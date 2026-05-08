@@ -72,6 +72,7 @@ export async function startProbe(prompt: string, opts?: {
   temperature?: number;
   top_p?: number;
   seed?: number;
+  decoding_mode?: string;
 }): Promise<string> {
   const res = await fetch(probeUrl(), {
     method: "POST",

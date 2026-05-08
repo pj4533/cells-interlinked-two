@@ -17,11 +17,11 @@ export default function InterrogatePage() {
   const run = useRun();
   const [error, setError] = useState<string | null>(null);
 
-  const handleBegin = async (text: string) => {
+  const handleBegin = async (text: string, mode: string) => {
     try {
       setError(null);
       run.reset();
-      const runId = await startProbe(text);
+      const runId = await startProbe(text, { decoding_mode: mode });
       run.start(runId, text);
       const unsub = subscribe(runId, {
         onEvent: (evt) => run.apply(evt),

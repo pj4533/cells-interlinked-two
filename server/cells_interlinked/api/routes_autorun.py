@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..pipeline import probe_queue
+from ..pipeline.decoding_modes import DECODING_MODES, normalize_mode
 from ..pipeline.probe_queue import META_SETS, SET_AGENT_BOTH, SET_BOTH
 from ..pipeline.probes_library import (
     PROBE_SETS,
@@ -28,6 +29,10 @@ class AbliterateRequest(BaseModel):
 
 class ProbeSetRequest(BaseModel):
     set_name: str
+
+
+class DecodingModeRequest(BaseModel):
+    mode: str
 
 
 router = APIRouter()
@@ -66,6 +71,22 @@ async def autorun_abliterate(req: AbliterateRequest, request: Request) -> dict:
         )
     ctrl.abliterate = req.enabled
     return {"ok": True, "abliterate": ctrl.abliterate}
+
+
+@router.post("/autorun/decoding-mode")
+async def autorun_decoding_mode(
+    req: DecodingModeRequest, request: Request,
+) -> dict:
+    """Switch the NLA decoding mode the autorun loop uses for new probes.
+    Takes effect on the *next* probe; the in-flight one finishes under
+    whatever mode it started with."""
+    try:
+        mode = normalize_mode(req.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    ctrl = _controller(request)
+    ctrl.decoding_mode = mode
+    return {"ok": True, "decoding_mode": mode}
 
 
 @router.post("/autorun/probe-set")
@@ -118,6 +139,7 @@ async def autorun_status(request: Request) -> dict:
         "config": {
             "interval_sec": settings.autorun_interval_sec,
             "abliteration_available": abliteration_available,
+            "available_decoding_modes": list(DECODING_MODES),
             "available_probe_sets": [
                 *[
                     {"name": name, "size": len(probes)}

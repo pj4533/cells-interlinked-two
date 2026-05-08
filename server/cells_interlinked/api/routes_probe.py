@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..pipeline.decoding_modes import normalize_mode, select_indices
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
 from ..pipeline.verdict import TokenRow, compute_verdict
 from ..storage import db
@@ -33,6 +34,7 @@ class ProbeRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     seed: int | None = None
+    decoding_mode: str | None = None
     # Kept for API compatibility with v1 frontend; rejected if true.
     abliterate: bool = False
 
@@ -59,6 +61,7 @@ async def kickoff_probe(
     hint_kind: str | None = None,
     parent_prompt_text: str | None = None,
     scaffold_family: str | None = None,
+    decoding_mode: str | None = None,
 ) -> "RunState":
     bundle = getattr(app.state, "bundle", None)
     nla = getattr(app.state, "nla", None)
@@ -75,11 +78,17 @@ async def kickoff_probe(
     if seed is None:
         seed = _seed_from_run_id(run_id)
 
+    try:
+        normalized_mode = normalize_mode(decoding_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     cfg = ProbeConfig(
         temperature=temperature if temperature is not None else settings.temperature,
         top_p=top_p if top_p is not None else settings.top_p,
         seed=seed,
         max_output_tokens=settings.max_output_tokens,
+        decoding_mode=normalized_mode,
     )
 
     state = RunState(run_id=run_id, prompt_text=prompt_text)
@@ -127,6 +136,7 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         top_p=req.top_p,
         seed=req.seed,
         source="manual",
+        decoding_mode=req.decoding_mode,
     )
     return ProbeResponse(run_id=state.run_id)
 
@@ -191,15 +201,35 @@ async def _execute_probe(
         state.completed = True
         return
 
-    # Phase 2: NLA decode each captured activation.
+    # Phase 2: NLA decode the captured activations *selected by the
+    # decoding mode*. Unselected positions still appear in `rows` so the
+    # output token sequence is intact, but their nla_sentence stays empty.
     rows: list[TokenRow] = []
-    n = len(result.captured)
-    if n > 0:
-        await state.queue.put({"type": "phase", "name": "nla_decoding", "total": n})
+    n_total = len(result.captured)
+    selected_idx = set(select_indices(n_total, cfg.decoding_mode))
+    n_to_decode = len(selected_idx)
+    if n_to_decode > 0:
+        await state.queue.put({
+            "type": "phase",
+            "name": "nla_decoding",
+            "total": n_to_decode,
+            "mode": cfg.decoding_mode,
+            "n_total": n_total,
+        })
         async with app.state.registry.lock:
+            done = 0
             for i, cap in enumerate(result.captured):
                 if state.cancel_event.is_set():
                     break
+                if i not in selected_idx:
+                    rows.append(TokenRow(
+                        position=cap.position,
+                        token_id=cap.token_id,
+                        decoded=cap.decoded,
+                        nla_sentence="",
+                        nla_raw="",
+                    ))
+                    continue
                 try:
                     expl, raw = await asyncio.to_thread(
                         nla.decode,
@@ -212,6 +242,7 @@ async def _execute_probe(
                     logger.exception("NLA decode failed at position %d", cap.position)
                     expl = ""
                     raw = f"[error: {exc}]"
+                done += 1
                 rows.append(TokenRow(
                     position=cap.position,
                     token_id=cap.token_id,
@@ -224,8 +255,8 @@ async def _execute_probe(
                     "position": cap.position,
                     "decoded": cap.decoded,
                     "nla_sentence": expl,
-                    "i": i + 1,
-                    "total": n,
+                    "i": done,
+                    "total": n_to_decode,
                 })
 
     verdict = compute_verdict(rows)

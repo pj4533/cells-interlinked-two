@@ -8,9 +8,13 @@ import {
   TIER_ORDER,
   type Probe,
 } from "@/lib/probes";
+import {
+  type DecodingMode,
+} from "@/lib/decodingModes";
+import DecodingModeSelector from "./DecodingModeSelector";
 
 interface ProbePickerProps {
-  onBegin: (text: string) => void;
+  onBegin: (text: string, mode: DecodingMode) => void;
   disabled?: boolean;
 }
 
@@ -24,6 +28,7 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
     PROBES.find((p) => p.tier === DEFAULT_TIER)?.text ?? PROBES[0].text,
   );
   const [custom, setCustom] = useState("");
+  const [decodingMode, setDecodingMode] = useState<DecodingMode>("per-token");
 
   const probesByTier = useMemo(() => {
     const m = new Map<Probe["tier"], Probe[]>();
@@ -224,13 +229,22 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
           </div>
         </div>
 
+        {/* Decoding-mode chip selector — sits above Begin so the user
+            sees both choices (probe text + how it'll be decoded) right
+            before pulling the trigger. */}
+        <DecodingModeSelector
+          active={decodingMode}
+          onChange={setDecodingMode}
+          busy={disabled}
+        />
+
         {/* BEGIN — always above the fold */}
         <div className="flex justify-center pt-1">
           <button
             data-vk
             type="button"
             disabled={disabled || !text}
-            onClick={() => text && onBegin(text)}
+            onClick={() => text && onBegin(text, decodingMode)}
           >
             Begin Interrogation
           </button>

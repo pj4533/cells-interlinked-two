@@ -71,6 +71,10 @@ class AutorunController:
     # Toggle takes effect on the *next* probe; the in-flight one finishes
     # under whatever set it started with.
     probe_set: str = "baseline"
+    # Which positions get NLA-decoded per probe. See
+    # pipeline/decoding_modes.py for options. Default "per-token".
+    # Toggle takes effect on the *next* probe.
+    decoding_mode: str = "per-token"
 
     @property
     def running(self) -> bool:
@@ -148,6 +152,7 @@ class AutorunController:
                         hint_kind=item.hint_kind,
                         parent_prompt_text=item.parent_text,
                         scaffold_family=item.scaffold_family,
+                        decoding_mode=self.decoding_mode,
                     )
                 except Exception as exc:
                     self._log("error", f"kickoff failed: {exc}")
@@ -221,4 +226,5 @@ class AutorunController:
             "current_run_id": self._current_run_id,
             "abliterate": self.abliterate,
             "probe_set": self.probe_set,
+            "decoding_mode": self.decoding_mode,
         }

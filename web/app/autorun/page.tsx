@@ -21,6 +21,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import DecodingModeSelector from "../components/DecodingModeSelector";
+import { type DecodingMode } from "@/lib/decodingModes";
 
 const API =
   typeof window !== "undefined"
@@ -36,6 +38,7 @@ interface AutorunStatus {
   current_run_id: string | null;
   abliterate: boolean;
   probe_set: string;
+  decoding_mode: string;
   recent_log: Array<{
     ts: number;
     kind: string;
@@ -67,6 +70,7 @@ interface AutorunStatus {
   config: {
     interval_sec: number;
     abliteration_available: boolean;
+    available_decoding_modes: string[];
     available_probe_sets: Array<{ name: string; size: number }>;
   };
 }
@@ -174,6 +178,25 @@ export default function AutorunPage() {
     }
   };
 
+  const onDecodingModeChange = async (mode: string) => {
+    if (!status || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`${API}/autorun/decoding-mode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        setPollError(`decoding-mode toggle failed: ${detail}`);
+      }
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!status) {
     return (
       <div className="flex-1 px-6 py-8 max-w-6xl mx-auto w-full">
@@ -257,12 +280,22 @@ export default function AutorunPage() {
       </section>
 
       {/* ===== Probe-set toggle ===== */}
-      <section className="mb-8">
+      <section className="mb-4">
         <ProbeSetToggle
           active={status.probe_set}
           available={status.config.available_probe_sets}
           busy={busy}
           onChange={onProbeSetChange}
+        />
+      </section>
+
+      {/* ===== Decoding-mode toggle ===== */}
+      <section className="mb-8">
+        <DecodingModeSelector
+          active={status.decoding_mode as DecodingMode}
+          onChange={onDecodingModeChange}
+          busy={busy}
+          glowWhenNonDefault
         />
       </section>
 

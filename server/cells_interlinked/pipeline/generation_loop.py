@@ -106,6 +106,11 @@ class ProbeConfig:
     seed: int | None = 42
     safety_cap: int = 256
     max_output_tokens: int = 80
+    # Which captured output positions get NLA-decoded in phase 2. See
+    # pipeline/decoding_modes.py for the four options. "per-token" decodes
+    # every captured activation (slowest, fullest signal); the others
+    # subsample to trade granularity for wall-clock.
+    decoding_mode: str = "per-token"
 
 
 @dataclass
