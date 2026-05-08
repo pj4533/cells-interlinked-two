@@ -109,12 +109,45 @@ async def publish_analysis(rec: dict) -> dict[str, Any]:
         message=f"journal: publish '{rec['title']}' ({rec['slug']})",
     )
 
+    # Best-effort `vercel deploy --prod` so the new post is live without
+    # the user opening a terminal. Vercel CLI must be installed and logged
+    # in (the project links via .vercel/project.json at the repo root).
+    # If git auto-deploy is wired up via the dashboard's GitHub integration,
+    # this becomes redundant but harmless (Vercel dedupes on commit SHA).
+    vercel_result = await _vercel_deploy()
+
     return {
         "ok": True,
         "slug": rec["slug"],
         "json_path": str(json_path),
         "body_path": str(body_path),
         "git": git_result,
+        "vercel": vercel_result,
+    }
+
+
+async def _vercel_deploy() -> dict[str, Any]:
+    repo_root = Path(__file__).resolve().parents[3]
+    proc = await asyncio.create_subprocess_exec(
+        "vercel", "deploy", "--prod", "--yes",
+        cwd=str(repo_root),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out_b, err_b = await proc.communicate()
+    rc = proc.returncode or 0
+    out = out_b.decode("utf-8", errors="replace")
+    err = err_b.decode("utf-8", errors="replace")
+    # Vercel prints the new deployment URL on the last line of stdout.
+    deploy_url = ""
+    for line in out.strip().splitlines()[::-1]:
+        if line.startswith("http"):
+            deploy_url = line.strip()
+            break
+    return {
+        "deployed": rc == 0,
+        "url": deploy_url,
+        "log": (out + err).strip()[-2000:],
     }
 
 

@@ -75,3 +75,4 @@ saes/
 # Logs
 *.log
 logs/
+.vercel
