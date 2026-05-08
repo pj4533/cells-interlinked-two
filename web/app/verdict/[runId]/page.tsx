@@ -5,7 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import CaveatsPanel from "../../components/CaveatsPanel";
+import { splitNLA } from "@/lib/nla";
 import type { VerdictAggregate, VerdictRow } from "@/lib/types";
+
+type ViewMode = "compact" | "full";
 
 interface ProbeRecord {
   run_id: string;
@@ -249,6 +252,7 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
   const [filter, setFilter] = useState<"all" | "with-nla" | "eval" | "introspect">(
     "all",
   );
+  const [view, setView] = useState<ViewMode>("compact");
   const filtered = useMemo(() => {
     if (filter === "all") return rows;
     if (filter === "with-nla") return rows.filter((r) => r.nla_sentence?.trim());
@@ -275,25 +279,44 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
 
   return (
     <div className="border border-rule bg-bg-soft">
-      <div className="flex items-center justify-between border-b border-rule px-4 py-2">
+      <div className="flex items-center justify-between border-b border-rule px-4 py-2 flex-wrap gap-2">
         <div className="font-display text-[10px] text-amber-dim tracking-widest">
           per-token channel comparison
         </div>
-        <div className="flex gap-1 text-[10px] font-mono">
-          {(["all", "with-nla", "eval", "introspect"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setFilter(f)}
-              className={`px-2 py-0.5 border ${
-                filter === f
-                  ? "border-amber text-amber bg-bg"
-                  : "border-rule text-text-dim hover:text-text"
-              }`}
-            >
-              {f}
-            </button>
-          ))}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex gap-1 text-[10px] font-mono">
+            {(["all", "with-nla", "eval", "introspect"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                className={`px-2 py-0.5 border ${
+                  filter === f
+                    ? "border-amber text-amber bg-bg"
+                    : "border-rule text-text-dim hover:text-text"
+                }`}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-4 bg-rule" />
+          <div className="flex gap-1 text-[10px] font-mono">
+            {(["compact", "full"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setView(m)}
+                className={`px-2 py-0.5 border ${
+                  view === m
+                    ? "border-amber text-amber bg-bg"
+                    : "border-rule text-text-dim hover:text-text"
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="max-h-[600px] overflow-y-auto">
@@ -302,7 +325,11 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
             <tr>
               <th className="text-left px-3 py-2 w-10">pos</th>
               <th className="text-left px-3 py-2 w-32">token</th>
-              <th className="text-left px-3 py-2">NLA-decoded activation sentence</th>
+              <th className="text-left px-3 py-2">
+                {view === "compact"
+                  ? "what this token's activation says (token-role only)"
+                  : "NLA-decoded activation sentence (full)"}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -313,15 +340,61 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                   {JSON.stringify(r.decoded)}
                 </td>
                 <td className="px-3 py-2 text-text leading-relaxed">
-                  {r.nla_sentence || (
-                    <span className="text-text-dim italic">— no parse —</span>
-                  )}
+                  <VerdictNLACell text={r.nla_sentence} mode={view} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function VerdictNLACell({
+  text,
+  mode,
+}: {
+  text: string | undefined;
+  mode: ViewMode;
+}) {
+  const parts = useMemo(() => splitNLA(text), [text]);
+  if (!text) return <span className="text-text-dim italic">— no parse —</span>;
+  if (mode === "compact") {
+    return (
+      <div className="text-text leading-relaxed">
+        {parts.role || (
+          <span className="text-text-dim italic">— no token-role clause —</span>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 leading-relaxed">
+      {parts.role && (
+        <div>
+          <span className="font-display text-[9px] text-amber tracking-widest mr-2">
+            role
+          </span>
+          <span className="text-text">{parts.role}</span>
+        </div>
+      )}
+      {parts.context && (
+        <div>
+          <span className="font-display text-[9px] text-amber-dim tracking-widest mr-2">
+            context
+          </span>
+          <span className="text-text-dim">{parts.context}</span>
+        </div>
+      )}
+      {parts.format && (
+        <div>
+          <span className="font-display text-[9px] text-amber-dim/70 tracking-widest mr-2">
+            format
+          </span>
+          <span className="text-text-dim/80">{parts.format}</span>
+        </div>
+      )}
     </div>
   );
 }

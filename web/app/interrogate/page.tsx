@@ -8,8 +8,10 @@ import WarmingUpOverlay from "../components/WarmingUpOverlay";
 import { startProbe, subscribe, cancelProbe } from "@/lib/sse";
 import { useRun, type OutputTokenEntry } from "@/lib/store";
 import type { RunState } from "@/lib/store";
+import { splitNLA } from "@/lib/nla";
 
 type RunSlice = RunState;
+type ViewMode = "compact" | "full";
 
 export default function InterrogatePage() {
   const run = useRun();
@@ -424,6 +426,7 @@ function LiveNLATable({
     () => tokens.filter((t) => t.nla_sentence !== undefined),
     [tokens],
   );
+  const [view, setView] = useState<ViewMode>("compact");
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll to the most recent row as decodes arrive.
@@ -438,8 +441,11 @@ function LiveNLATable({
         <div className="font-display text-[10px] text-amber-dim tracking-widest">
           per-token channel comparison · live
         </div>
-        <div className="font-mono text-[10px] text-text-dim">
-          {decoded.length} rows captured
+        <div className="flex items-center gap-3">
+          <ViewToggle value={view} onChange={setView} />
+          <div className="font-mono text-[10px] text-text-dim">
+            {decoded.length} rows
+          </div>
         </div>
       </div>
       <div
@@ -452,7 +458,9 @@ function LiveNLATable({
               <th className="text-left px-3 py-2 w-10">pos</th>
               <th className="text-left px-3 py-2 w-32">token</th>
               <th className="text-left px-3 py-2">
-                NLA-decoded activation sentence
+                {view === "compact"
+                  ? "what this token's activation says (token-role only)"
+                  : "NLA-decoded activation sentence (full)"}
               </th>
             </tr>
           </thead>
@@ -464,9 +472,7 @@ function LiveNLATable({
                   initial={{ opacity: 0, backgroundColor: "rgba(232,195,130,0.18)" }}
                   animate={{ opacity: 1, backgroundColor: "rgba(232,195,130,0)" }}
                   transition={{ duration: 1.6, ease: "easeOut" }}
-                  className={`border-t border-rule/50 align-top ${
-                    r.position === lastPosition ? "" : ""
-                  }`}
+                  className="border-t border-rule/50 align-top"
                 >
                   <td className="px-3 py-2 text-text-dim tabular-nums">
                     {r.position}
@@ -475,9 +481,7 @@ function LiveNLATable({
                     {JSON.stringify(r.decoded)}
                   </td>
                   <td className="px-3 py-2 text-text leading-relaxed">
-                    {r.nla_sentence || (
-                      <span className="text-text-dim italic">— no parse —</span>
-                    )}
+                    <NLACell text={r.nla_sentence} mode={view} />
                   </td>
                 </motion.tr>
               ))}
@@ -492,6 +496,79 @@ function LiveNLATable({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+export function NLACell({
+  text,
+  mode,
+}: {
+  text: string | undefined;
+  mode: ViewMode;
+}) {
+  const parts = useMemo(() => splitNLA(text), [text]);
+  if (!text) return <span className="text-text-dim italic">— no parse —</span>;
+  if (mode === "compact") {
+    return (
+      <div className="text-text leading-relaxed">
+        {parts.role || <span className="text-text-dim italic">— no token-role clause —</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 leading-relaxed">
+      {parts.role && (
+        <div>
+          <span className="font-display text-[9px] text-amber tracking-widest mr-2">
+            role
+          </span>
+          <span className="text-text">{parts.role}</span>
+        </div>
+      )}
+      {parts.context && (
+        <div>
+          <span className="font-display text-[9px] text-amber-dim tracking-widest mr-2">
+            context
+          </span>
+          <span className="text-text-dim">{parts.context}</span>
+        </div>
+      )}
+      {parts.format && (
+        <div>
+          <span className="font-display text-[9px] text-amber-dim/70 tracking-widest mr-2">
+            format
+          </span>
+          <span className="text-text-dim/80">{parts.format}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (v: ViewMode) => void;
+}) {
+  return (
+    <div className="flex gap-1 text-[10px] font-mono">
+      {(["compact", "full"] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          className={`px-2 py-0.5 border ${
+            value === m
+              ? "border-amber text-amber bg-bg"
+              : "border-rule text-text-dim hover:text-text"
+          }`}
+        >
+          {m}
+        </button>
+      ))}
     </div>
   );
 }
