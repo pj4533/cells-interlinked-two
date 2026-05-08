@@ -18,6 +18,14 @@ export interface RunState {
   phase: "idle" | "generating" | "decoding" | "done";
   /** During NLA-decoding phase: how far through the per-token decode we are. */
   decodeProgress: { done: number; total: number } | null;
+  /** Wall-clock ms when the decoding phase started — used by the UI to
+   *  compute a rolling ETA without re-rendering on a timer. */
+  decodeStartedAt: number | null;
+  /** Position of the most-recently-completed NLA decode. Drives the
+   *  "decoding position N of T" cue without scanning the array. */
+  lastDecodedPosition: number | null;
+  generationStartedAt: number | null;
+  generationFinishedAt: number | null;
   isRunning: boolean;
   stoppedReason: string | null;
   verdict: VerdictEvent | null;
@@ -37,6 +45,10 @@ const initial: RunState = {
   totalTokens: 0,
   phase: "idle",
   decodeProgress: null,
+  decodeStartedAt: null,
+  lastDecodedPosition: null,
+  generationStartedAt: null,
+  generationFinishedAt: null,
   isRunning: false,
   stoppedReason: null,
   verdict: null,
@@ -53,6 +65,7 @@ export const useRun = create<RunState & Actions>((set) => ({
       prompt,
       isRunning: true,
       phase: "generating",
+      generationStartedAt: Date.now(),
     });
   },
 
@@ -77,6 +90,8 @@ export const useRun = create<RunState & Actions>((set) => ({
           set({
             phase: "decoding",
             decodeProgress: { done: 0, total: evt.total },
+            decodeStartedAt: Date.now(),
+            generationFinishedAt: Date.now(),
           });
         }
         return;
@@ -91,6 +106,7 @@ export const useRun = create<RunState & Actions>((set) => ({
           return {
             outputTokens: out,
             decodeProgress: { done: evt.i, total: evt.total },
+            lastDecodedPosition: evt.position,
           };
         });
         return;
