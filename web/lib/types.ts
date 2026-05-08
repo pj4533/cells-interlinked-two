@@ -16,6 +16,8 @@ export interface PhaseEvent {
 export interface NLADecodedEvent {
   type: "nla_decoded";
   position: number;
+  end_position?: number | null;
+  n_pooled?: number;
   decoded: string;
   nla_sentence: string;
   i: number;
@@ -33,6 +35,11 @@ export interface VerdictRow {
   token_id: number;
   decoded: string;
   nla_sentence: string;
+  /** Present only for pooled rows. Indicates how many positions were
+   *  mean-pooled into this single decode. Sampled per-token rows omit
+   *  the field (treat absence as n_pooled=1). */
+  n_pooled?: number;
+  end_position?: number | null;
 }
 
 export interface VerdictAggregate {

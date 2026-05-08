@@ -111,6 +111,11 @@ class ProbeConfig:
     # every captured activation (slowest, fullest signal); the others
     # subsample to trade granularity for wall-clock.
     decoding_mode: str = "per-token"
+    # If True, each pick becomes a small contiguous window whose
+    # activations are MEAN-POOLED into one decode (phrase-level read).
+    # If False, each pick is a single position decoded directly
+    # (per-token read). No-op for "per-token" mode (windows of 1).
+    pooled: bool = False
 
 
 @dataclass

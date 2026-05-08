@@ -10,7 +10,7 @@
 export default function GitHubCorner() {
   return (
     <a
-      href="https://github.com/pj4533/cells-interlinked"
+      href="https://github.com/pj4533/cells-interlinked-two"
       target="_blank"
       rel="noopener noreferrer"
       aria-label="View source on GitHub"

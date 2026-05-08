@@ -14,7 +14,7 @@ import {
 import DecodingModeSelector from "./DecodingModeSelector";
 
 interface ProbePickerProps {
-  onBegin: (text: string, mode: DecodingMode) => void;
+  onBegin: (text: string, mode: DecodingMode, pooled: boolean) => void;
   disabled?: boolean;
 }
 
@@ -29,6 +29,7 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   );
   const [custom, setCustom] = useState("");
   const [decodingMode, setDecodingMode] = useState<DecodingMode>("per-token");
+  const [pooled, setPooled] = useState<boolean>(false);
 
   const probesByTier = useMemo(() => {
     const m = new Map<Probe["tier"], Probe[]>();
@@ -234,7 +235,11 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
             before pulling the trigger. */}
         <DecodingModeSelector
           active={decodingMode}
-          onChange={setDecodingMode}
+          pooled={pooled}
+          onChange={(m, p) => {
+            setDecodingMode(m);
+            setPooled(p);
+          }}
           busy={disabled}
         />
 
@@ -244,7 +249,7 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
             data-vk
             type="button"
             disabled={disabled || !text}
-            onClick={() => text && onBegin(text, decodingMode)}
+            onClick={() => text && onBegin(text, decodingMode, pooled)}
           >
             Begin Interrogation
           </button>

@@ -35,14 +35,23 @@ class TokenRow:
     decoded: str
     nla_sentence: str
     nla_raw: str = ""
+    # Number of adjacent positions whose activations were mean-pooled to
+    # produce this row. 1 = per-token decode. >1 = pooled phrase-level
+    # decode covering [position .. end_position].
+    n_pooled: int = 1
+    end_position: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "position": self.position,
             "token_id": self.token_id,
             "decoded": self.decoded,
             "nla_sentence": self.nla_sentence,
         }
+        if self.n_pooled > 1:
+            d["n_pooled"] = self.n_pooled
+            d["end_position"] = self.end_position
+        return d
 
 
 @dataclass

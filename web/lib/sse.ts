@@ -73,6 +73,7 @@ export async function startProbe(prompt: string, opts?: {
   top_p?: number;
   seed?: number;
   decoding_mode?: string;
+  pooled?: boolean;
 }): Promise<string> {
   const res = await fetch(probeUrl(), {
     method: "POST",

@@ -3,32 +3,35 @@
 import {
   DECODING_MODES,
   DECODING_MODE_LABELS,
-  DECODING_MODE_DESCRIPTIONS,
+  modeDescription,
   type DecodingMode,
 } from "@/lib/decodingModes";
 
 interface Props {
   active: DecodingMode;
-  onChange: (m: DecodingMode) => void;
+  pooled: boolean;
+  onChange: (m: DecodingMode, pooled: boolean) => void;
   busy?: boolean;
   /** Used by /autorun where the toggle is non-default → glow. The /interrogate
    *  picker leaves this off so the row reads as a normal config control. */
   glowWhenNonDefault?: boolean;
 }
 
-/** Mirrors ProbeSetSelector's chrome — same chip-row visual treatment, same
- *  description-on-the-right layout, so the two selectors read as a coherent
- *  pair on the autorun page and stand on their own on /interrogate. */
+/** Mirrors ProbeSetSelector's chrome — same chip-row visual treatment.
+ *  Adds a "POOLED" pill on the right that toggles whether each sample
+ *  decodes one position or a mean-pooled window of adjacent positions. */
 export default function DecodingModeSelector({
   active,
+  pooled,
   onChange,
   busy,
   glowWhenNonDefault,
 }: Props) {
-  const isActive = active !== "per-token";
+  const isActive = active !== "per-token" || pooled;
+  const pooledDisabled = active === "per-token";
   return (
     <div
-      className="border border-rule bg-bg-soft px-5 py-4 flex items-center gap-5"
+      className="border border-rule bg-bg-soft px-5 py-4 flex items-center gap-5 flex-wrap"
       style={
         glowWhenNonDefault && isActive
           ? {
@@ -53,7 +56,7 @@ export default function DecodingModeSelector({
               role="radio"
               aria-checked={selected}
               disabled={busy || selected}
-              onClick={() => onChange(m)}
+              onClick={() => onChange(m, pooled)}
               className="px-3 py-1.5 font-display text-[10px] tracking-widest transition-colors disabled:cursor-default"
               style={{
                 background: selected ? "var(--amber-dim)" : "var(--bg)",
@@ -66,7 +69,33 @@ export default function DecodingModeSelector({
           );
         })}
       </div>
-      <div className="flex-1 min-w-0">
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={pooled}
+        disabled={busy || pooledDisabled}
+        onClick={() => onChange(active, !pooled)}
+        className="inline-flex items-center gap-2 px-3 py-1.5 font-display text-[10px] tracking-widest border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{
+          background: pooled && !pooledDisabled ? "var(--cyan-dim)" : "var(--bg)",
+          color: pooled && !pooledDisabled ? "var(--bg)" : "var(--text-dim)",
+          borderColor: pooled && !pooledDisabled
+            ? "var(--cyan-dim)"
+            : "var(--rule)",
+        }}
+        title={
+          pooledDisabled
+            ? "Pooled is a no-op at per-token (windows of 1)"
+            : pooled
+            ? "Pooled ON — each pick is a window of activations mean-pooled into one decode"
+            : "Pooled OFF — each pick is a single position"
+        }
+      >
+        {pooled && !pooledDisabled ? "POOLED ON" : "POOLED OFF"}
+      </button>
+
+      <div className="flex-1 min-w-[18rem]">
         <div
           className={`font-display text-sm tracking-widest ${
             isActive ? "text-amber amber-glow" : "text-text-dim"
@@ -75,7 +104,7 @@ export default function DecodingModeSelector({
           NLA DECODING
         </div>
         <div className="text-[10px] text-text-dim italic mt-0.5 leading-snug">
-          {DECODING_MODE_DESCRIPTIONS[active]}
+          {modeDescription(active, pooled)}
         </div>
       </div>
     </div>

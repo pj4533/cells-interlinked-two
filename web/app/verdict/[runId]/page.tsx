@@ -319,34 +319,63 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
           </div>
         </div>
       </div>
-      <div className="max-h-[600px] overflow-y-auto">
-        <table className="w-full text-xs font-mono">
-          <thead className="text-amber-dim text-[10px] sticky top-0 bg-bg-soft border-b border-rule">
-            <tr>
-              <th className="text-left px-3 py-2 w-10">pos</th>
-              <th className="text-left px-3 py-2 w-32">token</th>
-              <th className="text-left px-3 py-2">
-                {view === "compact"
-                  ? "what this token's activation says (token-role only)"
-                  : "NLA-decoded activation sentence (full)"}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((r) => (
-              <tr key={r.position} className="border-t border-rule/50 align-top">
-                <td className="px-3 py-2 text-text-dim">{r.position}</td>
-                <td className="px-3 py-2 text-amber whitespace-pre-wrap break-all">
-                  {JSON.stringify(r.decoded)}
-                </td>
-                <td className="px-3 py-2 text-text leading-relaxed">
-                  <VerdictNLACell text={r.nla_sentence} mode={view} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {(() => {
+        const anyPooled = filtered.some((r) => (r.n_pooled ?? 1) > 1);
+        return (
+          <div className="max-h-[600px] overflow-y-auto">
+            <table className="w-full text-xs font-mono">
+              <thead className="text-amber-dim text-[10px] sticky top-0 bg-bg-soft border-b border-rule">
+                <tr>
+                  <th className="text-left px-3 py-2 w-16">pos</th>
+                  <th className="text-left px-3 py-2 w-40">
+                    {anyPooled ? "tokens" : "token"}
+                  </th>
+                  <th className="text-left px-3 py-2">
+                    {anyPooled
+                      ? view === "compact"
+                        ? "what this window's mean-pooled activation says (compact)"
+                        : "NLA-decoded mean-pooled activation sentence (full)"
+                      : view === "compact"
+                      ? "what this token's activation says (token-role only)"
+                      : "NLA-decoded activation sentence (full)"}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => {
+                  const nPooled = r.n_pooled ?? 1;
+                  const endPos = r.end_position ?? r.position;
+                  return (
+                    <tr
+                      key={`${r.position}-${endPos}`}
+                      className="border-t border-rule/50 align-top"
+                    >
+                      <td className="px-3 py-2 text-text-dim tabular-nums">
+                        {nPooled > 1 ? (
+                          <span>
+                            {r.position}–{endPos}
+                            <div className="text-[9px] text-cyan tracking-widest font-display mt-0.5">
+                              pool×{nPooled}
+                            </div>
+                          </span>
+                        ) : (
+                          r.position
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-amber whitespace-pre-wrap break-all">
+                        {JSON.stringify(r.decoded)}
+                      </td>
+                      <td className="px-3 py-2 text-text leading-relaxed">
+                        <VerdictNLACell text={r.nla_sentence} mode={view} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
     </div>
   );
 }

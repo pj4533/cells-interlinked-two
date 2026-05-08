@@ -6,14 +6,27 @@ import type { StreamEvent, VerdictEvent, VerdictRow } from "./types";
 export interface OutputTokenEntry {
   position: number;
   decoded: string;
-  /** Filled in by the "nla_decoded" event during phase 2. */
-  nla_sentence?: string;
+}
+
+/** A row in the per-token / per-window NLA table. One per decode call.
+ *  For per-token decoding, n_pooled === 1 and end_position === position.
+ *  For pooled decoding, n_pooled > 1 and decoded is the concatenated
+ *  output text spanning [position .. end_position]. */
+export interface DecodedWindow {
+  position: number;
+  end_position: number;
+  n_pooled: number;
+  decoded: string;
+  nla_sentence: string;
 }
 
 export interface RunState {
   runId: string | null;
   prompt: string;
   outputTokens: OutputTokenEntry[];
+  /** Each completed phase-2 decode lands here as one row. Per-token mode
+   *  → one entry per output token. Pooled mode → one entry per window. */
+  decodedWindows: DecodedWindow[];
   totalTokens: number;
   phase: "idle" | "generating" | "decoding" | "done";
   /** During NLA-decoding phase: how far through the per-token decode we are. */
@@ -21,8 +34,8 @@ export interface RunState {
   /** Wall-clock ms when the decoding phase started — used by the UI to
    *  compute a rolling ETA without re-rendering on a timer. */
   decodeStartedAt: number | null;
-  /** Position of the most-recently-completed NLA decode. Drives the
-   *  "decoding position N of T" cue without scanning the array. */
+  /** Start position of the most-recently-completed window. Drives the
+   *  "decoding position N of T" cue. */
   lastDecodedPosition: number | null;
   generationStartedAt: number | null;
   generationFinishedAt: number | null;
@@ -42,6 +55,7 @@ const initial: RunState = {
   runId: null,
   prompt: "",
   outputTokens: [],
+  decodedWindows: [],
   totalTokens: 0,
   phase: "idle",
   decodeProgress: null,
@@ -97,18 +111,20 @@ export const useRun = create<RunState & Actions>((set) => ({
         return;
       }
       case "nla_decoded": {
-        set((s) => {
-          const out = s.outputTokens.slice();
-          const idx = out.findIndex((t) => t.position === evt.position);
-          if (idx >= 0) {
-            out[idx] = { ...out[idx], nla_sentence: evt.nla_sentence };
-          }
-          return {
-            outputTokens: out,
-            decodeProgress: { done: evt.i, total: evt.total },
-            lastDecodedPosition: evt.position,
-          };
-        });
+        const nPooled = evt.n_pooled ?? 1;
+        const endPos = evt.end_position ?? evt.position;
+        const window: DecodedWindow = {
+          position: evt.position,
+          end_position: endPos,
+          n_pooled: nPooled,
+          decoded: evt.decoded,
+          nla_sentence: evt.nla_sentence,
+        };
+        set((s) => ({
+          decodedWindows: [...s.decodedWindows, window],
+          decodeProgress: { done: evt.i, total: evt.total },
+          lastDecodedPosition: evt.position,
+        }));
         return;
       }
       case "verdict": {

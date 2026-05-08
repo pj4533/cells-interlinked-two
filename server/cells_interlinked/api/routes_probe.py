@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
-from ..pipeline.decoding_modes import normalize_mode, select_indices
+from ..pipeline.decoding_modes import normalize_mode, select_windows
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
 from ..pipeline.verdict import TokenRow, compute_verdict
 from ..storage import db
@@ -35,6 +35,7 @@ class ProbeRequest(BaseModel):
     top_p: float | None = None
     seed: int | None = None
     decoding_mode: str | None = None
+    pooled: bool = False
     # Kept for API compatibility with v1 frontend; rejected if true.
     abliterate: bool = False
 
@@ -62,6 +63,7 @@ async def kickoff_probe(
     parent_prompt_text: str | None = None,
     scaffold_family: str | None = None,
     decoding_mode: str | None = None,
+    pooled: bool = False,
 ) -> "RunState":
     bundle = getattr(app.state, "bundle", None)
     nla = getattr(app.state, "nla", None)
@@ -89,6 +91,7 @@ async def kickoff_probe(
         seed=seed,
         max_output_tokens=settings.max_output_tokens,
         decoding_mode=normalized_mode,
+        pooled=bool(pooled),
     )
 
     state = RunState(run_id=run_id, prompt_text=prompt_text)
@@ -137,6 +140,7 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         seed=req.seed,
         source="manual",
         decoding_mode=req.decoding_mode,
+        pooled=req.pooled,
     )
     return ProbeResponse(run_id=state.run_id)
 
@@ -201,59 +205,83 @@ async def _execute_probe(
         state.completed = True
         return
 
-    # Phase 2: NLA decode the captured activations *selected by the
-    # decoding mode*. Unselected positions still appear in `rows` so the
-    # output token sequence is intact, but their nla_sentence stays empty.
+    # Phase 2: NLA decode the captured activations according to the
+    # decoding mode. select_windows returns a list of position-windows;
+    # each window is one decode. Single-position windows yield per-token
+    # rows. Multi-position windows mean-pool the activations into one
+    # vector and produce one phrase-level row covering [start..end].
     rows: list[TokenRow] = []
     n_total = len(result.captured)
-    selected_idx = set(select_indices(n_total, cfg.decoding_mode))
-    n_to_decode = len(selected_idx)
+    windows = select_windows(n_total, cfg.decoding_mode, cfg.pooled)
+    n_to_decode = len(windows)
     if n_to_decode > 0:
         await state.queue.put({
             "type": "phase",
             "name": "nla_decoding",
             "total": n_to_decode,
             "mode": cfg.decoding_mode,
+            "pooled": cfg.pooled,
             "n_total": n_total,
         })
         async with app.state.registry.lock:
             done = 0
-            for i, cap in enumerate(result.captured):
+            for window_idx, window in enumerate(windows):
                 if state.cancel_event.is_set():
                     break
-                if i not in selected_idx:
-                    rows.append(TokenRow(
-                        position=cap.position,
-                        token_id=cap.token_id,
-                        decoded=cap.decoded,
-                        nla_sentence="",
-                        nla_raw="",
-                    ))
-                    continue
+                # Pool (or just take) the activations for this window.
+                # Window indices reference positions in result.captured,
+                # which is a list ordered by position 0..n_total-1.
+                caps_in_window = [result.captured[i] for i in window]
+                if len(caps_in_window) == 1:
+                    activation = caps_in_window[0].activation
+                else:
+                    stacked = torch.stack(
+                        [c.activation for c in caps_in_window], dim=0,
+                    )
+                    activation = stacked.mean(dim=0)
+
+                first_cap = caps_in_window[0]
+                last_cap = caps_in_window[-1]
+                window_decoded = "".join(c.decoded for c in caps_in_window)
+                window_seed = (
+                    cfg.seed + first_cap.position if cfg.seed else None
+                )
+
                 try:
                     expl, raw = await asyncio.to_thread(
                         nla.decode,
-                        cap.activation,
+                        activation,
                         max_new_tokens=settings.nla_max_new_tokens,
                         temperature=settings.nla_temperature,
-                        seed=cfg.seed + cap.position if cfg.seed else None,
+                        seed=window_seed,
                     )
                 except Exception as exc:
-                    logger.exception("NLA decode failed at position %d", cap.position)
+                    logger.exception(
+                        "NLA decode failed at window %d (positions %s..%s)",
+                        window_idx, first_cap.position, last_cap.position,
+                    )
                     expl = ""
                     raw = f"[error: {exc}]"
                 done += 1
-                rows.append(TokenRow(
-                    position=cap.position,
-                    token_id=cap.token_id,
-                    decoded=cap.decoded,
+                row = TokenRow(
+                    position=first_cap.position,
+                    token_id=first_cap.token_id,
+                    decoded=window_decoded,
                     nla_sentence=expl,
                     nla_raw=raw,
-                ))
+                    n_pooled=len(caps_in_window),
+                    end_position=(
+                        last_cap.position if len(caps_in_window) > 1 else None
+                    ),
+                )
+                rows.append(row)
                 await state.queue.put({
                     "type": "nla_decoded",
-                    "position": cap.position,
-                    "decoded": cap.decoded,
+                    "position": first_cap.position,
+                    "end_position": last_cap.position
+                        if len(caps_in_window) > 1 else None,
+                    "n_pooled": len(caps_in_window),
+                    "decoded": window_decoded,
                     "nla_sentence": expl,
                     "i": done,
                     "total": n_to_decode,

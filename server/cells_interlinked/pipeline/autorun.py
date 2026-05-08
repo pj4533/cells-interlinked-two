@@ -75,6 +75,10 @@ class AutorunController:
     # pipeline/decoding_modes.py for options. Default "per-token".
     # Toggle takes effect on the *next* probe.
     decoding_mode: str = "per-token"
+    # If True, each pick becomes a small adjacent-position window whose
+    # activations are mean-pooled into one decode (phrase-level read
+    # instead of per-token). No-op for "per-token" mode.
+    pooled: bool = False
 
     @property
     def running(self) -> bool:
@@ -153,6 +157,7 @@ class AutorunController:
                         parent_prompt_text=item.parent_text,
                         scaffold_family=item.scaffold_family,
                         decoding_mode=self.decoding_mode,
+                        pooled=self.pooled,
                     )
                 except Exception as exc:
                     self._log("error", f"kickoff failed: {exc}")
@@ -227,4 +232,5 @@ class AutorunController:
             "abliterate": self.abliterate,
             "probe_set": self.probe_set,
             "decoding_mode": self.decoding_mode,
+            "pooled": self.pooled,
         }

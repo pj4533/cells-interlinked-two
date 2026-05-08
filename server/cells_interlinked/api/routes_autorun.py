@@ -33,6 +33,7 @@ class ProbeSetRequest(BaseModel):
 
 class DecodingModeRequest(BaseModel):
     mode: str
+    pooled: bool | None = None
 
 
 router = APIRouter()
@@ -77,16 +78,22 @@ async def autorun_abliterate(req: AbliterateRequest, request: Request) -> dict:
 async def autorun_decoding_mode(
     req: DecodingModeRequest, request: Request,
 ) -> dict:
-    """Switch the NLA decoding mode the autorun loop uses for new probes.
-    Takes effect on the *next* probe; the in-flight one finishes under
-    whatever mode it started with."""
+    """Switch the NLA decoding mode (and optionally pooled) the autorun
+    loop uses for new probes. Takes effect on the *next* probe; the
+    in-flight one finishes under whatever it started with."""
     try:
         mode = normalize_mode(req.mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     ctrl = _controller(request)
     ctrl.decoding_mode = mode
-    return {"ok": True, "decoding_mode": mode}
+    if req.pooled is not None:
+        ctrl.pooled = bool(req.pooled)
+    return {
+        "ok": True,
+        "decoding_mode": mode,
+        "pooled": ctrl.pooled,
+    }
 
 
 @router.post("/autorun/probe-set")

@@ -39,6 +39,7 @@ interface AutorunStatus {
   abliterate: boolean;
   probe_set: string;
   decoding_mode: string;
+  pooled: boolean;
   recent_log: Array<{
     ts: number;
     kind: string;
@@ -178,14 +179,14 @@ export default function AutorunPage() {
     }
   };
 
-  const onDecodingModeChange = async (mode: string) => {
+  const onDecodingModeChange = async (mode: string, pooled: boolean) => {
     if (!status || busy) return;
     setBusy(true);
     try {
       const res = await fetch(`${API}/autorun/decoding-mode`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify({ mode, pooled }),
       });
       if (!res.ok) {
         const detail = await res.text();
@@ -293,6 +294,7 @@ export default function AutorunPage() {
       <section className="mb-8">
         <DecodingModeSelector
           active={status.decoding_mode as DecodingMode}
+          pooled={status.pooled}
           onChange={onDecodingModeChange}
           busy={busy}
           glowWhenNonDefault

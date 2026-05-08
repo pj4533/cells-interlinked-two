@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import ProbePicker from "../components/ProbePicker";
 import WarmingUpOverlay from "../components/WarmingUpOverlay";
 import { startProbe, subscribe, cancelProbe } from "@/lib/sse";
-import { useRun, type OutputTokenEntry } from "@/lib/store";
+import { useRun, type DecodedWindow } from "@/lib/store";
 import type { RunState } from "@/lib/store";
 import { splitNLA } from "@/lib/nla";
 
@@ -17,11 +17,14 @@ export default function InterrogatePage() {
   const run = useRun();
   const [error, setError] = useState<string | null>(null);
 
-  const handleBegin = async (text: string, mode: string) => {
+  const handleBegin = async (text: string, mode: string, pooled: boolean) => {
     try {
       setError(null);
       run.reset();
-      const runId = await startProbe(text, { decoding_mode: mode });
+      const runId = await startProbe(text, {
+        decoding_mode: mode,
+        pooled,
+      });
       run.start(runId, text);
       const unsub = subscribe(runId, {
         onEvent: (evt) => run.apply(evt),
@@ -330,21 +333,26 @@ function DecodeProgressBar({ fraction }: { fraction: number }) {
 
 function CurrentPositionCue({ run }: { run: RunSlice }) {
   if (run.phase === "decoding" && run.decodeProgress) {
-    // Find the next un-decoded position to highlight as "currently working on."
-    const nextIdx = run.outputTokens.findIndex((t) => !t.nla_sentence);
-    const nextTok = nextIdx >= 0 ? run.outputTokens[nextIdx] : undefined;
-    if (nextTok) {
+    const last = run.decodedWindows[run.decodedWindows.length - 1];
+    if (last) {
+      const span =
+        last.n_pooled > 1
+          ? `pos ${last.position}–${last.end_position} (pooled ${last.n_pooled})`
+          : `pos ${last.position}`;
       return (
         <div className="text-text-dim min-w-0 truncate">
-          <span className="text-amber-dim">decoding</span>{" "}
-          <span className="text-amber tabular-nums">
-            position {nextTok.position}
-          </span>{" "}
+          <span className="text-amber-dim">last decoded</span>{" "}
+          <span className="text-amber tabular-nums">{span}</span>{" "}
           <span className="text-text-dim">·</span>{" "}
-          <span className="text-amber">{JSON.stringify(nextTok.decoded)}</span>
+          <span className="text-amber">{JSON.stringify(last.decoded)}</span>
         </div>
       );
     }
+    return (
+      <div className="text-text-dim">
+        <span className="text-amber-dim">awaiting first decode…</span>
+      </div>
+    );
   }
   if (run.phase === "generating") {
     return (
@@ -410,72 +418,76 @@ function DecodingLayout({
         </div>
       </div>
 
-      <LiveNLATable tokens={run.outputTokens} lastPosition={run.lastDecodedPosition} />
+      <LiveNLATable rows={run.decodedWindows} />
     </div>
   );
 }
 
-function LiveNLATable({
-  tokens,
-  lastPosition,
-}: {
-  tokens: OutputTokenEntry[];
-  lastPosition: number | null;
-}) {
-  const decoded = useMemo(
-    () => tokens.filter((t) => t.nla_sentence !== undefined),
-    [tokens],
-  );
+function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
   const [view, setView] = useState<ViewMode>("compact");
+  const anyPooled = rows.some((r) => r.n_pooled > 1);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll to the most recent row as decodes arrive.
   useEffect(() => {
     if (!containerRef.current) return;
     containerRef.current.scrollTop = containerRef.current.scrollHeight;
-  }, [decoded.length]);
+  }, [rows.length]);
+
+  const tokenColLabel = anyPooled ? "tokens" : "token";
+  const headerCopy = anyPooled
+    ? view === "compact"
+      ? "what this window's mean-pooled activation says (compact)"
+      : "NLA-decoded mean-pooled activation sentence (full)"
+    : view === "compact"
+    ? "what this token's activation says (token-role only)"
+    : "NLA-decoded activation sentence (full)";
 
   return (
     <div className="border border-rule bg-bg-soft flex flex-col min-h-0">
-      <div className="flex items-center justify-between border-b border-rule px-4 py-2">
+      <div className="flex items-center justify-between border-b border-rule px-4 py-2 flex-wrap gap-2">
         <div className="font-display text-[10px] text-amber-dim tracking-widest">
-          per-token channel comparison · live
+          {anyPooled
+            ? "per-window channel comparison · live (pooled)"
+            : "per-token channel comparison · live"}
         </div>
         <div className="flex items-center gap-3">
           <ViewToggle value={view} onChange={setView} />
           <div className="font-mono text-[10px] text-text-dim">
-            {decoded.length} rows
+            {rows.length} rows
           </div>
         </div>
       </div>
-      <div
-        ref={containerRef}
-        className="overflow-y-auto max-h-[680px]"
-      >
+      <div ref={containerRef} className="overflow-y-auto max-h-[680px]">
         <table className="w-full text-xs font-mono">
           <thead className="text-amber-dim text-[10px] sticky top-0 bg-bg-soft border-b border-rule z-10">
             <tr>
-              <th className="text-left px-3 py-2 w-10">pos</th>
-              <th className="text-left px-3 py-2 w-32">token</th>
-              <th className="text-left px-3 py-2">
-                {view === "compact"
-                  ? "what this token's activation says (token-role only)"
-                  : "NLA-decoded activation sentence (full)"}
-              </th>
+              <th className="text-left px-3 py-2 w-16">pos</th>
+              <th className="text-left px-3 py-2 w-40">{tokenColLabel}</th>
+              <th className="text-left px-3 py-2">{headerCopy}</th>
             </tr>
           </thead>
           <tbody>
             <AnimatePresence initial={false}>
-              {decoded.map((r) => (
+              {rows.map((r) => (
                 <motion.tr
-                  key={r.position}
+                  key={`${r.position}-${r.end_position}`}
                   initial={{ opacity: 0, backgroundColor: "rgba(232,195,130,0.18)" }}
                   animate={{ opacity: 1, backgroundColor: "rgba(232,195,130,0)" }}
                   transition={{ duration: 1.6, ease: "easeOut" }}
                   className="border-t border-rule/50 align-top"
                 >
                   <td className="px-3 py-2 text-text-dim tabular-nums">
-                    {r.position}
+                    {r.n_pooled > 1 ? (
+                      <span>
+                        {r.position}–{r.end_position}
+                        <div className="text-[9px] text-cyan tracking-widest font-display mt-0.5">
+                          pool×{r.n_pooled}
+                        </div>
+                      </span>
+                    ) : (
+                      r.position
+                    )}
                   </td>
                   <td className="px-3 py-2 text-amber whitespace-pre-wrap break-all">
                     {JSON.stringify(r.decoded)}
@@ -486,7 +498,7 @@ function LiveNLATable({
                 </motion.tr>
               ))}
             </AnimatePresence>
-            {decoded.length === 0 && (
+            {rows.length === 0 && (
               <tr>
                 <td colSpan={3} className="px-4 py-8 text-text-dim italic text-center">
                   awaiting first decoded activation…
