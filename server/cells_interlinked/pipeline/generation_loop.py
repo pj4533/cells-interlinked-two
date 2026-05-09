@@ -37,12 +37,16 @@ class SingleLayerHook:
 
     @staticmethod
     def _find_layers(model: Any) -> Any:
-        # Most HF causal LMs expose .model.layers (Llama/Qwen/Mistral). Some
-        # wrap it in .model.model.layers (Gemma-3 with text_config).
+        # Most HF causal LMs expose .model.layers (Llama/Qwen/Mistral). Gemma-3
+        # is multimodal-wrapped: Gemma3ForConditionalGeneration → .model
+        # (Gemma3Model) → .language_model (Gemma3TextModel) → .layers.
         m = model
         for path in (
             ("model", "layers"),
+            ("model", "language_model", "layers"),  # Gemma-3 multimodal wrapper
             ("model", "model", "layers"),
+            ("language_model", "layers"),
+            ("language_model", "model", "layers"),
             ("transformer", "h"),
             ("gpt_neox", "layers"),
         ):

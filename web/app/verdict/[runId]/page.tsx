@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import CaveatsPanel from "../../components/CaveatsPanel";
+import SAEPanel from "../../components/SAEPanel";
 import { splitNLA } from "@/lib/nla";
 import type { VerdictAggregate, VerdictRow } from "@/lib/types";
 
@@ -184,6 +185,8 @@ export default function VerdictPage() {
       )}
 
       <NLATable rows={rows} />
+
+      <SAEPanel rows={rows} />
 
       <PriorRunsPanel runs={priorRuns} currentRunId={rec.run_id} />
 

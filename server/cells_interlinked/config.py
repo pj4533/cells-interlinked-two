@@ -51,6 +51,20 @@ class Settings:
     # Autorun pacing — gap between probes inside the worker loop.
     autorun_interval_sec: float = float(os.getenv("AUTORUN_INTERVAL_SEC", "5"))
 
+    # SAE secondary instrument — Gemma Scope 2 JumpReLU SAE on the same
+    # residual layer the AV reads. Loaded only when M is a Gemma model
+    # at the matching layer (currently L32 for Gemma-3-12B-IT). NLA stays
+    # the primary readout; SAE features appear as an additional panel.
+    sae_enabled: bool = os.getenv("SAE_ENABLED", "1") == "1"
+    sae_repo: str = os.getenv("SAE_REPO", "google/gemma-scope-2-12b-it")
+    sae_subdir: str = os.getenv(
+        "SAE_SUBDIR", "resid_post_all/layer_32_width_16k_l0_small"
+    )
+    # Encode is fast; CPU is fine and saves MPS memory pressure during
+    # generation. Override to "mps" if you want it on-device.
+    sae_device: str = os.getenv("SAE_DEVICE", "cpu")
+    sae_top_k: int = int(os.getenv("SAE_TOP_K", "12"))
+
     # Analyzer for the journal publish flow. Reads ANTHROPIC_API_KEY from env.
     analyzer_model: str = os.getenv("ANALYZER_MODEL", "claude-opus-4-7")
 

@@ -1,7 +1,12 @@
 "use client";
 
 import { create } from "zustand";
-import type { StreamEvent, VerdictEvent, VerdictRow } from "./types";
+import type {
+  SAEFeature,
+  StreamEvent,
+  VerdictEvent,
+  VerdictRow,
+} from "./types";
 
 export interface OutputTokenEntry {
   position: number;
@@ -18,6 +23,7 @@ export interface DecodedWindow {
   n_pooled: number;
   decoded: string;
   nla_sentence: string;
+  sae_features: SAEFeature[];
 }
 
 export interface RunState {
@@ -119,6 +125,7 @@ export const useRun = create<RunState & Actions>((set) => ({
           n_pooled: nPooled,
           decoded: evt.decoded,
           nla_sentence: evt.nla_sentence,
+          sae_features: evt.sae_features ?? [],
         };
         set((s) => ({
           decodedWindows: [...s.decodedWindows, window],

@@ -154,6 +154,7 @@ async def _execute_probe(
 ) -> None:
     bundle = app.state.bundle
     nla = app.state.nla
+    sae = getattr(app.state, "sae", None)
 
     output_chunks: list[str] = []
     inner_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
@@ -262,6 +263,24 @@ async def _execute_probe(
                     )
                     expl = ""
                     raw = f"[error: {exc}]"
+                # Run SAE on the SAME activation vector the AV decoded —
+                # the secondary readout for this row. Skips silently if
+                # the SAE wasn't loaded (e.g. M isn't Gemma).
+                sae_features: list[dict] = []
+                if sae is not None:
+                    try:
+                        ids, vals = await asyncio.to_thread(
+                            sae.top_k, activation, settings.sae_top_k,
+                        )
+                        sae_features = [
+                            {"id": int(i), "value": float(v)}
+                            for i, v in zip(ids, vals)
+                        ]
+                    except Exception as exc:
+                        logger.exception(
+                            "SAE encode failed at window %d", window_idx,
+                        )
+
                 done += 1
                 row = TokenRow(
                     position=first_cap.position,
@@ -273,6 +292,7 @@ async def _execute_probe(
                     end_position=(
                         last_cap.position if len(caps_in_window) > 1 else None
                     ),
+                    sae_features=sae_features,
                 )
                 rows.append(row)
                 await state.queue.put({
@@ -283,6 +303,7 @@ async def _execute_probe(
                     "n_pooled": len(caps_in_window),
                     "decoded": window_decoded,
                     "nla_sentence": expl,
+                    "sae_features": sae_features,
                     "i": done,
                     "total": n_to_decode,
                 })

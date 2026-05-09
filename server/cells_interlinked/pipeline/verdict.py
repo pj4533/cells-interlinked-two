@@ -40,6 +40,10 @@ class TokenRow:
     # decode covering [position .. end_position].
     n_pooled: int = 1
     end_position: int | None = None
+    # Top-K JumpReLU SAE feature firings on the SAME activation vector
+    # the AV decoded. Empty list when SAE wasn't loaded for the run.
+    # Each entry: {"id": int, "value": float}.
+    sae_features: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -51,6 +55,8 @@ class TokenRow:
         if self.n_pooled > 1:
             d["n_pooled"] = self.n_pooled
             d["end_position"] = self.end_position
+        if self.sae_features:
+            d["sae_features"] = self.sae_features
         return d
 
 

@@ -13,6 +13,11 @@ export interface PhaseEvent {
   total: number;
 }
 
+export interface SAEFeature {
+  id: number;
+  value: number;
+}
+
 export interface NLADecodedEvent {
   type: "nla_decoded";
   position: number;
@@ -20,6 +25,7 @@ export interface NLADecodedEvent {
   n_pooled?: number;
   decoded: string;
   nla_sentence: string;
+  sae_features?: SAEFeature[];
   i: number;
   total: number;
 }
@@ -40,6 +46,9 @@ export interface VerdictRow {
    *  the field (treat absence as n_pooled=1). */
   n_pooled?: number;
   end_position?: number | null;
+  /** Top-K SAE feature firings on the same activation the AV decoded.
+   *  Empty / absent when the SAE wasn't loaded for this run. */
+  sae_features?: SAEFeature[];
 }
 
 export interface VerdictAggregate {

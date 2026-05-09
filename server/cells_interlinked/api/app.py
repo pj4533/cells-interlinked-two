@@ -21,6 +21,11 @@ from ..config import settings
 from ..pipeline.autorun import AutorunController
 from ..pipeline.model_loader import load_model
 from ..pipeline.nla_client import NLAClient
+from ..pipeline.sae_runner import (
+    DEFAULT_SAE_REPO,
+    DEFAULT_SAE_SUBDIR,
+    JumpReLUSAE,
+)
 from ..storage import db
 from .routes_autorun import router as autorun_router
 from .routes_journal import router as journal_router
@@ -73,6 +78,43 @@ async def lifespan(app: FastAPI):
 
     app.state.bundle = bundle
     app.state.nla = nla
+
+    # Optional secondary instrument: Gemma Scope 2 SAE at the same
+    # extraction layer the AV reads. Skip silently if the architecture
+    # isn't Gemma-flavoured (Gemma Scope 2 only covers Gemma-3) — Qwen
+    # and other M models still have NLA as their primary readout.
+    sae: JumpReLUSAE | None = None
+    if settings.sae_enabled and bundle.extraction_layer == 32 and (
+        "gemma" in bundle.model_name.lower()
+    ):
+        try:
+            sae = await asyncio.to_thread(
+                JumpReLUSAE,
+                settings.sae_repo,
+                settings.sae_subdir,
+                settings.sae_device,
+            )
+            assert sae.cfg.d_model == bundle.hidden_dim, (
+                f"SAE d_model={sae.cfg.d_model} != M hidden_dim={bundle.hidden_dim}"
+            )
+            assert sae.cfg.layer == bundle.extraction_layer, (
+                f"SAE layer L{sae.cfg.layer} != extraction L{bundle.extraction_layer}"
+            )
+            logger.info(
+                "SAE loaded as secondary instrument: %s/%s (d_sae=%d)",
+                settings.sae_repo, settings.sae_subdir, sae.cfg.d_sae,
+            )
+        except Exception as exc:
+            logger.warning("SAE load failed; continuing NLA-only: %s", exc)
+            sae = None
+    elif settings.sae_enabled:
+        logger.info(
+            "SAE skipped: only loads automatically for Gemma-flavoured M at L32 "
+            "(current: %s @ L%d)",
+            bundle.model_name, bundle.extraction_layer,
+        )
+    app.state.sae = sae
+
     app.state.registry = RunRegistry()
     app.state.refusal_directions = None  # not supported in v2
 
@@ -120,12 +162,15 @@ def create_app() -> FastAPI:
     def health() -> dict:
         bundle = getattr(app.state, "bundle", None)
         nla = getattr(app.state, "nla", None)
+        sae = getattr(app.state, "sae", None)
         return {
             "status": "ok",
             "model_loaded": bundle is not None,
             "av_loaded": nla is not None,
+            "sae_loaded": sae is not None,
             "model_name": bundle.model_name if bundle else None,
             "av_repo": settings.av_repo,
+            "sae_repo": (sae.cfg.repo + "/" + sae.cfg.subdir) if sae else None,
             "extraction_layer": bundle.extraction_layer if bundle else None,
             "device": str(bundle.device) if bundle else None,
         }

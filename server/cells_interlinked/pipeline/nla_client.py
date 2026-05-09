@@ -174,11 +174,17 @@ class NLAClient:
 
         # Cache the embedded prompt template once; per-decode we just clone
         # it and overwrite the injection row. Saves N embedding lookups.
+        #
+        # IMPORTANT: do NOT multiply by self.embed_scale here. For Gemma,
+        # the module IS Gemma3TextScaledWordEmbedding, which applies the
+        # √hidden_size scaling internally on forward. kitft's reference
+        # bypasses the module (loads the raw weight tensor) and therefore
+        # has to multiply manually. We use the module forward, which
+        # already does it. Multiplying again would double-scale Gemma
+        # embeddings by ~62× (sqrt(3840)) and produce generation collapse.
         embed = self.model.get_input_embeddings()
         with torch.no_grad():
-            self._template_embeds = (
-                embed(self._template_input_ids) * self.embed_scale
-            ).to(dtype)
+            self._template_embeds = embed(self._template_input_ids).to(dtype)
         self._attention_mask = torch.ones(
             (1, self._seq_len), dtype=torch.long, device=self.device
         )
