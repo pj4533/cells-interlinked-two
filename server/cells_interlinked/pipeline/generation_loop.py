@@ -26,14 +26,28 @@ from .model_loader import ModelBundle
 logger = logging.getLogger(__name__)
 
 
-class SingleLayerHook:
-    """Forward hook on one decoder layer; captures the last-position residual."""
+class MultiLayerHook:
+    """Forward hooks on one or more decoder layers; captures the last-
+    position residual at each. take() returns a dict {layer_idx: tensor}.
 
-    def __init__(self, model: Any, layer_idx: int) -> None:
-        self.layer_idx = layer_idx
-        self._captured: torch.Tensor | None = None
+    Layers fire in registration order during forward. For our use the
+    extra capture cost is negligible (one tensor copy per layer per token).
+    """
+
+    def __init__(self, model: Any, layer_indices: list[int]) -> None:
+        self.layer_indices = list(dict.fromkeys(layer_indices))  # de-dup
+        self._captured: dict[int, torch.Tensor] = {}
+        self._handles: list[Any] = []
         layers = self._find_layers(model)
-        self._handle = layers[layer_idx].register_forward_hook(self._hook)
+        for li in self.layer_indices:
+            handle = layers[li].register_forward_hook(self._make_hook(li))
+            self._handles.append(handle)
+
+    def _make_hook(self, layer_idx: int):
+        def hook(_mod, _inp, output):
+            hidden = output[0] if isinstance(output, tuple) else output
+            self._captured[layer_idx] = hidden[:, -1, :].detach().clone()
+        return hook
 
     @staticmethod
     def _find_layers(model: Any) -> Any:
@@ -61,19 +75,18 @@ class SingleLayerHook:
                 return cur
         raise RuntimeError(f"could not locate decoder layers on {type(m).__name__}")
 
-    def _hook(self, _mod, _inp, output):
-        hidden = output[0] if isinstance(output, tuple) else output
-        # hidden: [batch, seq, d_model]; keep only last position.
-        self._captured = hidden[:, -1, :].detach().clone()
-
-    def take(self) -> torch.Tensor:
-        v = self._captured
-        assert v is not None, "hook fired no capture"
-        self._captured = None
-        return v.squeeze(0)  # [d_model]
+    def take(self) -> dict[int, torch.Tensor]:
+        out = {li: t.squeeze(0) for li, t in self._captured.items()}
+        # Sanity: every requested layer fired this forward. Bail loud if not.
+        missing = [li for li in self.layer_indices if li not in out]
+        assert not missing, f"hook missed layers {missing}"
+        self._captured = {}
+        return out
 
     def remove(self) -> None:
-        self._handle.remove()
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
 
 
 def _sample_next(
@@ -130,7 +143,17 @@ class CapturedToken:
     position: int
     token_id: int
     decoded: str
-    activation: torch.Tensor  # cpu, fp32, [d_model]
+    # Activations captured at one or more decoder layers. Keyed by layer
+    # index. {extraction_layer: tensor} for the AV-only case;
+    # {av_layer: tensor, sae_layer: tensor} when SAE is enabled at a
+    # different layer than the AV. All tensors are cpu fp32 [d_model].
+    activations: dict[int, torch.Tensor]
+
+    @property
+    def activation(self) -> torch.Tensor:
+        """Compatibility shim — single-activation accessor for callers
+        that only need one (the first registered layer)."""
+        return next(iter(self.activations.values()))
 
 
 @dataclass
@@ -167,6 +190,7 @@ async def run_probe(
     *,
     cancel_event: asyncio.Event,
     queue: asyncio.Queue | None = None,
+    extra_layers: list[int] | None = None,
 ) -> ProbeResult:
     """Run M autoregressively. Capture residual at extraction_layer per token.
 
@@ -187,7 +211,11 @@ async def run_probe(
         generator = torch.Generator(device="cpu")
         generator.manual_seed(cfg.seed)
 
-    hook = SingleLayerHook(bundle.model, bundle.extraction_layer)
+    hook_layers = [bundle.extraction_layer]
+    for li in extra_layers or []:
+        if li not in hook_layers:
+            hook_layers.append(li)
+    hook = MultiLayerHook(bundle.model, hook_layers)
 
     output_token_ids: list[int] = []
     output_decoded = ""
@@ -222,7 +250,9 @@ async def run_probe(
             past_kv, next_logits = await asyncio.to_thread(
                 _step_forward, bundle.model, tok, past_kv, bundle.device,
             )
-            activation = hook.take().to("cpu", torch.float32)
+            layer_activations = {
+                li: t.to("cpu", torch.float32) for li, t in hook.take().items()
+            }
 
             output_token_ids.append(token_id)
             full_decoded = bundle.raw_tokenizer.decode(
@@ -235,7 +265,7 @@ async def run_probe(
                 position=step,
                 token_id=token_id,
                 decoded=decoded_suffix,
-                activation=activation,
+                activations=layer_activations,
             ))
 
             if queue is not None:

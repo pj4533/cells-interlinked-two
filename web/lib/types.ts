@@ -16,6 +16,12 @@ export interface PhaseEvent {
 export interface SAEFeature {
   id: number;
   value: number;
+  /** Auto-interp description from Neuronpedia, when one exists. Empty
+   *  string when the feature has no published explanation. */
+  label?: string;
+  /** Name of the LLM that produced the description (e.g.
+   *  "gemini-2.5-flash-lite"). Used to attribute / quality-rank. */
+  label_model?: string;
 }
 
 export interface NLADecodedEvent {

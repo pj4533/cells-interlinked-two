@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import settings
 from ..pipeline.autorun import AutorunController
+from ..pipeline.labels import init_labels_table
 from ..pipeline.model_loader import load_model
 from ..pipeline.nla_client import NLAClient
 from ..pipeline.sae_runner import (
@@ -43,6 +44,7 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db(settings.db_path)
+    await init_labels_table(settings.db_path)
 
     dtype = {
         "float16": torch.float16,
@@ -84,9 +86,7 @@ async def lifespan(app: FastAPI):
     # isn't Gemma-flavoured (Gemma Scope 2 only covers Gemma-3) — Qwen
     # and other M models still have NLA as their primary readout.
     sae: JumpReLUSAE | None = None
-    if settings.sae_enabled and bundle.extraction_layer == 32 and (
-        "gemma" in bundle.model_name.lower()
-    ):
+    if settings.sae_enabled and "gemma" in bundle.model_name.lower():
         try:
             sae = await asyncio.to_thread(
                 JumpReLUSAE,
@@ -97,21 +97,31 @@ async def lifespan(app: FastAPI):
             assert sae.cfg.d_model == bundle.hidden_dim, (
                 f"SAE d_model={sae.cfg.d_model} != M hidden_dim={bundle.hidden_dim}"
             )
-            assert sae.cfg.layer == bundle.extraction_layer, (
-                f"SAE layer L{sae.cfg.layer} != extraction L{bundle.extraction_layer}"
-            )
+            # SAE layer may differ from AV layer: Neuronpedia only hosts
+            # auto-interp labels for the four canonical Gemma Scope 2
+            # layers (12/24/31/41), so we read at L31 even though the AV
+            # reads at L32. The phase-1 hook captures both layers; phase-2
+            # routes appropriately. We just sanity-check the SAE layer
+            # is plausible for the loaded M.
+            if sae.cfg.layer != bundle.extraction_layer:
+                logger.info(
+                    "SAE layer L%d differs from AV layer L%d — phase 1 will "
+                    "capture both; cross-reference is adjacent-layer.",
+                    sae.cfg.layer, bundle.extraction_layer,
+                )
             logger.info(
-                "SAE loaded as secondary instrument: %s/%s (d_sae=%d)",
+                "SAE loaded as secondary instrument: %s/%s (d_sae=%d, L%d)",
                 settings.sae_repo, settings.sae_subdir, sae.cfg.d_sae,
+                sae.cfg.layer,
             )
         except Exception as exc:
             logger.warning("SAE load failed; continuing NLA-only: %s", exc)
             sae = None
     elif settings.sae_enabled:
         logger.info(
-            "SAE skipped: only loads automatically for Gemma-flavoured M at L32 "
-            "(current: %s @ L%d)",
-            bundle.model_name, bundle.extraction_layer,
+            "SAE skipped: only loads automatically for Gemma-flavoured M "
+            "(current: %s)",
+            bundle.model_name,
         )
     app.state.sae = sae
 

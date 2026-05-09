@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..pipeline.decoding_modes import normalize_mode, select_windows
+from ..pipeline.labels import get_labels
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
 from ..pipeline.verdict import TokenRow, compute_verdict
 from ..storage import db
@@ -169,6 +170,14 @@ async def _execute_probe(
 
     forwarder_task = asyncio.create_task(forwarder())
 
+    # When the SAE reads a different layer than the AV, capture both during
+    # phase-1 forward via a multi-layer hook. The AV gets bundle.extraction_layer
+    # activations; the SAE gets the secondary one.
+    sae_layer = sae.cfg.layer if sae is not None else None
+    extra_layers: list[int] = []
+    if sae_layer is not None and sae_layer != bundle.extraction_layer:
+        extra_layers.append(sae_layer)
+
     result: ProbeResult | None = None
     error_msg: str | None = None
     try:
@@ -180,6 +189,7 @@ async def _execute_probe(
                 cfg=cfg,
                 cancel_event=state.cancel_event,
                 queue=inner_queue,
+                extra_layers=extra_layers,
             )
     except Exception as exc:
         logger.exception("phase1 generation failed")
@@ -228,17 +238,26 @@ async def _execute_probe(
             for window_idx, window in enumerate(windows):
                 if state.cancel_event.is_set():
                     break
-                # Pool (or just take) the activations for this window.
+                # Pool (or just take) activations for this window.
                 # Window indices reference positions in result.captured,
                 # which is a list ordered by position 0..n_total-1.
                 caps_in_window = [result.captured[i] for i in window]
-                if len(caps_in_window) == 1:
-                    activation = caps_in_window[0].activation
-                else:
-                    stacked = torch.stack(
-                        [c.activation for c in caps_in_window], dim=0,
-                    )
-                    activation = stacked.mean(dim=0)
+
+                def pool_at(layer: int) -> torch.Tensor:
+                    if len(caps_in_window) == 1:
+                        return caps_in_window[0].activations[layer]
+                    return torch.stack(
+                        [c.activations[layer] for c in caps_in_window],
+                        dim=0,
+                    ).mean(dim=0)
+
+                # AV always reads the bundle's primary extraction layer.
+                activation = pool_at(bundle.extraction_layer)
+                # SAE reads its own layer (may be the same as AV's or one
+                # nearby, depending on Neuronpedia coverage).
+                sae_activation = (
+                    pool_at(sae_layer) if sae_layer is not None else None
+                )
 
                 first_cap = caps_in_window[0]
                 last_cap = caps_in_window[-1]
@@ -262,14 +281,13 @@ async def _execute_probe(
                     )
                     expl = ""
                     raw = f"[error: {exc}]"
-                # Run SAE on the SAME activation vector the AV decoded —
-                # the secondary readout for this row. Skips silently if
-                # the SAE wasn't loaded (e.g. M isn't Gemma).
+                # SAE reads its own (possibly different) layer's activation
+                # — see comment above. Skips silently if not loaded.
                 sae_features: list[dict] = []
-                if sae is not None:
+                if sae is not None and sae_activation is not None:
                     try:
                         ids, vals = await asyncio.to_thread(
-                            sae.top_k, activation, settings.sae_top_k,
+                            sae.top_k, sae_activation, settings.sae_top_k,
                         )
                         sae_features = [
                             {"id": int(i), "value": float(v)}
@@ -306,6 +324,34 @@ async def _execute_probe(
                     "i": done,
                     "total": n_to_decode,
                 })
+
+    # Batch-fetch Neuronpedia auto-interp labels for the SAE features
+    # that fired across all rows. Cached in SQLite so a label is fetched
+    # at most once per (sae_id, feature_id) globally; subsequent runs
+    # touching the same features see them instantly. Failure here is
+    # non-fatal — the panel renders fine without labels.
+    if sae is not None and rows:
+        try:
+            unique_ids = {
+                int(f["id"])
+                for r in rows
+                for f in (r.sae_features or [])
+            }
+            if unique_ids:
+                label_map = await get_labels(
+                    settings.db_path,
+                    settings.neuronpedia_sae_id,
+                    sorted(unique_ids),
+                )
+                for r in rows:
+                    if not r.sae_features:
+                        continue
+                    for f in r.sae_features:
+                        entry = label_map.get(int(f["id"])) or {}
+                        f["label"] = entry.get("label", "")
+                        f["label_model"] = entry.get("model", "")
+        except Exception as exc:
+            logger.warning("label fetch failed: %s", exc)
 
     verdict = compute_verdict(rows)
 

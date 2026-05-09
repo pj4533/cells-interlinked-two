@@ -189,14 +189,29 @@ const perRowTab = page
   .filter({ visible: true })
   .first();
 await perRowTab.click();
-await page.waitForTimeout(300);
+await page.waitForTimeout(400);
 await shot(page, "03-sae-per-row");
-const perRowChips = await page
-  .locator('span:has-text("#")')
-  .filter({ visible: true })
+// Per-row links to Neuronpedia for each feature id; presence of one
+// confirms the view rendered.
+const perRowLinks = await page
+  .locator('a[href^="https://www.neuronpedia.org/gemma-3-12b-it/"]')
   .count();
-if (perRowChips === 0) fail("per-row SAE view has no feature chips");
-log(`✓ per-row view shows ${perRowChips} SAE chips`);
+if (perRowLinks === 0) fail("per-row SAE view has no Neuronpedia feature links");
+log(`✓ per-row view shows ${perRowLinks} Neuronpedia feature links`);
+
+// 4e. Verify at least one row carries an auto-interp label string
+//     (Neuronpedia coverage is partial; we just need any label to land).
+const sampleLabel = await page
+  .locator(".text-text.leading-snug")
+  .filter({ visible: true })
+  .first()
+  .textContent()
+  .catch(() => null);
+log(
+  sampleLabel
+    ? `✓ sample auto-interp label: ${JSON.stringify(sampleLabel.slice(0, 80))}`
+    : "(no labels rendered — may be a low-coverage run; not a hard fail)",
+);
 
 if (errors.length || consoleErrors.length) {
   log(`pageerror: ${errors.length}, console.error: ${consoleErrors.length}`);
