@@ -5,8 +5,12 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import ProbePicker from "../components/ProbePicker";
 import WarmingUpOverlay from "../components/WarmingUpOverlay";
-import { startProbe, subscribe, cancelProbe } from "@/lib/sse";
-import { useRun, type DecodedWindow } from "@/lib/store";
+import { startProbe, subscribe, cancelProbe, fetchProbe } from "@/lib/sse";
+import {
+  useRun,
+  type DecodedWindow,
+  type ProbeRecordLike,
+} from "@/lib/store";
 import type { RunState } from "@/lib/store";
 import { splitNLA } from "@/lib/nla";
 
@@ -16,30 +20,94 @@ type ViewMode = "compact" | "full";
 export default function InterrogatePage() {
   const run = useRun();
   const [error, setError] = useState<string | null>(null);
+  /** Active SSE unsubscribe — call to terminate any current stream
+   *  before starting a new one (avoids dual subscriptions on reconnect). */
+  const unsubRef = useRef<null | (() => void)>(null);
+  /** A run id we recovered the verdict for via polling — used to skip
+   *  showing connection errors when the run actually finished fine. */
+  const recoveredRef = useRef<Set<string>>(new Set());
+
+  /** Try to recover a run that the SSE lost contact with. If the backend
+   *  shows it finished, hydrate the store from the DB row. If it's still
+   *  running, re-subscribe to the live stream from where we are. */
+  const tryRecover = async (runId: string) => {
+    const rec = (await fetchProbe(runId)) as ProbeRecordLike | null;
+    if (!rec) return;
+    if (rec.finished_at) {
+      recoveredRef.current.add(runId);
+      run.hydrateFromRecord(rec);
+      setError(null);
+      return;
+    }
+    // Still in flight — try a fresh stream.
+    if (unsubRef.current) unsubRef.current();
+    unsubRef.current = subscribe(runId, {
+      onEvent: (evt) => run.apply(evt),
+      onError: () => onStreamError(runId),
+    });
+  };
+
+  const onStreamError = (runId: string) => {
+    if (recoveredRef.current.has(runId)) return;
+    setError("connection lost — checking if the run finished anyway…");
+    tryRecover(runId);
+  };
 
   const handleBegin = async (text: string, mode: string, pooled: boolean) => {
     try {
       setError(null);
+      recoveredRef.current.clear();
       run.reset();
+      if (unsubRef.current) {
+        unsubRef.current();
+        unsubRef.current = null;
+      }
       const runId = await startProbe(text, {
         decoding_mode: mode,
         pooled,
       });
       run.start(runId, text);
-      const unsub = subscribe(runId, {
+      unsubRef.current = subscribe(runId, {
         onEvent: (evt) => run.apply(evt),
-        onError: () => setError("connection lost"),
+        onError: () => onStreamError(runId),
       });
-      return () => unsub();
+      return () => {
+        if (unsubRef.current) {
+          unsubRef.current();
+          unsubRef.current = null;
+        }
+      };
     } catch (e) {
       setError(String(e));
     }
   };
 
   useEffect(() => {
-    return () => run.reset();
+    return () => {
+      if (unsubRef.current) unsubRef.current();
+      run.reset();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // When the tab regains visibility, sanity-check the in-flight run.
+  // Browsers (Safari especially) can silently kill an EventSource on a
+  // backgrounded tab; without this we'd be stuck on stale state until
+  // page reload. If the run finished while we were away, hydrate. If
+  // it's still running, the periodic resubscribe in tryRecover catches
+  // up.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== "visible") return;
+      const id = run.runId;
+      if (!id) return;
+      if (run.phase === "done") return;
+      tryRecover(id);
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.runId, run.phase]);
 
   if (!run.runId) {
     return <ProbePicker onBegin={handleBegin} disabled={run.isRunning} />;

@@ -55,6 +55,43 @@ interface Actions {
   start: (runId: string, prompt: string) => void;
   apply: (evt: StreamEvent) => void;
   reset: () => void;
+  /** Populate the store from a completed-run DB record. Used by the
+   *  interrogate page's polling fallback when the SSE drops mid-run
+   *  (backgrounded tab, network glitch, etc.) — the run keeps running
+   *  on the backend; this lets the UI catch up once we discover it
+   *  finished. */
+  hydrateFromRecord: (rec: ProbeRecordLike) => void;
+}
+
+/** The minimal subset of GET /probes/{runId} fields the store needs to
+ *  reconstruct a run after losing the live stream. */
+export interface ProbeRecordLike {
+  run_id: string;
+  prompt_text: string;
+  output_text?: string;
+  total_tokens?: number;
+  stopped_reason?: string | null;
+  finished_at?: number | null;
+  error?: string | null;
+  verdict?: {
+    rows: Array<{
+      position: number;
+      token_id: number;
+      decoded: string;
+      nla_sentence: string;
+      n_pooled?: number;
+      end_position?: number | null;
+      sae_features?: SAEFeature[];
+    }>;
+    aggregate: {
+      n_positions: number;
+      n_with_explanation: number;
+      n_eval_hits: number;
+      n_introspect_hits: number;
+      frac_eval: number;
+      frac_introspect: number;
+    };
+  };
 }
 
 const initial: RunState = {
@@ -91,6 +128,50 @@ export const useRun = create<RunState & Actions>((set) => ({
 
   reset: () => {
     set(initial);
+  },
+
+  hydrateFromRecord: (rec) => {
+    if (!rec.finished_at) return;
+    const v = rec.verdict;
+    const rows = v?.rows ?? [];
+    // Reconstruct outputTokens from row decoded text (best-effort —
+    // pooled rows concatenate multiple tokens; we just synthesize one
+    // outputTokens entry per row at the start position).
+    const outputTokens: OutputTokenEntry[] = rows.map((r) => ({
+      position: r.position,
+      decoded: r.decoded,
+    }));
+    const decodedWindows: DecodedWindow[] = rows
+      .filter((r) => (r.nla_sentence ?? "").length > 0 || r.sae_features?.length)
+      .map((r) => ({
+        position: r.position,
+        end_position: r.end_position ?? r.position,
+        n_pooled: r.n_pooled ?? 1,
+        decoded: r.decoded,
+        nla_sentence: r.nla_sentence ?? "",
+        sae_features: r.sae_features ?? [],
+      }));
+    const verdictEvent: VerdictEvent | null = v
+      ? { type: "verdict", rows: v.rows, aggregate: v.aggregate }
+      : null;
+    set({
+      runId: rec.run_id,
+      prompt: rec.prompt_text,
+      outputTokens,
+      decodedWindows,
+      totalTokens: rec.total_tokens ?? outputTokens.length,
+      phase: "done",
+      decodeProgress: null,
+      decodeStartedAt: null,
+      lastDecodedPosition:
+        rows.length > 0 ? rows[rows.length - 1].position : null,
+      generationStartedAt: null,
+      generationFinishedAt: rec.finished_at ?? null,
+      isRunning: false,
+      stoppedReason: rec.stopped_reason ?? "recovered",
+      verdict: verdictEvent,
+      error: rec.error ?? null,
+    });
   },
 
   apply: (evt) => {

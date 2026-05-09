@@ -45,6 +45,12 @@ export function subscribe(runId: string, h: SubscribeHandlers): () => void {
     "ping",
   ];
 
+  // Track whether we've already received a terminal event. EventSource
+  // fires `onerror` as part of the closure sequence after `es.close()`
+  // on some browsers — without this guard we'd surface a spurious
+  // "connection lost" to the user immediately after a clean done.
+  let cleanlyClosed = false;
+
   for (const t of eventTypes) {
     es.addEventListener(t, (e: MessageEvent) => {
       if (t === "ping") return;
@@ -54,6 +60,7 @@ export function subscribe(runId: string, h: SubscribeHandlers): () => void {
         console.error("sse parse error", err, e.data);
       }
       if (t === "done" || t === "error") {
+        cleanlyClosed = true;
         es.close();
         h.onClose?.();
       }
@@ -61,10 +68,14 @@ export function subscribe(runId: string, h: SubscribeHandlers): () => void {
   }
 
   es.onerror = (err) => {
+    if (cleanlyClosed) return;
     h.onError?.(err);
   };
 
-  return () => es.close();
+  return () => {
+    cleanlyClosed = true;
+    es.close();
+  };
 }
 
 export async function startProbe(prompt: string, opts?: {
@@ -87,4 +98,14 @@ export async function startProbe(prompt: string, opts?: {
 
 export async function cancelProbe(runId: string): Promise<void> {
   await fetch(cancelUrl(runId), { method: "POST" });
+}
+
+export async function fetchProbe(runId: string): Promise<unknown | null> {
+  try {
+    const res = await fetch(`${API}/probes/${runId}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
