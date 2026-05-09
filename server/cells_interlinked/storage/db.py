@@ -74,6 +74,28 @@ CREATE INDEX IF NOT EXISTS idx_analyses_status ON analyses (status);
 """
 
 
+async def cleanup_orphans(path: Path) -> int:
+    """Mark any in-flight probes left over from a previous process as
+    errored. The asyncio task driving them died with the previous
+    backend; their RunRegistry entry doesn't exist anymore. Without this
+    they'd sit in /archive forever as "● running — click to reconnect"
+    that always 404s on the SSE stream.
+
+    Returns the number of rows updated.
+    """
+    import time
+    now = time.time()
+    async with aiosqlite.connect(path) as db:
+        cur = await db.execute(
+            "UPDATE probes SET finished_at = ?, stopped_reason = ?, "
+            "error = COALESCE(error, ?) "
+            "WHERE finished_at IS NULL",
+            (now, "server_restart", "backend restarted while run was in flight"),
+        )
+        await db.commit()
+        return cur.rowcount or 0
+
+
 async def init_db(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(path) as db:

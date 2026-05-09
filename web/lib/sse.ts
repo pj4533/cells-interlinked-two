@@ -31,6 +31,26 @@ export interface SubscribeHandlers {
   onClose?: () => void;
 }
 
+/** Probe whether the SSE stream endpoint will accept us before opening
+ *  the EventSource. Returns the HTTP status of a HEAD-equivalent GET.
+ *  Useful when the run might be orphaned (404) — the EventSource itself
+ *  doesn't expose status codes on connection errors.
+ */
+export async function streamReachable(runId: string): Promise<number> {
+  try {
+    const res = await fetch(streamUrl(runId), {
+      method: "GET",
+      headers: { Accept: "text/event-stream" },
+      signal: AbortSignal.timeout(2500),
+    });
+    // We immediately abort the body — we just want the status.
+    res.body?.cancel().catch(() => {});
+    return res.status;
+  } catch {
+    return 0;
+  }
+}
+
 export function subscribe(runId: string, h: SubscribeHandlers): () => void {
   const es = new EventSource(streamUrl(runId));
 

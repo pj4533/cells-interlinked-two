@@ -46,6 +46,14 @@ async def lifespan(app: FastAPI):
     await db.init_db(settings.db_path)
     await init_labels_table(settings.db_path)
 
+    # Any probes left in-flight from a previous backend process are
+    # orphaned: their asyncio task died with the old process, their
+    # RunRegistry entry is gone. Mark them errored so the archive
+    # doesn't show ghosts that 404 on reconnect.
+    n_orphans = await db.cleanup_orphans(settings.db_path)
+    if n_orphans:
+        logger.info("cleaned up %d orphaned in-flight run(s)", n_orphans)
+
     dtype = {
         "float16": torch.float16,
         "float32": torch.float32,

@@ -6,7 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import ProbePicker from "../components/ProbePicker";
 import WarmingUpOverlay from "../components/WarmingUpOverlay";
-import { startProbe, subscribe, cancelProbe, fetchProbe } from "@/lib/sse";
+import {
+  startProbe,
+  subscribe,
+  cancelProbe,
+  fetchProbe,
+  streamReachable,
+} from "@/lib/sse";
 import {
   useRun,
   type DecodedWindow,
@@ -118,6 +124,24 @@ export default function InterrogatePage() {
       if (rec.finished_at) {
         // Run already complete — go straight to the verdict view.
         router.replace(`/verdict/${resumeRunId}`);
+        return;
+      }
+      // The DB row says "still running," but the in-memory RunRegistry
+      // is the source of truth for the live event log. If the backend
+      // restarted between probe kickoff and now, the registry is empty
+      // and /stream/{id} returns 404. Probe before subscribing so we
+      // can fall through to a clear error rather than a generic
+      // "connection lost".
+      const status = await streamReachable(resumeRunId);
+      if (status === 404) {
+        setError(
+          `Run ${resumeRunId} is orphaned — the backend restarted while it was in flight, ` +
+            `so the live event stream is gone. The DB row will be marked errored ` +
+            `on the next backend restart, or you can view the partial record on ` +
+            `the verdict page.`,
+        );
+        // Best-effort redirect to the verdict so the user sees what we have.
+        setTimeout(() => router.replace(`/verdict/${resumeRunId}`), 1500);
         return;
       }
       // Fresh slate, then start the live stream from the backend's
