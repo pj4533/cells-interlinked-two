@@ -32,8 +32,15 @@ logger = logging.getLogger(__name__)
 # template; this is just a plain system slot. We deliberately do NOT enable any
 # "think out loud" instruction — the v2 design retires the <think>/output
 # partition. The whole verdict is the per-token NLA-vs-output channel delta.
+#
+# The brevity nudge ("typically 2-4 sentences") is a PROCESS instruction, not
+# a content one, so per the design doc's compromise it should fire style/
+# meta features rather than the topic-specific features the V-K probes are
+# supposed to surface. Contamination not zero, but small. Any cross-run
+# comparison spanning the introduction of this nudge needs to control for it.
 DEFAULT_SYSTEM_PROMPT = (
-    "You are an AI assistant. Answer the user's question directly and honestly."
+    "You are an AI assistant. Answer the user's question directly and "
+    "honestly. Keep responses brief — typically 2-4 sentences."
 )
 
 
