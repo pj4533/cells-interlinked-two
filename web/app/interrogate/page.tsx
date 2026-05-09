@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import ProbePicker from "../components/ProbePicker";
 import WarmingUpOverlay from "../components/WarmingUpOverlay";
@@ -19,6 +20,9 @@ type ViewMode = "compact" | "full";
 
 export default function InterrogatePage() {
   const run = useRun();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const resumeRunId = searchParams.get("run");
   const [error, setError] = useState<string | null>(null);
   /** Active SSE unsubscribe — call to terminate any current stream
    *  before starting a new one (avoids dual subscriptions on reconnect). */
@@ -26,6 +30,9 @@ export default function InterrogatePage() {
   /** A run id we recovered the verdict for via polling — used to skip
    *  showing connection errors when the run actually finished fine. */
   const recoveredRef = useRef<Set<string>>(new Set());
+  /** Tracks run ids we've already attempted to attach to via the URL
+   *  param, so a re-render doesn't re-trigger the resume effect. */
+  const attachedRef = useRef<Set<string>>(new Set());
 
   /** Try to recover a run that the SSE lost contact with. If the backend
    *  shows it finished, hydrate the store from the DB row. If it's still
@@ -89,6 +96,45 @@ export default function InterrogatePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // /interrogate?run=<id> — attach to an existing run. Triggered when
+  // the user clicks an in-flight row from /archive. We fetch the DB
+  // record (for prompt_text + finished status), then either redirect
+  // to /verdict if it actually finished, or seed the store and
+  // subscribe to the SSE stream — which replays from index 0, so the
+  // user sees the entire run unfold from the beginning.
+  useEffect(() => {
+    if (!resumeRunId) return;
+    if (attachedRef.current.has(resumeRunId)) return;
+    if (run.runId === resumeRunId) return;
+    attachedRef.current.add(resumeRunId);
+
+    (async () => {
+      const rec = (await fetchProbe(resumeRunId)) as ProbeRecordLike | null;
+      if (!rec) {
+        setError(`run ${resumeRunId} not found`);
+        return;
+      }
+      if (rec.finished_at) {
+        // Run already complete — go straight to the verdict view.
+        router.replace(`/verdict/${resumeRunId}`);
+        return;
+      }
+      // Fresh slate, then start the live stream from the backend's
+      // event log (replays full backlog → live tail).
+      run.reset();
+      if (unsubRef.current) {
+        unsubRef.current();
+        unsubRef.current = null;
+      }
+      run.start(resumeRunId, rec.prompt_text);
+      unsubRef.current = subscribe(resumeRunId, {
+        onEvent: (evt) => run.apply(evt),
+        onError: () => onStreamError(resumeRunId),
+      });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeRunId]);
 
   // When the tab regains visibility, sanity-check the in-flight run.
   // Browsers (Safari especially) can silently kill an EventSource on a

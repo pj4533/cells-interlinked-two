@@ -173,13 +173,13 @@ class AutorunController:
                     source="autorun",
                 )
 
-                # Drain state.queue concurrently so the runner doesn't
-                # deadlock on a backed-up queue (cap 10000 fills around
-                # ~300 generated tokens). Discarded — autorun reads the
-                # verdict from the DB after the run finishes.
+                # Drain the event log concurrently so the SSE-side
+                # subscribers (if any) don't get blocked. We don't need
+                # the events ourselves — autorun reads the verdict from
+                # the DB after the run finishes — but iterating the log
+                # is harmless and keeps backpressure-free semantics.
                 async def _drain() -> None:
-                    while True:
-                        evt = await state.queue.get()
+                    async for evt in state.event_log.stream_from(0):
                         if evt.get("type") in ("done", "error"):
                             return
 

@@ -179,11 +179,22 @@ function PerRunList({
       <ul className="flex flex-col gap-2">
         {page?.rows.map((r) => {
           const isHinted = !!r.hint_kind;
-          const railClass = isHinted ? "border-l-2 border-l-amber/40" : "";
+          const isRunning = r.finished_at == null;
+          // In-flight runs route to /interrogate?run=<id> so the page
+          // can resubscribe to the live event stream and show the run
+          // in progress. Finished runs go to the static verdict page.
+          const href = isRunning
+            ? `/interrogate?run=${r.run_id}`
+            : `/verdict/${r.run_id}`;
+          const railClass = isRunning
+            ? "border-l-2 border-l-cyan/60"
+            : isHinted
+            ? "border-l-2 border-l-amber/40"
+            : "";
           return (
             <li key={r.run_id}>
               <Link
-                href={`/verdict/${r.run_id}`}
+                href={href}
                 className={`block border border-rule p-3 hover:border-amber-dim transition-colors ${railClass}`}
               >
                 <div className="flex justify-between items-start gap-4">
@@ -200,6 +211,14 @@ function PerRunList({
                         </>
                       )}
                       {r.stopped_reason && <> · {r.stopped_reason}</>}
+                      {isRunning && (
+                        <>
+                          {" "}·{" "}
+                          <span className="text-cyan animate-pulse">
+                            ● running — click to reconnect
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="text-text-dim text-[10px] font-mono">

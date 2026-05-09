@@ -162,7 +162,7 @@ async def _execute_probe(
     async def forwarder() -> None:
         while True:
             evt = await inner_queue.get()
-            await state.queue.put(evt)
+            await state.emit(evt)
             if evt.get("type") == "token":
                 output_chunks.append(evt["decoded"])
             if evt.get("type") == "stopped":
@@ -194,7 +194,7 @@ async def _execute_probe(
     except Exception as exc:
         logger.exception("phase1 generation failed")
         error_msg = str(exc)
-        await state.queue.put({"type": "error", "message": str(exc)})
+        await state.emit({"type": "error", "message": str(exc)})
         await inner_queue.put({"type": "stopped", "reason": "error", "total_tokens": 0})
     finally:
         await forwarder_task
@@ -211,7 +211,8 @@ async def _execute_probe(
             verdict=None,
             error=error_msg,
         )
-        await state.queue.put({"type": "done"})
+        await state.emit({"type": "done"})
+        await state.event_log.close()
         state.completed = True
         return
 
@@ -225,7 +226,7 @@ async def _execute_probe(
     windows = select_windows(n_total, cfg.decoding_mode, cfg.pooled)
     n_to_decode = len(windows)
     if n_to_decode > 0:
-        await state.queue.put({
+        await state.emit({
             "type": "phase",
             "name": "nla_decoding",
             "total": n_to_decode,
@@ -312,7 +313,7 @@ async def _execute_probe(
                     sae_features=sae_features,
                 )
                 rows.append(row)
-                await state.queue.put({
+                await state.emit({
                     "type": "nla_decoded",
                     "position": first_cap.position,
                     "end_position": last_cap.position
@@ -355,7 +356,7 @@ async def _execute_probe(
 
     verdict = compute_verdict(rows)
 
-    await state.queue.put({
+    await state.emit({
         "type": "verdict",
         "rows": [r.to_dict() for r in verdict.rows],
         "aggregate": verdict.aggregate,
@@ -378,7 +379,8 @@ async def _execute_probe(
     except Exception:
         pass
 
-    await state.queue.put({"type": "done"})
+    await state.emit({"type": "done"})
+    await state.event_log.close()
     state.completed = True
 
 
