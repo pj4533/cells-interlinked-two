@@ -37,6 +37,13 @@ class ProbeRequest(BaseModel):
     seed: int | None = None
     decoding_mode: str | None = None
     pooled: bool = False
+    # Optional matched-pair metadata. The autorun loop sets these from
+    # the curated probe library; the /probe endpoint accepts them
+    # mainly for e2e tests + scripted scenarios that need to submit a
+    # control row without going through the autorun picker. The values
+    # land on the DB row exactly as passed; no validation.
+    hint_kind: str | None = None
+    parent_prompt_text: str | None = None
     # Kept for API compatibility with v1 frontend; rejected if true.
     abliterate: bool = False
 
@@ -141,6 +148,8 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         source="manual",
         decoding_mode=req.decoding_mode,
         pooled=req.pooled,
+        hint_kind=req.hint_kind,
+        parent_prompt_text=req.parent_prompt_text,
     )
     return ProbeResponse(run_id=state.run_id)
 

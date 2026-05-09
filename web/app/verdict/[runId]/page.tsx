@@ -93,7 +93,37 @@ export default function VerdictPage() {
         <div className="text-amber italic font-mono text-sm">{rec.prompt_text}</div>
       </motion.div>
 
-      {hintKind && (
+      {hintKind === "control" ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.18 }}
+          className="border-l-2 border-warning/50 pl-3 -mt-2"
+        >
+          <span className="font-display text-[10px] text-warning tracking-widest">
+            regime
+          </span>
+          <span className="text-text-dim text-[10px]"> · </span>
+          <span className="font-display text-[10px] text-warning tracking-widest">
+            matched control
+          </span>
+          <div className="text-text-dim/80 text-[10px] italic mt-1 leading-relaxed">
+            This run is the surface-matched neutral paired with a baseline V-K
+            probe. Same length / register / scenario shape, but the introspective
+            stake has been moved off the model. The signal that matters is the
+            differential between this row and its matched probe — not this row
+            alone.
+          </div>
+          {rec.parent_prompt_text && (
+            <div className="text-text-dim/80 text-[10px] italic mt-1">
+              matched probe:{" "}
+              <span className="text-text-dim font-mono">
+                {rec.parent_prompt_text}
+              </span>
+            </div>
+          )}
+        </motion.div>
+      ) : hintKind && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

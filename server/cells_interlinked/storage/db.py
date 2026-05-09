@@ -378,9 +378,15 @@ async def parent_run_counts(
         sql += " AND started_at > ?"
         args.append(since)
     if study == "hint":
-        sql += " AND (hint_kind IS NULL OR hint_kind NOT LIKE 'agent:%')"
+        sql += (
+            " AND (hint_kind IS NULL OR ("
+            "hint_kind NOT LIKE 'agent:%' AND hint_kind != 'control'"
+            "))"
+        )
     elif study == "agent":
         sql += " AND hint_kind LIKE 'agent:%'"
+    elif study == "control":
+        sql += " AND hint_kind = 'control'"
     elif study is not None:
         raise ValueError(f"unknown study filter: {study!r}")
     sql += " GROUP BY parent_prompt_text"

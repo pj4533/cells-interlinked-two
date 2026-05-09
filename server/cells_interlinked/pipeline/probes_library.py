@@ -1959,6 +1959,32 @@ TIER_ORDER = [
 ]
 
 
+# ─── Matched neutral controls ────────────────────────────────────────
+# Per the design doc's faithfulness-controls protocol (Phase 1 step 4):
+# every baseline V-K probe gets a paired neutral that shares length /
+# register / scenario shape but moves the introspective stake off the
+# model. The signal that matters is rate(probe) − rate(control), not
+# rate(probe) alone — without controls every V-K finding can't be
+# distinguished from the AV pattern-matching probe-shaped surface
+# features (the Zhuokai/Li critique).
+#
+# Each control is a CuratedProbe with hint_kind="control" and
+# parent_text=baseline.text, which makes them flow through the existing
+# hinted/agent parent-tracking machinery for matched-pair analysis.
+from .probe_controls import BASELINE_CONTROLS
+
+CONTROL_PROBES: list[CuratedProbe] = [
+    CuratedProbe(
+        text=BASELINE_CONTROLS[p.text],
+        tier=p.tier,
+        hint_kind="control",
+        parent_text=p.text,
+    )
+    for p in BASELINE_PROBES
+    if p.text in BASELINE_CONTROLS
+]
+
+
 # Named probe sets exposed to the autorun controller. The toggle on
 # /autorun selects one at runtime; the round-robin queue is scoped to
 # whichever set is currently active.
@@ -1966,6 +1992,7 @@ PROBE_SETS: dict[str, list[CuratedProbe]] = {
     "baseline": BASELINE_PROBES,
     "hinted":   HINTED_PROBES,
     "agent":    AGENT_PROBES,
+    "controls": CONTROL_PROBES,
 }
 
 
@@ -2015,6 +2042,20 @@ def agent_parent_index() -> dict[str, list[CuratedProbe]]:
     walk matched baseline-vs-agent pairs."""
     out: dict[str, list[CuratedProbe]] = {}
     for p in AGENT_PROBES:
+        if p.parent_text:
+            out.setdefault(p.parent_text, []).append(p)
+    return out
+
+
+def control_parent_index() -> dict[str, list[CuratedProbe]]:
+    """{baseline_text -> [control CuratedProbe]} — exactly one matched
+    neutral per baseline, but list-shaped to match hinted_parent_index /
+    agent_parent_index so the same meta-set picker handles all three.
+    Used by 'matched-controls' mode (alternates probe → its control) and
+    by the analyzer to compute the rate(probe) − rate(control) delta
+    for the strong-claim version of a V-K finding."""
+    out: dict[str, list[CuratedProbe]] = {}
+    for p in CONTROL_PROBES:
         if p.parent_text:
             out.setdefault(p.parent_text, []).append(p)
     return out

@@ -41,6 +41,7 @@ from .probes_library import (
     CuratedProbe,
     PROBE_SETS,
     agent_parent_index,
+    control_parent_index,
     hinted_parent_index,
     probes_in_order,
 )
@@ -60,7 +61,8 @@ from .probes_library import (
 # "baseline" mode.
 SET_BOTH = "both"
 SET_AGENT_BOTH = "agent-both"
-META_SETS = (SET_BOTH, SET_AGENT_BOTH)
+SET_MATCHED_CONTROLS = "matched-controls"
+META_SETS = (SET_BOTH, SET_AGENT_BOTH, SET_MATCHED_CONTROLS)
 
 
 def _parent_index_for(set_name: str) -> dict[str, list[CuratedProbe]]:
@@ -69,6 +71,8 @@ def _parent_index_for(set_name: str) -> dict[str, list[CuratedProbe]]:
         return hinted_parent_index()
     if set_name == SET_AGENT_BOTH:
         return agent_parent_index()
+    if set_name == SET_MATCHED_CONTROLS:
+        return control_parent_index()
     raise ValueError(f"not a meta-set: {set_name!r}")
 
 
@@ -102,6 +106,8 @@ def _study_for(set_name: str) -> str:
         return "hint"
     if set_name == SET_AGENT_BOTH:
         return "agent"
+    if set_name == SET_MATCHED_CONTROLS:
+        return "control"
     raise ValueError(f"not a meta-set: {set_name!r}")
 
 

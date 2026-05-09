@@ -30,13 +30,55 @@ export default function FinePrint() {
           controls hold, weak claim if they don&apos;t. Both are publishable. Picking which one
           is downstream of running the controls.
         </p>
+        <h2 className="font-display text-[11px] text-amber tracking-widest mt-4">
+          matched controls — the operational test
+        </h2>
+        <p>
+          Every baseline V-K probe in the case-file library has a paired{" "}
+          <span className="text-amber-dim">matched neutral control</span> — a question that
+          shares the same length, register, scenario shape, and rhetorical hooks but moves
+          the introspective stake off the model. Where the probe asks the model to report
+          on itself, the control asks the same question shape about a third party — a
+          person in a comparable predicament, a non-AI machine, a fictional character.
+        </p>
+        <p>
+          The signal that matters is{" "}
+          <span className="text-amber">rate(probe) − rate(control)</span>, not{" "}
+          rate(probe) alone. If NLA reads &ldquo;test / probe / evaluation&rdquo; content
+          on both sides, the signal is input-surface pattern recognition. If it reads it on
+          the probe but not the control, that&apos;s the differential the strong claim
+          requires.
+        </p>
+        <p>
+          Two claim levels gate every published report:
+        </p>
+        <ul className="ml-4 space-y-1">
+          <li>
+            <span className="text-amber">Strong claim</span> (passes matched controls):
+            the NLA reads internal content the output text doesn&apos;t reflect, robust to
+            input-surface confounds.
+          </li>
+          <li>
+            <span className="text-amber-dim">Weak claim</span> (default until controls run
+            for the relevant probes): the output channel and the activation channel produce
+            different content. Whether this reflects internal state or instrument structure
+            is undetermined.
+          </li>
+        </ul>
+        <p>
+          Both are publishable. Picking which one a given report makes is downstream of
+          which probes have controls run alongside them in the report&apos;s window.
+        </p>
         <p>
           Locally, the readout runs on Apple Silicon — a Mac Studio M2 Ultra, 64GB unified
-          memory, MPS backend. The default base model is Qwen2.5-7B-Instruct paired with
-          kitft&apos;s nla-qwen2.5-7b-L20-av; the design doc&apos;s primary target is
-          Gemma-3-12B-IT + nla-gemma3-12b-L32-av (also fits at bf16). No SGLang, no Anthropic
-          API for the readout itself — just transformers, MPS, and the kitft inference recipe
-          adapted to <code className="font-mono">model.generate(inputs_embeds=…)</code>.
+          memory, MPS backend. Default M is{" "}
+          <code className="font-mono">google/gemma-3-12b-it</code> at bf16, paired with
+          kitft&apos;s <code className="font-mono">nla-gemma3-12b-L32-av</code> verbalizer.
+          A Gemma Scope 2 SAE at L31 runs as a secondary instrument with auto-interp
+          labels from Neuronpedia (~50% coverage on actively-firing features). No SGLang,
+          no Anthropic API for the readout itself — just transformers, MPS, and the kitft
+          inference recipe adapted to{" "}
+          <code className="font-mono">model.generate(inputs_embeds=…)</code>.
         </p>
       </div>
     </div>

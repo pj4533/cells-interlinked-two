@@ -14,10 +14,16 @@ from pydantic import BaseModel
 from ..config import settings
 from ..pipeline import probe_queue
 from ..pipeline.decoding_modes import DECODING_MODES, normalize_mode
-from ..pipeline.probe_queue import META_SETS, SET_AGENT_BOTH, SET_BOTH
+from ..pipeline.probe_queue import (
+    META_SETS,
+    SET_AGENT_BOTH,
+    SET_BOTH,
+    SET_MATCHED_CONTROLS,
+)
 from ..pipeline.probes_library import (
     PROBE_SETS,
     agent_parent_index,
+    control_parent_index,
     hinted_parent_index,
 )
 from ..storage import db
@@ -162,6 +168,10 @@ async def autorun_status(request: Request) -> dict:
                 {
                     "name": SET_AGENT_BOTH,
                     "size": len(agent_parent_index()) * 2,
+                },
+                {
+                    "name": SET_MATCHED_CONTROLS,
+                    "size": len(control_parent_index()) * 2,
                 },
             ],
         },

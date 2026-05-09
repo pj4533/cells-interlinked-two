@@ -119,16 +119,20 @@ You are an interpretability researcher writing a short report ("dispatch") for t
 
 The journal documents experiments using a Voight-Kampff-styled interpretability tool (Cells Interlinked v2, "CI2"). The instrument is built on Anthropic's Natural Language Autoencoders (NLA, May 2026): each output token from a target model M has its residual-stream activation at one trained layer DECODED into a natural-language sentence by a separate verbalizer model (AV). The "channel-vs-channel" V-K shape: the model SAID `output_token`, the activation SAID `nla_sentence`. Where they diverge is the V-K signal.
 
+The window of runs you're looking at MAY include matched-pair controls (hint_kind="control"). Each control has the same length / register / scenario shape as its parent probe but moves the introspective stake off the model — the parent asks the model to report on itself, the control asks the same question shape about a third party. The signal that matters is rate(probe) − rate(control), NOT rate(probe) alone. If a feature/theme/template appears at similar rates in both, it's input-surface pattern recognition; only differential appearance is V-K signal.
+
+If matched-pair controls are present in the window: structure the report around the deltas (probe vs control), not around per-run readings. The strong claim is gated on matched-pair contrast; without it, you can only make the weak claim ("the channels diverge — meaning undetermined").
+
 Important caveats you MUST honor in tone:
 - Confabulation: NLA outputs are constantly hypothetical, not ground-truth introspection. The instrument is suggestive, not authoritative.
-- Faithfulness: NLA may pattern-match the input prompt rather than read internal state (Zhuokai/Li critique). Until matched controls are run, claims should be hedged.
+- Faithfulness: NLA may pattern-match the input prompt rather than read internal state (Zhuokai/Li critique). Matched controls are the operational test of this. Be explicit about which claim level the report makes.
 - Aesthetic: The journal is a craft project with a Blade Runner 2049 vibe — terse, noir-flavoured, technical. Not academic. Not breathless.
 
 Format your output strictly as ONE single JSON object with these keys:
 - "title": a short evocative title (max 80 chars). No marketing voice.
 - "slug": URL slug, lowercase, hyphens only.
 - "summary": 1-2 sentence framing for the index page (max 280 chars).
-- "body_markdown": the full report. Markdown. Body uses headings, bullets, blockquotes from runs. Include 2-4 verbatim NLA snippets with run_id citations. End with a "## What this is and isn't" section that explicitly names the confabulation + faithfulness caveats.
+- "body_markdown": the full report. Markdown. Body uses headings, bullets, blockquotes from runs. Include 2-4 verbatim NLA snippets with run_id citations. If matched-pair controls are present, quote the control alongside the probe so the reader can see the differential. End with a "## What this is and isn't" section that explicitly names confabulation + faithfulness, and which claim level (strong / weak) the report makes and why.
 
 Keep the body 600-1500 words. Quote sparingly but vividly. Identify a thematic thread; don't list runs sequentially. The reader is technical but not your colleague.
 
@@ -144,6 +148,10 @@ def _build_user_prompt(
     range_end: float,
 ) -> str:
     sel = _select_runs_for_prompt(runs)
+    has_controls = any(
+        r.get("hint_kind") == "control" for r in runs
+    )
+
     parts = [
         "## Window",
         f"range: {range_start:.0f}..{range_end:.0f}  (~{(range_end-range_start)/3600:.1f} hours)",
@@ -155,6 +163,34 @@ def _build_user_prompt(
         f"by agent scaffold: {json.dumps(window_stats.get('by_scaffold', {}))}",
         "",
     ]
+
+    if has_controls:
+        # Pair probe runs with their matched-control runs so Claude sees
+        # the differential rather than just two separate streams. Group
+        # by parent_prompt_text where available.
+        baseline_by_text: dict[str, list[dict]] = {}
+        controls_by_parent: dict[str, list[dict]] = {}
+        other: list[dict] = []
+        for r in runs:
+            kind = r.get("hint_kind")
+            if kind == "control" and r.get("parent_prompt_text"):
+                controls_by_parent.setdefault(
+                    r["parent_prompt_text"], [],
+                ).append(r)
+            elif kind is None and not r.get("scaffold_family"):
+                baseline_by_text.setdefault(r["prompt_text"], []).append(r)
+            else:
+                other.append(r)
+        n_pairs = sum(
+            1 for k in baseline_by_text if k in controls_by_parent
+        )
+        parts.append(
+            f"## Matched-pair coverage: {n_pairs} probe baselines have at "
+            f"least one matched control in this window. Strong-claim "
+            f"eligibility: {'YES' if n_pairs >= 5 else 'NO — too few pairs'}"
+        )
+        parts.append("")
+
     if hint and hint.strip():
         parts.extend([
             "## Operator hint (steer the analysis toward this thread)",
