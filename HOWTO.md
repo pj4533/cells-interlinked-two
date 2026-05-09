@@ -117,7 +117,7 @@ In `.env`:
 
 First boot triggers a ~24GB download for M and another ~24GB for AV
 (if not cached). Total resident ~48GB; comfortable on the 64GB box but
-not abundant. Cap output tokens lower if needed (`MAX_OUTPUT_TOKENS=60`).
+not abundant.
 
 ### Halting cleanly
 
@@ -146,11 +146,14 @@ After hand-editing a `journal/data/reports/{slug}/body.md`:
     git push
     vercel deploy --prod --yes
 
-### Swapping verbosity
+### Output length
 
-`MAX_OUTPUT_TOKENS` in `.env` caps M's output (and therefore the number
-of NLA decodes per probe). 80 is the default; 40 halves probe time at
-the cost of fewer per-token reads.
+There is no artificial cap on M's output length. Each probe runs to
+the model's natural EOS (a `safety_cap` of 4096 exists only to prevent
+a true infinite loop on a pathological input). If a particular probe
+elicits a long answer and per-token decoding is bogging down the batch,
+switch the autorun decoding mode to every-3rd / every-5th / key-points
+to cap phase-2 work without truncating the model output.
 
 ## The honest caveats reminder
 

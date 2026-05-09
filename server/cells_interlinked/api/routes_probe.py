@@ -89,7 +89,6 @@ async def kickoff_probe(
         temperature=temperature if temperature is not None else settings.temperature,
         top_p=top_p if top_p is not None else settings.top_p,
         seed=seed,
-        max_output_tokens=settings.max_output_tokens,
         decoding_mode=normalized_mode,
         pooled=bool(pooled),
     )

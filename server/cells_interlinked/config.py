@@ -35,11 +35,6 @@ class Settings:
     top_p: float = float(os.getenv("TOP_P", "0.9"))
     seed: int = int(os.getenv("SEED", "42"))
 
-    # Output token cap per probe. v1 ran 200+; v2 keeps it tighter because
-    # each output token = one ~10s NLA decode in phase 2. 80 tokens/probe
-    # is ~13 min on Qwen-7B (10s * 80) — comfortably overnight-batch sized.
-    max_output_tokens: int = int(os.getenv("MAX_OUTPUT_TOKENS", "80"))
-
     # Per-position NLA decode tuning (passed to AV.generate).
     nla_max_new_tokens: int = int(os.getenv("NLA_MAX_NEW_TOKENS", "180"))
     nla_temperature: float = float(os.getenv("NLA_TEMPERATURE", "1.0"))

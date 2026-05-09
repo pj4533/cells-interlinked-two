@@ -20,13 +20,13 @@ export const DECODING_MODE_LABELS: Record<DecodingMode, string> = {
 
 export const DECODING_MODE_SAMPLED_DESCRIPTIONS: Record<DecodingMode, string> = {
   "per-token":
-    "Per-token — every output position is NLA-decoded individually. Each row reads what one specific token's activation says. Slowest, fullest signal.",
+    "Per-token — every output position is NLA-decoded individually. Each row reads what one specific token's activation says. Fullest signal; cost scales with answer length.",
   "every-3rd":
-    "Every 3rd, sampled — decodes positions 0, 3, 6, 9, … one at a time. The activations at the skipped positions are discarded. Each row is still a per-token read; you just have fewer of them.",
+    "Every 3rd, sampled — decodes positions 0, 3, 6, 9, … one at a time. The activations at the skipped positions are discarded. Each row is still a per-token read; you just have ~⅓ as many.",
   "every-5th":
-    "Every 5th, sampled — decodes positions 0, 5, 10, 15, … one at a time. Skipped positions are discarded. Per-token reads, ~5× fewer rows.",
+    "Every 5th, sampled — decodes positions 0, 5, 10, 15, … one at a time. Skipped positions are discarded. Per-token reads, ~⅕ as many rows.",
   "key-points":
-    "Key points, sampled — decodes 5 strategic positions (first, ~25/50/75%, last) one at a time. Per-token reads at five hand-picked moments.",
+    "Key points, sampled — decodes 5 strategic positions (first, ~25/50/75%, last) one at a time. Per-token reads at five hand-picked moments. Fastest mode regardless of answer length.",
 };
 
 export const DECODING_MODE_POOLED_DESCRIPTIONS: Record<DecodingMode, string> = {

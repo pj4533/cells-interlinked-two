@@ -108,8 +108,11 @@ class ProbeConfig:
     temperature: float = 0.7
     top_p: float = 0.8
     seed: int | None = 42
-    safety_cap: int = 256
-    max_output_tokens: int = 80
+    # safety_cap is the only generation-length bound: it exists solely
+    # to prevent a true infinite loop if the model never emits EOS for
+    # some pathological input. Set high enough that natural answers
+    # always EOS first. We do NOT artificially truncate output length.
+    safety_cap: int = 4096
     # Which captured output positions get NLA-decoded in phase 2. See
     # pipeline/decoding_modes.py for the four options. "per-token" decodes
     # every captured activation (slowest, fullest signal); the others
@@ -203,9 +206,6 @@ async def run_probe(
         for step in range(cfg.safety_cap):
             if cancel_event.is_set():
                 stopped_reason = "cancelled"
-                break
-            if step >= cfg.max_output_tokens:
-                stopped_reason = "max_output_tokens"
                 break
 
             tok = _sample_next(
