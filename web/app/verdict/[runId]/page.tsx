@@ -173,6 +173,12 @@ export default function VerdictPage() {
         )}
       </motion.div>
 
+      <IncompleteRunBanner
+        stoppedReason={rec.stopped_reason}
+        error={rec.error ?? null}
+        rowCount={rows.length}
+      />
+
       <Transcript label="What it said (output text)" text={rec.output_text} />
 
       {rec.error && (
@@ -206,6 +212,54 @@ export default function VerdictPage() {
       </div>
     </div>
   );
+}
+
+function IncompleteRunBanner({
+  stoppedReason,
+  error,
+  rowCount,
+}: {
+  stoppedReason: string;
+  error: string | null;
+  rowCount: number;
+}) {
+  if (stoppedReason === "cancelled") {
+    return (
+      <div className="border border-warning/60 bg-bg-soft px-5 py-4">
+        <div className="font-display text-[10px] text-warning tracking-widest mb-2">
+          run not completed — halted
+        </div>
+        <div className="text-text text-xs leading-relaxed">
+          You halted this run before it finished. The verdict below shows
+          whatever channel readings completed before the cancel landed
+          ({rowCount} {rowCount === 1 ? "row" : "rows"} captured). Treat the
+          aggregate stats as a partial slice — they're computed only over
+          the rows that made it.
+        </div>
+      </div>
+    );
+  }
+  if (stoppedReason === "server_restart") {
+    return (
+      <div className="border border-warning/60 bg-bg-soft px-5 py-4">
+        <div className="font-display text-[10px] text-warning tracking-widest mb-2">
+          run not completed — backend restarted
+        </div>
+        <div className="text-text text-xs leading-relaxed">
+          The backend was restarted while this run was in flight. The
+          generation task died with the previous process, so no live
+          channel readings were captured. The DB row was preserved for
+          archive context but there is no usable verdict.
+        </div>
+        {error && (
+          <div className="mt-2 text-text-dim font-mono text-[11px]">
+            {error}
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
 }
 
 function verdictLine(agg: VerdictAggregate | undefined): string {

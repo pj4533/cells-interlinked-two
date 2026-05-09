@@ -224,7 +224,11 @@ export const useRun = create<RunState & Actions>((set) => ({
         return;
       }
       case "stopped": {
-        set({ stoppedReason: evt.reason, isRunning: false });
+        // "stopped" is the end of phase 1 (M generation), NOT the end
+        // of the run — phase 2 (NLA decoding) follows. Keep isRunning
+        // true so the Halt button stays visible during decoding; only
+        // the "done" event marks the run truly finished.
+        set({ stoppedReason: evt.reason });
         return;
       }
       case "done": {

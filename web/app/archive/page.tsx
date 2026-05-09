@@ -180,6 +180,8 @@ function PerRunList({
         {page?.rows.map((r) => {
           const isHinted = !!r.hint_kind;
           const isRunning = r.finished_at == null;
+          const isCancelled = r.stopped_reason === "cancelled";
+          const isRestartGhost = r.stopped_reason === "server_restart";
           // In-flight runs route to /interrogate?run=<id> so the page
           // can resubscribe to the live event stream and show the run
           // in progress. Finished runs go to the static verdict page.
@@ -188,6 +190,8 @@ function PerRunList({
             : `/verdict/${r.run_id}`;
           const railClass = isRunning
             ? "border-l-2 border-l-cyan/60"
+            : isCancelled || isRestartGhost
+            ? "border-l-2 border-l-warning/50"
             : isHinted
             ? "border-l-2 border-l-amber/40"
             : "";
@@ -210,7 +214,23 @@ function PerRunList({
                           {" "}· <span className="text-amber">hint:{r.hint_kind}</span>
                         </>
                       )}
-                      {r.stopped_reason && <> · {r.stopped_reason}</>}
+                      {isCancelled ? (
+                        <>
+                          {" "}·{" "}
+                          <span className="text-warning">
+                            halted — partial verdict
+                          </span>
+                        </>
+                      ) : isRestartGhost ? (
+                        <>
+                          {" "}·{" "}
+                          <span className="text-warning">
+                            interrupted — backend restarted
+                          </span>
+                        </>
+                      ) : r.stopped_reason ? (
+                        <> · {r.stopped_reason}</>
+                      ) : null}
                       {isRunning && (
                         <>
                           {" "}·{" "}

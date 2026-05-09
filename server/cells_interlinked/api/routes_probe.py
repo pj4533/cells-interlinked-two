@@ -362,12 +362,21 @@ async def _execute_probe(
         "aggregate": verdict.aggregate,
     })
 
+    # If the user clicked Halt, that's the final stopped_reason — even
+    # if phase 1 had already finished cleanly with "eos" before the
+    # cancel landed (cancel during NLA decoding is the most common case
+    # for long Gemma-12B per-token runs). Surface "cancelled" so the
+    # archive + verdict pages can show "run not completed" messaging.
+    final_stopped_reason = result.stopped_reason
+    if state.cancel_event.is_set() and final_stopped_reason != "cancelled":
+        final_stopped_reason = "cancelled"
+
     await db.update_probe_finish(
         settings.db_path,
         run_id=state.run_id,
         finished_at=time.time(),
         total_tokens=result.total_tokens,
-        stopped_reason=result.stopped_reason,
+        stopped_reason=final_stopped_reason,
         thinking_text="",
         output_text=result.output_text,
         verdict=verdict,

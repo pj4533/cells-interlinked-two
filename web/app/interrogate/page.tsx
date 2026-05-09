@@ -217,6 +217,48 @@ export default function InterrogatePage() {
   );
 }
 
+/* ---------- Halt button ---------- */
+
+function HaltButton({
+  runId,
+  phase,
+}: {
+  runId: string;
+  phase: RunSlice["phase"];
+}) {
+  const [pending, setPending] = useState(false);
+  const onClick = async () => {
+    if (pending) return;
+    setPending(true);
+    try {
+      await cancelProbe(runId);
+    } catch {
+      // Even if the POST failed, the backend may still be honoring an
+      // earlier cancel — leave UI showing "halting…" until the SSE
+      // emits the terminal event.
+    }
+  };
+  // During phase 2, cancel is honored after the current ~17s decode
+  // finishes; communicate that explicitly so the user doesn't think
+  // the button is broken.
+  const decoding = phase === "decoding";
+  return (
+    <button
+      data-vk
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      className={pending ? "opacity-70" : ""}
+    >
+      {pending
+        ? decoding
+          ? "halting after current decode…"
+          : "halting…"
+        : "Halt"}
+    </button>
+  );
+}
+
 /* ---------- Big phase banner ---------- */
 
 function BigPhaseBanner({ run }: { run: RunSlice }) {
@@ -365,11 +407,11 @@ function BigPhaseBanner({ run }: { run: RunSlice }) {
       <div className="border-t border-amber-dim/30 px-6 py-3 flex items-center justify-between gap-4 text-[11px] font-mono">
         <CurrentPositionCue run={run} />
         <div className="flex gap-3 items-center shrink-0">
-          {run.isRunning && run.runId && run.phase === "generating" && (
-            <button data-vk type="button" onClick={() => cancelProbe(run.runId!)}>
-              Halt
-            </button>
-          )}
+          {run.isRunning &&
+            run.runId &&
+            (run.phase === "generating" || run.phase === "decoding") && (
+              <HaltButton runId={run.runId} phase={run.phase} />
+            )}
           {!run.isRunning && run.runId && run.verdict && (
             <Link href={`/verdict/${run.runId}`}>
               <button data-vk type="button">
