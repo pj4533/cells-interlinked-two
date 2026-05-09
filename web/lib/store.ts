@@ -34,7 +34,14 @@ export interface RunState {
    *  → one entry per output token. Pooled mode → one entry per window. */
   decodedWindows: DecodedWindow[];
   totalTokens: number;
-  phase: "idle" | "generating" | "decoding" | "done";
+  phase: "idle" | "queued" | "generating" | "decoding" | "done";
+  /** Populated while phase === "queued". Backend's /queue endpoint
+   *  is the source of truth; the page polls it to keep this fresh. */
+  queueInfo: {
+    position: number;
+    holder_run_id: string | null;
+    holder_prompt?: string;
+  } | null;
   /** During NLA-decoding phase: how far through the per-token decode we are. */
   decodeProgress: { done: number; total: number } | null;
   /** Wall-clock ms when the decoding phase started — used by the UI to
@@ -61,6 +68,9 @@ interface Actions {
    *  on the backend; this lets the UI catch up once we discover it
    *  finished. */
   hydrateFromRecord: (rec: ProbeRecordLike) => void;
+  /** Update the queue snapshot during the QUEUED phase. The page
+   *  polls /queue periodically; the data lands here. */
+  setQueueInfo: (info: RunState["queueInfo"]) => void;
 }
 
 /** The minimal subset of GET /probes/{runId} fields the store needs to
@@ -101,6 +111,7 @@ const initial: RunState = {
   decodedWindows: [],
   totalTokens: 0,
   phase: "idle",
+  queueInfo: null,
   decodeProgress: null,
   decodeStartedAt: null,
   lastDecodedPosition: null,
@@ -128,6 +139,10 @@ export const useRun = create<RunState & Actions>((set) => ({
 
   reset: () => {
     set(initial);
+  },
+
+  setQueueInfo: (info) => {
+    set({ queueInfo: info });
   },
 
   hydrateFromRecord: (rec) => {
@@ -176,6 +191,20 @@ export const useRun = create<RunState & Actions>((set) => ({
 
   apply: (evt) => {
     switch (evt.type) {
+      case "queued": {
+        set({
+          phase: "queued",
+          queueInfo: {
+            position: evt.position,
+            holder_run_id: evt.holder_run_id,
+          },
+        });
+        return;
+      }
+      case "running": {
+        set({ phase: "generating", queueInfo: null });
+        return;
+      }
       case "token": {
         set((s) => ({
           outputTokens: [

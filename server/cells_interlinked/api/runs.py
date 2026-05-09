@@ -6,12 +6,19 @@ each tracking its own position. New subscribers replay the full backlog
 before tailing the live stream — so a user who navigates away mid-run
 and returns gets the complete picture, not just the events emitted after
 they reconnect.
+
+The registry also exposes a fair, queue-tracked acquire() context
+manager — only one probe holds compute at a time (MPS is one device),
+but the registry tells callers their position in the queue so the UI
+can surface "queued behind run X — position 2" instead of sitting
+silently while another probe runs.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 
@@ -80,9 +87,18 @@ class RunState:
 
 
 class RunRegistry:
+    """One probe's compute at a time. MPS is one device — two concurrent
+    `model.generate()` calls just slice the GPU and finish in 2× the
+    wall-clock with no throughput gain. So we serialize via a lock, but
+    track the queue (current holder + ordered waiters) so the UI can
+    surface "queued behind run X" instead of looking frozen.
+    """
+
     def __init__(self) -> None:
         self._runs: dict[str, RunState] = {}
-        self._lock = asyncio.Lock()  # serializes generation; one model, one stream
+        self._lock = asyncio.Lock()
+        self._holder: str | None = None
+        self._waiters: list[str] = []
 
     def add(self, run: RunState) -> None:
         self._runs[run.run_id] = run
@@ -95,4 +111,52 @@ class RunRegistry:
 
     @property
     def lock(self) -> asyncio.Lock:
+        # Backward-compat raw access; new code should prefer acquire().
         return self._lock
+
+    @property
+    def holder_run_id(self) -> str | None:
+        return self._holder
+
+    @property
+    def waiters(self) -> list[str]:
+        return list(self._waiters)
+
+    def position_of(self, run_id: str) -> int | None:
+        """0 = currently holding the lock; 1 = next up; None = not queued."""
+        if self._holder == run_id:
+            return 0
+        if run_id in self._waiters:
+            return self._waiters.index(run_id) + 1
+        return None
+
+    @asynccontextmanager
+    async def acquire(self, run_id: str) -> AsyncIterator[None]:
+        """Fair-FIFO acquire of the compute lock. Tracks queue position
+        so observers can poll for "where am I in line?". If the awaiting
+        coroutine is cancelled while in the queue, cleans up the waiters
+        list before re-raising."""
+        self._waiters.append(run_id)
+        try:
+            await self._lock.acquire()
+        except BaseException:
+            if run_id in self._waiters:
+                self._waiters.remove(run_id)
+            raise
+        # Lock owned. Promote ourselves out of the waiters list and into
+        # the holder slot.
+        try:
+            if run_id in self._waiters:
+                self._waiters.remove(run_id)
+            self._holder = run_id
+            yield
+        finally:
+            self._holder = None
+            self._lock.release()
+
+    def snapshot(self) -> dict:
+        return {
+            "holder_run_id": self._holder,
+            "waiters": list(self._waiters),
+            "waiters_count": len(self._waiters),
+        }

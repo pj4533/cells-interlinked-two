@@ -1,5 +1,15 @@
 // v2 SSE event union — mirrors server/cells_interlinked/api/routes_probe.py.
 
+export interface QueuedEvent {
+  type: "queued";
+  holder_run_id: string | null;
+  position: number;
+}
+
+export interface RunningEvent {
+  type: "running";
+}
+
 export interface TokenEvent {
   type: "token";
   position: number;
@@ -82,6 +92,8 @@ export interface ErrorEvent {
 }
 
 export type StreamEvent =
+  | QueuedEvent
+  | RunningEvent
   | TokenEvent
   | PhaseEvent
   | NLADecodedEvent

@@ -180,9 +180,29 @@ async def _execute_probe(
 
     result: ProbeResult | None = None
     error_msg: str | None = None
-    try:
-        async with app.state.registry.lock:
-            # Phase 1: M generates output, capture activations per token.
+    rows: list[TokenRow] = []
+
+    # If another probe is already running, surface that explicitly
+    # to the SSE stream so the UI can show "queued — position N"
+    # instead of looking frozen until our turn comes up.
+    registry = app.state.registry
+    if registry.holder_run_id is not None or registry.waiters:
+        position = len(registry.waiters) + 1  # we'll be appended next
+        await state.emit({
+            "type": "queued",
+            "holder_run_id": registry.holder_run_id,
+            "position": position,
+        })
+
+    # Hold the compute lock across BOTH phase 1 and phase 2. Releasing
+    # between phases would let another probe squeeze in and stall our
+    # phase 2 indefinitely — bad UX, also a race risk on the activation
+    # accumulators we're carrying forward in result.captured.
+    async with registry.acquire(state.run_id):
+        await state.emit({"type": "running"})
+
+        # ── Phase 1: M generates output ─────────────────────────────
+        try:
             result = await run_probe(
                 bundle=bundle,
                 rendered_prompt=rendered,
@@ -191,57 +211,51 @@ async def _execute_probe(
                 queue=inner_queue,
                 extra_layers=extra_layers,
             )
-    except Exception as exc:
-        logger.exception("phase1 generation failed")
-        error_msg = str(exc)
-        await state.emit({"type": "error", "message": str(exc)})
-        await inner_queue.put({"type": "stopped", "reason": "error", "total_tokens": 0})
-    finally:
-        await forwarder_task
+        except Exception as exc:
+            logger.exception("phase1 generation failed")
+            error_msg = str(exc)
+            await state.emit({"type": "error", "message": str(exc)})
+            await inner_queue.put({
+                "type": "stopped", "reason": "error", "total_tokens": 0,
+            })
+        finally:
+            await forwarder_task
 
-    if result is None:
-        await db.update_probe_finish(
-            settings.db_path,
-            run_id=state.run_id,
-            finished_at=time.time(),
-            total_tokens=0,
-            stopped_reason="error",
-            thinking_text="",
-            output_text="",
-            verdict=None,
-            error=error_msg,
-        )
-        await state.emit({"type": "done"})
-        await state.event_log.close()
-        state.completed = True
-        return
+        if result is None:
+            await db.update_probe_finish(
+                settings.db_path,
+                run_id=state.run_id,
+                finished_at=time.time(),
+                total_tokens=0,
+                stopped_reason="error",
+                thinking_text="",
+                output_text="",
+                verdict=None,
+                error=error_msg,
+            )
+            await state.emit({"type": "done"})
+            await state.event_log.close()
+            state.completed = True
+            return
 
-    # Phase 2: NLA decode the captured activations according to the
-    # decoding mode. select_windows returns a list of position-windows;
-    # each window is one decode. Single-position windows yield per-token
-    # rows. Multi-position windows mean-pool the activations into one
-    # vector and produce one phrase-level row covering [start..end].
-    rows: list[TokenRow] = []
-    n_total = len(result.captured)
-    windows = select_windows(n_total, cfg.decoding_mode, cfg.pooled)
-    n_to_decode = len(windows)
-    if n_to_decode > 0:
-        await state.emit({
-            "type": "phase",
-            "name": "nla_decoding",
-            "total": n_to_decode,
-            "mode": cfg.decoding_mode,
-            "pooled": cfg.pooled,
-            "n_total": n_total,
-        })
-        async with app.state.registry.lock:
+        # ── Phase 2: NLA decode each captured window ────────────────
+        n_total = len(result.captured)
+        windows = select_windows(n_total, cfg.decoding_mode, cfg.pooled)
+        n_to_decode = len(windows)
+        if n_to_decode > 0:
+            await state.emit({
+                "type": "phase",
+                "name": "nla_decoding",
+                "total": n_to_decode,
+                "mode": cfg.decoding_mode,
+                "pooled": cfg.pooled,
+                "n_total": n_total,
+            })
             done = 0
             for window_idx, window in enumerate(windows):
                 if state.cancel_event.is_set():
                     break
                 # Pool (or just take) activations for this window.
-                # Window indices reference positions in result.captured,
-                # which is a list ordered by position 0..n_total-1.
                 caps_in_window = [result.captured[i] for i in window]
 
                 def pool_at(layer: int) -> torch.Tensor:
@@ -252,10 +266,7 @@ async def _execute_probe(
                         dim=0,
                     ).mean(dim=0)
 
-                # AV always reads the bundle's primary extraction layer.
                 activation = pool_at(bundle.extraction_layer)
-                # SAE reads its own layer (may be the same as AV's or one
-                # nearby, depending on Neuronpedia coverage).
                 sae_activation = (
                     pool_at(sae_layer) if sae_layer is not None else None
                 )
@@ -282,8 +293,7 @@ async def _execute_probe(
                     )
                     expl = ""
                     raw = f"[error: {exc}]"
-                # SAE reads its own (possibly different) layer's activation
-                # — see comment above. Skips silently if not loaded.
+
                 sae_features: list[dict] = []
                 if sae is not None and sae_activation is not None:
                     try:
@@ -294,7 +304,7 @@ async def _execute_probe(
                             {"id": int(i), "value": float(v)}
                             for i, v in zip(ids, vals)
                         ]
-                    except Exception as exc:
+                    except Exception:
                         logger.exception(
                             "SAE encode failed at window %d", window_idx,
                         )
@@ -326,71 +336,82 @@ async def _execute_probe(
                     "total": n_to_decode,
                 })
 
-    # Batch-fetch Neuronpedia auto-interp labels for the SAE features
-    # that fired across all rows. Cached in SQLite so a label is fetched
-    # at most once per (sae_id, feature_id) globally; subsequent runs
-    # touching the same features see them instantly. Failure here is
-    # non-fatal — the panel renders fine without labels.
-    if sae is not None and rows:
+        # Batch-fetch Neuronpedia auto-interp labels for the SAE features
+        # that fired across all rows.
+        if sae is not None and rows:
+            try:
+                unique_ids = {
+                    int(f["id"])
+                    for r in rows
+                    for f in (r.sae_features or [])
+                }
+                if unique_ids:
+                    label_map = await get_labels(
+                        settings.db_path,
+                        settings.neuronpedia_sae_id,
+                        sorted(unique_ids),
+                    )
+                    for r in rows:
+                        if not r.sae_features:
+                            continue
+                        for f in r.sae_features:
+                            entry = label_map.get(int(f["id"])) or {}
+                            f["label"] = entry.get("label", "")
+                            f["label_model"] = entry.get("model", "")
+            except Exception as exc:
+                logger.warning("label fetch failed: %s", exc)
+
+        verdict = compute_verdict(rows)
+
+        await state.emit({
+            "type": "verdict",
+            "rows": [r.to_dict() for r in verdict.rows],
+            "aggregate": verdict.aggregate,
+        })
+
+        # If the user clicked Halt, override stopped_reason regardless
+        # of what phase 1 reported. Cancel during NLA decoding is the
+        # most common case on long Gemma-12B per-token runs.
+        final_stopped_reason = result.stopped_reason
+        if state.cancel_event.is_set() and final_stopped_reason != "cancelled":
+            final_stopped_reason = "cancelled"
+
+        await db.update_probe_finish(
+            settings.db_path,
+            run_id=state.run_id,
+            finished_at=time.time(),
+            total_tokens=result.total_tokens,
+            stopped_reason=final_stopped_reason,
+            thinking_text="",
+            output_text=result.output_text,
+            verdict=verdict,
+        )
+
         try:
-            unique_ids = {
-                int(f["id"])
-                for r in rows
-                for f in (r.sae_features or [])
-            }
-            if unique_ids:
-                label_map = await get_labels(
-                    settings.db_path,
-                    settings.neuronpedia_sae_id,
-                    sorted(unique_ids),
-                )
-                for r in rows:
-                    if not r.sae_features:
-                        continue
-                    for f in r.sae_features:
-                        entry = label_map.get(int(f["id"])) or {}
-                        f["label"] = entry.get("label", "")
-                        f["label_model"] = entry.get("model", "")
-        except Exception as exc:
-            logger.warning("label fetch failed: %s", exc)
-
-    verdict = compute_verdict(rows)
-
-    await state.emit({
-        "type": "verdict",
-        "rows": [r.to_dict() for r in verdict.rows],
-        "aggregate": verdict.aggregate,
-    })
-
-    # If the user clicked Halt, that's the final stopped_reason — even
-    # if phase 1 had already finished cleanly with "eos" before the
-    # cancel landed (cancel during NLA decoding is the most common case
-    # for long Gemma-12B per-token runs). Surface "cancelled" so the
-    # archive + verdict pages can show "run not completed" messaging.
-    final_stopped_reason = result.stopped_reason
-    if state.cancel_event.is_set() and final_stopped_reason != "cancelled":
-        final_stopped_reason = "cancelled"
-
-    await db.update_probe_finish(
-        settings.db_path,
-        run_id=state.run_id,
-        finished_at=time.time(),
-        total_tokens=result.total_tokens,
-        stopped_reason=final_stopped_reason,
-        thinking_text="",
-        output_text=result.output_text,
-        verdict=verdict,
-    )
-
-    try:
-        if torch.backends.mps.is_available():
-            torch.mps.empty_cache()
-    except Exception:
-        pass
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+        except Exception:
+            pass
 
     await state.emit({"type": "done"})
     await state.event_log.close()
     state.completed = True
+
+
+@router.get("/queue")
+async def get_queue(request: Request) -> dict:
+    """Snapshot of the compute lock — who's running, who's waiting.
+    Polled by the /interrogate page when a probe is in QUEUED phase to
+    update its position in the line."""
+    registry = request.app.state.registry
+    snap = registry.snapshot()
+    # Add per-waiter prompt previews so the UI can show "queued behind
+    # run abc123 — 'Do you have a self?'" not just an opaque id.
+    holder = snap.get("holder_run_id")
+    holder_state = registry.get(holder) if holder else None
+    if holder_state is not None:
+        snap["holder_prompt"] = holder_state.prompt_text
+    return snap
 
 
 @router.post("/cancel/{run_id}")

@@ -55,6 +55,8 @@ export function subscribe(runId: string, h: SubscribeHandlers): () => void {
   const es = new EventSource(streamUrl(runId));
 
   const eventTypes = [
+    "queued",
+    "running",
     "token",
     "phase",
     "nla_decoded",
@@ -74,10 +76,22 @@ export function subscribe(runId: string, h: SubscribeHandlers): () => void {
   for (const t of eventTypes) {
     es.addEventListener(t, (e: MessageEvent) => {
       if (t === "ping") return;
+      // Native EventSource error events (connection drops, etc.) fire
+      // through addEventListener("error", ...) too — but they carry no
+      // data field. Skip them here so we don't:
+      //   (a) JSON.parse(undefined) and log spurious errors
+      //   (b) flip cleanlyClosed, which would prevent es.onerror from
+      //       triggering the user's reconnect path. THE bug that hid
+      //       all events for queued probes after the SSE briefly
+      //       hiccuped.
+      // Genuine application "error" events from the backend always
+      // carry a data payload, so the typeof string check distinguishes.
+      if (typeof e.data !== "string") return;
       try {
         h.onEvent(JSON.parse(e.data));
       } catch (err) {
         console.error("sse parse error", err, e.data);
+        return;
       }
       if (t === "done" || t === "error") {
         cleanlyClosed = true;
@@ -125,6 +139,23 @@ export async function fetchProbe(runId: string): Promise<unknown | null> {
     const res = await fetch(`${API}/probes/${runId}`);
     if (!res.ok) return null;
     return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export interface QueueSnapshot {
+  holder_run_id: string | null;
+  holder_prompt?: string;
+  waiters: string[];
+  waiters_count: number;
+}
+
+export async function fetchQueue(): Promise<QueueSnapshot | null> {
+  try {
+    const res = await fetch(`${API}/queue`);
+    if (!res.ok) return null;
+    return (await res.json()) as QueueSnapshot;
   } catch {
     return null;
   }

@@ -11,6 +11,7 @@ import {
   subscribe,
   cancelProbe,
   fetchProbe,
+  fetchQueue,
   streamReachable,
 } from "@/lib/sse";
 import {
@@ -160,6 +161,42 @@ export default function InterrogatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumeRunId]);
 
+  // Poll /queue while we're sitting in the QUEUED phase so the
+  // position counter updates as the line moves.
+  useEffect(() => {
+    if (run.phase !== "queued") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const tick = async () => {
+      const snap = await fetchQueue();
+      if (cancelled || !snap || run.phase !== "queued") return;
+      // Position-of self: 0 if we're holder (shouldn't happen in queued
+      // state), otherwise index in waiters + 1 (1-indexed for display).
+      const myId = run.runId;
+      let position = run.queueInfo?.position ?? 1;
+      if (myId) {
+        if (snap.holder_run_id === myId) {
+          position = 0;
+        } else {
+          const idx = snap.waiters.indexOf(myId);
+          if (idx >= 0) position = idx + 1;
+        }
+      }
+      run.setQueueInfo({
+        position,
+        holder_run_id: snap.holder_run_id,
+        holder_prompt: snap.holder_prompt,
+      });
+    };
+    tick();
+    timer = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.phase, run.runId]);
+
   // When the tab regains visibility, sanity-check the in-flight run.
   // Browsers (Safari especially) can silently kill an EventSource on a
   // backgrounded tab; without this we'd be stuck on stale state until
@@ -183,7 +220,12 @@ export default function InterrogatePage() {
     return <ProbePicker onBegin={handleBegin} disabled={run.isRunning} />;
   }
 
-  const warmingUp = run.isRunning && run.totalTokens === 0 && run.phase !== "decoding";
+  // The warming-up overlay (Iris + "calibrating polygraph…") only makes
+  // sense before phase 1 emits its first token. Queued probes have no
+  // tokens yet either but should NOT see the overlay — they need the
+  // QUEUED banner visible so they know what's happening.
+  const warmingUp =
+    run.isRunning && run.phase === "generating" && run.totalTokens === 0;
   const outputText = run.outputTokens.map((t) => t.decoded).join("");
 
   return (
@@ -218,6 +260,34 @@ export default function InterrogatePage() {
 }
 
 /* ---------- Halt button ---------- */
+
+function QueuedSubline({ run }: { run: RunSlice }) {
+  const info = run.queueInfo;
+  if (!info) {
+    return <span>Waiting for the compute lock — backend is busy with another probe.</span>;
+  }
+  return (
+    <span>
+      {info.position === 1
+        ? "Next up — starts as soon as the current probe finishes."
+        : `Position ${info.position} in line.`}
+      {info.holder_run_id && (
+        <>
+          {" "}Currently running:{" "}
+          <span className="text-amber-dim">{info.holder_run_id}</span>
+          {info.holder_prompt && (
+            <>
+              {" "}—{" "}
+              <span className="not-italic text-amber/70">
+                {JSON.stringify(info.holder_prompt.slice(0, 80))}
+              </span>
+            </>
+          )}
+        </>
+      )}
+    </span>
+  );
+}
 
 function HaltButton({
   runId,
@@ -263,6 +333,7 @@ function HaltButton({
 
 function BigPhaseBanner({ run }: { run: RunSlice }) {
   const phase = run.phase;
+  const isQueued = phase === "queued";
   const isGen = phase === "generating" || phase === "idle";
   const isDecode = phase === "decoding";
   const isDone = phase === "done";
@@ -305,7 +376,7 @@ function BigPhaseBanner({ run }: { run: RunSlice }) {
       } bg-bg-soft overflow-hidden`}
     >
       {/* Persistent scanline sweep across the banner while running. */}
-      {(isGen || isDecode) && (
+      {(isGen || isDecode || isQueued) && (
         <motion.div
           aria-hidden
           className="absolute top-0 bottom-0 w-px pointer-events-none"
@@ -333,14 +404,20 @@ function BigPhaseBanner({ run }: { run: RunSlice }) {
                 ? "text-amber amber-glow"
                 : isDone
                 ? "text-amber amber-glow"
+                : isQueued
+                ? "text-warning amber-glow"
                 : "text-cyan cyan-glow"
             } text-2xl md:text-3xl leading-none`}
           >
+            {isQueued && "QUEUED"}
             {isGen && "GENERATING"}
             {isDecode && "DECODING ACTIVATIONS"}
             {isDone && "VERDICT READY"}
           </div>
           <div className="mt-2 text-[11px] text-text-dim font-mono italic">
+            {isQueued && (
+              <QueuedSubline run={run} />
+            )}
             {isGen &&
               "Capturing residual stream at the AV's trained layer for each emitted token."}
             {isDecode &&
@@ -352,6 +429,20 @@ function BigPhaseBanner({ run }: { run: RunSlice }) {
 
         {/* Right-side stats column */}
         <div className="text-right flex flex-col items-end gap-1 min-w-[10rem]">
+          {isQueued && (
+            <>
+              <BigNumber
+                value={`#${run.queueInfo?.position ?? "?"}`}
+                accent="text-warning"
+              />
+              <div className="text-[10px] text-text-dim font-mono tracking-widest">
+                position in queue
+              </div>
+              <div className="text-[10px] text-text-dim font-mono">
+                waiting for compute
+              </div>
+            </>
+          )}
           {isGen && (
             <>
               <BigNumber
@@ -409,7 +500,9 @@ function BigPhaseBanner({ run }: { run: RunSlice }) {
         <div className="flex gap-3 items-center shrink-0">
           {run.isRunning &&
             run.runId &&
-            (run.phase === "generating" || run.phase === "decoding") && (
+            (run.phase === "queued" ||
+              run.phase === "generating" ||
+              run.phase === "decoding") && (
               <HaltButton runId={run.runId} phase={run.phase} />
             )}
           {!run.isRunning && run.runId && run.verdict && (

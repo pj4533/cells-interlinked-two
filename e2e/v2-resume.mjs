@@ -141,4 +141,6 @@ if (errors.length) {
 }
 
 await browser.close();
+// Clean up so subsequent tests don't queue behind our long-running probe.
+await fetch(`${API}/cancel/${runId}`, { method: "POST" }).catch(() => {});
 log("PASS — resume from /archive routes to /interrogate?run= and replays backlog");
