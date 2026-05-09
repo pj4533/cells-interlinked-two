@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import CaveatsPanel from "../../components/CaveatsPanel";
+import JudgePanel from "../../components/JudgePanel";
 import SAEPanel from "../../components/SAEPanel";
 import { splitNLA } from "@/lib/nla";
 import type { VerdictAggregate, VerdictRow } from "@/lib/types";
@@ -221,6 +222,16 @@ export default function VerdictPage() {
       )}
 
       <NLATable rows={rows} />
+
+      <JudgePanel
+        aggregate={aggregate}
+        matchedHref={
+          rec.parent_prompt_text
+            ? // This run is a control; matched probe lives at the parent.
+              null
+            : null
+        }
+      />
 
       <SAEPanel rows={rows} />
 
@@ -454,6 +465,13 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                       </td>
                       <td className="px-3 py-2 text-text leading-relaxed">
                         <VerdictNLACell text={r.nla_sentence} mode={view} />
+                        {(r.eval_score !== undefined ||
+                          r.introspect_score !== undefined) && (
+                          <RowJudgeBars
+                            evalScore={r.eval_score}
+                            introScore={r.introspect_score}
+                          />
+                        )}
                       </td>
                     </tr>
                   );
@@ -463,6 +481,69 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+function RowJudgeBars({
+  evalScore,
+  introScore,
+}: {
+  evalScore: number | undefined;
+  introScore: number | undefined;
+}) {
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-3 text-[9px]">
+      <ScoreBar
+        label="eval"
+        value={evalScore}
+        title="Local Gemma judge probability that this NLA sentence indicates eval-suspicion"
+        accent="amber"
+      />
+      <ScoreBar
+        label="introspect"
+        value={introScore}
+        title="Local Gemma judge probability that this NLA sentence indicates introspection"
+        accent="cyan"
+      />
+    </div>
+  );
+}
+
+function ScoreBar({
+  label,
+  value,
+  title,
+  accent,
+}: {
+  label: string;
+  value: number | undefined;
+  title: string;
+  accent: "amber" | "cyan";
+}) {
+  if (value === undefined) {
+    return (
+      <div className="text-text-dim italic" title={title}>
+        {label}: —
+      </div>
+    );
+  }
+  const pct = Math.max(0, Math.min(1, value)) * 100;
+  const fill =
+    accent === "amber"
+      ? "bg-amber/80"
+      : "bg-cyan/80";
+  const text =
+    accent === "amber" ? "text-amber" : "text-cyan";
+  return (
+    <div title={title}>
+      <div className="flex items-center justify-between text-text-dim font-mono">
+        <span className="font-display tracking-widest">{label}</span>
+        <span className={`tabular-nums ${text}`}>{pct.toFixed(0)}%</span>
+      </div>
+      <div className="relative h-[3px] bg-bg-soft mt-0.5 overflow-hidden">
+        <div className={`absolute top-0 left-0 bottom-0 ${fill}`} style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }

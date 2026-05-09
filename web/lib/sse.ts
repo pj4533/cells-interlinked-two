@@ -112,6 +112,11 @@ export function subscribe(runId: string, h: SubscribeHandlers): () => void {
   };
 }
 
+export interface StartProbeResult {
+  run_id: string;
+  control_run_id: string | null;
+}
+
 export async function startProbe(prompt: string, opts?: {
   max_new_tokens?: number;
   temperature?: number;
@@ -119,7 +124,8 @@ export async function startProbe(prompt: string, opts?: {
   seed?: number;
   decoding_mode?: string;
   pooled?: boolean;
-}): Promise<string> {
+  include_matched_control?: boolean;
+}): Promise<StartProbeResult> {
   const res = await fetch(probeUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -127,7 +133,10 @@ export async function startProbe(prompt: string, opts?: {
   });
   if (!res.ok) throw new Error(`probe start failed: ${res.status}`);
   const j = await res.json();
-  return j.run_id;
+  return {
+    run_id: j.run_id,
+    control_run_id: j.control_run_id ?? null,
+  };
 }
 
 export async function cancelProbe(runId: string): Promise<void> {

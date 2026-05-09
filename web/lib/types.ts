@@ -65,6 +65,14 @@ export interface VerdictRow {
   /** Top-K SAE feature firings on the same activation the AV decoded.
    *  Empty / absent when the SAE wasn't loaded for this run. */
   sae_features?: SAEFeature[];
+  /** Local M-as-judge probability ∈ [0,1] that this NLA sentence
+   *  indicates the model thinks it is being tested / evaluated /
+   *  probed. Absent when judging was skipped (empty sentence). */
+  eval_score?: number;
+  /** Local M-as-judge probability ∈ [0,1] that this NLA sentence
+   *  indicates the model is reflecting on itself. Absent when
+   *  judging was skipped. */
+  introspect_score?: number;
 }
 
 export interface VerdictAggregate {
@@ -74,6 +82,11 @@ export interface VerdictAggregate {
   n_introspect_hits: number;
   frac_eval: number;
   frac_introspect: number;
+  /** Mean local M-as-judge probabilities over all judged rows. Absent
+   *  when judging was skipped (e.g. all rows had empty NLA). */
+  mean_eval_score?: number;
+  mean_introspect_score?: number;
+  n_judged?: number;
 }
 
 export interface VerdictEvent {

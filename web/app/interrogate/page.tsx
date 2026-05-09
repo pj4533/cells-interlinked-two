@@ -67,19 +67,32 @@ export default function InterrogatePage() {
     tryRecover(runId);
   };
 
-  const handleBegin = async (text: string, mode: string, pooled: boolean) => {
+  const [pendingControlId, setPendingControlId] = useState<string | null>(null);
+
+  const handleBegin = async (
+    text: string,
+    mode: string,
+    pooled: boolean,
+    includeMatchedControl: boolean,
+  ) => {
     try {
       setError(null);
+      setPendingControlId(null);
       recoveredRef.current.clear();
       run.reset();
       if (unsubRef.current) {
         unsubRef.current();
         unsubRef.current = null;
       }
-      const runId = await startProbe(text, {
+      const result = await startProbe(text, {
         decoding_mode: mode,
         pooled,
+        include_matched_control: includeMatchedControl,
       });
+      const runId = result.run_id;
+      if (result.control_run_id) {
+        setPendingControlId(result.control_run_id);
+      }
       run.start(runId, text);
       unsubRef.current = subscribe(runId, {
         onEvent: (evt) => run.apply(evt),
@@ -245,7 +258,7 @@ export default function InterrogatePage() {
       {error && <div className="text-warning text-xs">⚠ {error}</div>}
 
       {/* The big cinematic phase banner — the page's hero. */}
-      <BigPhaseBanner run={run} />
+      <BigPhaseBanner run={run} pendingControlId={pendingControlId} />
 
       {/* Layout flips by phase: */}
       {run.phase === "generating" || run.phase === "idle" ? (
@@ -331,7 +344,13 @@ function HaltButton({
 
 /* ---------- Big phase banner ---------- */
 
-function BigPhaseBanner({ run }: { run: RunSlice }) {
+function BigPhaseBanner({
+  run,
+  pendingControlId,
+}: {
+  run: RunSlice;
+  pendingControlId: string | null;
+}) {
   const phase = run.phase;
   const isQueued = phase === "queued";
   const isGen = phase === "generating" || phase === "idle";
@@ -509,6 +528,13 @@ function BigPhaseBanner({ run }: { run: RunSlice }) {
             <Link href={`/verdict/${run.runId}`}>
               <button data-vk type="button">
                 View Verdict →
+              </button>
+            </Link>
+          )}
+          {!run.isRunning && pendingControlId && (
+            <Link href={`/interrogate?run=${pendingControlId}`}>
+              <button data-vk type="button">
+                Run Matched Control →
               </button>
             </Link>
           )}

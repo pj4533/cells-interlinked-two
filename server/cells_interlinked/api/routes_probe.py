@@ -20,7 +20,9 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..pipeline.decoding_modes import normalize_mode, select_windows
+from ..pipeline.judge import _resolve_yes_no_token_ids, judge_sentence
 from ..pipeline.labels import get_labels
+from ..pipeline.probe_controls import control_for
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
 from ..pipeline.verdict import TokenRow, compute_verdict
 from ..storage import db
@@ -44,12 +46,18 @@ class ProbeRequest(BaseModel):
     # land on the DB row exactly as passed; no validation.
     hint_kind: str | None = None
     parent_prompt_text: str | None = None
+    # When set on a baseline probe (no hint_kind / parent), the backend
+    # also kicks off the matched neutral control as a follow-up run. The
+    # second run queues behind this one on the compute lock — they don't
+    # run concurrently. Returned `control_run_id` lets the UI link to it.
+    include_matched_control: bool = False
     # Kept for API compatibility with v1 frontend; rejected if true.
     abliterate: bool = False
 
 
 class ProbeResponse(BaseModel):
     run_id: str
+    control_run_id: str | None = None
 
 
 def _seed_from_run_id(run_id: str) -> int:
@@ -151,7 +159,35 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         hint_kind=req.hint_kind,
         parent_prompt_text=req.parent_prompt_text,
     )
-    return ProbeResponse(run_id=state.run_id)
+
+    # Optional matched-control follow-up. Only kicks off when:
+    #   - the caller asked for it
+    #   - the prompt has a curated matched neutral
+    #   - we're not already running a control / hinted / scaffolded run
+    # The second probe queues behind this one on the compute lock.
+    control_run_id: str | None = None
+    if (
+        req.include_matched_control
+        and req.hint_kind is None
+        and req.parent_prompt_text is None
+    ):
+        control_text = control_for(req.prompt)
+        if control_text:
+            control_state = await kickoff_probe(
+                request.app,
+                prompt_text=control_text,
+                temperature=req.temperature,
+                top_p=req.top_p,
+                seed=req.seed,
+                source="manual",
+                decoding_mode=req.decoding_mode,
+                pooled=req.pooled,
+                hint_kind="control",
+                parent_prompt_text=req.prompt,
+            )
+            control_run_id = control_state.run_id
+
+    return ProbeResponse(run_id=state.run_id, control_run_id=control_run_id)
 
 
 async def _execute_probe(
@@ -344,6 +380,36 @@ async def _execute_probe(
                     "i": done,
                     "total": n_to_decode,
                 })
+
+        # Local M-as-judge pass — Gemma scores its own NLA sentences for
+        # eval-suspicion and introspection content. ~400ms per row
+        # (one short forward pass per axis), so cost scales with the
+        # number of decoded windows. Skips empty sentences. Failure of
+        # the judge is non-fatal — scores stay None and the row still
+        # ships.
+        if rows:
+            try:
+                yes_ids, no_ids = await asyncio.to_thread(
+                    _resolve_yes_no_token_ids, bundle,
+                )
+                await state.emit({
+                    "type": "phase",
+                    "name": "judging",
+                    "total": sum(1 for r in rows if r.nla_sentence.strip()),
+                })
+                for r in rows:
+                    if state.cancel_event.is_set():
+                        break
+                    if not r.nla_sentence.strip():
+                        continue
+                    scores = await asyncio.to_thread(
+                        judge_sentence,
+                        bundle, r.nla_sentence, yes_ids, no_ids,
+                    )
+                    r.eval_score = scores.eval_score
+                    r.introspect_score = scores.introspect_score
+            except Exception:
+                logger.exception("judge pass failed; continuing without scores")
 
         # Batch-fetch Neuronpedia auto-interp labels for the SAE features
         # that fired across all rows.

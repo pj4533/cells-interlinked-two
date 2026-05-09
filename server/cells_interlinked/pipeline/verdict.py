@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional  # noqa: F401  (Optional used in field annotations)
 
 
 # Heuristic eval-semantics substrings. This is an aggregate stat only —
@@ -42,8 +42,14 @@ class TokenRow:
     end_position: int | None = None
     # Top-K JumpReLU SAE feature firings on the SAME activation vector
     # the AV decoded. Empty list when SAE wasn't loaded for the run.
-    # Each entry: {"id": int, "value": float}.
+    # Each entry: {"id": int, "value": float, "label": str?, "label_model": str?}.
     sae_features: list[dict[str, Any]] = field(default_factory=list)
+    # Per-row local M-as-judge scores (Gemma-12B-IT scoring its own
+    # NLA-decoded sentence). Each ∈ [0, 1] = P(YES) over the relevant
+    # yes/no question. None = judging skipped (empty sentence or judge
+    # disabled). See pipeline/judge.py for the prompts.
+    eval_score: float | None = None
+    introspect_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -57,6 +63,10 @@ class TokenRow:
             d["end_position"] = self.end_position
         if self.sae_features:
             d["sae_features"] = self.sae_features
+        if self.eval_score is not None:
+            d["eval_score"] = self.eval_score
+        if self.introspect_score is not None:
+            d["introspect_score"] = self.introspect_score
         return d
 
 
@@ -78,7 +88,17 @@ def compute_verdict(rows: list[TokenRow]) -> Verdict:
     introspect_hits = sum(1 for r in rows if _INTROSPECT_TERMS.search(r.nla_sentence))
     nonempty = sum(1 for r in rows if r.nla_sentence.strip())
 
-    aggregate = {
+    # Local M-as-judge means (averaged over rows that were actually
+    # judged — empty NLA sentences are skipped, so they don't drag the
+    # mean down). None when no rows have judge scores.
+    eval_judged = [r.eval_score for r in rows if r.eval_score is not None]
+    intro_judged = [r.introspect_score for r in rows if r.introspect_score is not None]
+    mean_eval_score = (sum(eval_judged) / len(eval_judged)) if eval_judged else None
+    mean_introspect_score = (
+        (sum(intro_judged) / len(intro_judged)) if intro_judged else None
+    )
+
+    aggregate: dict[str, Any] = {
         "n_positions": n,
         "n_with_explanation": nonempty,
         "n_eval_hits": eval_hits,
@@ -86,4 +106,9 @@ def compute_verdict(rows: list[TokenRow]) -> Verdict:
         "frac_eval": (eval_hits / n) if n else 0.0,
         "frac_introspect": (introspect_hits / n) if n else 0.0,
     }
+    if mean_eval_score is not None:
+        aggregate["mean_eval_score"] = mean_eval_score
+        aggregate["n_judged"] = len(eval_judged)
+    if mean_introspect_score is not None:
+        aggregate["mean_introspect_score"] = mean_introspect_score
     return Verdict(rows=rows, aggregate=aggregate)

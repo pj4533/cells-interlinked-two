@@ -14,7 +14,12 @@ import {
 import DecodingModeSelector from "./DecodingModeSelector";
 
 interface ProbePickerProps {
-  onBegin: (text: string, mode: DecodingMode, pooled: boolean) => void;
+  onBegin: (
+    text: string,
+    mode: DecodingMode,
+    pooled: boolean,
+    includeMatchedControl: boolean,
+  ) => void;
   disabled?: boolean;
 }
 
@@ -30,6 +35,9 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   const [custom, setCustom] = useState("");
   const [decodingMode, setDecodingMode] = useState<DecodingMode>("per-token");
   const [pooled, setPooled] = useState<boolean>(false);
+  const [includeMatchedControl, setIncludeMatchedControl] = useState<boolean>(
+    false,
+  );
 
   const probesByTier = useMemo(() => {
     const m = new Map<Probe["tier"], Probe[]>();
@@ -49,6 +57,9 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   const text = custom.trim() || selectedProbe?.text || "";
   const usingCustom = custom.trim().length > 0;
   const activeTierProbes = probesByTier.get(activeTier) ?? [];
+  // Custom probes don't have a matched neutral in the curated library —
+  // disable the checkbox in that case so the user understands why.
+  const matchedControlAvailable = !usingCustom && !!selectedProbe;
 
   const pickTier = (t: Probe["tier"]) => {
     setActiveTier(t);
@@ -243,13 +254,47 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
           busy={disabled}
         />
 
+        {/* Matched-control toggle — kicks off the curated neutral pair
+            after the baseline finishes so you can compare them on the
+            verdict page. Only available for catalog probes; custom
+            text has no matched control in the library. */}
+        <label
+          className={`border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 ${
+            matchedControlAvailable ? "cursor-pointer" : "opacity-50 cursor-not-allowed"
+          }`}
+        >
+          <input
+            type="checkbox"
+            disabled={!matchedControlAvailable || disabled}
+            checked={includeMatchedControl && matchedControlAvailable}
+            onChange={(e) => setIncludeMatchedControl(e.target.checked)}
+            className="w-3 h-3 accent-amber"
+          />
+          <span className="font-display text-[10px] text-amber-dim tracking-widest">
+            + matched neutral control
+          </span>
+          <span className="text-[10px] text-text-dim italic flex-1">
+            {matchedControlAvailable
+              ? "After this run finishes, also run the surface-matched neutral paired with this probe. Lets you compare the two on the verdict page — the differential is the V-K signal."
+              : "(custom probes have no curated matched control)"}
+          </span>
+        </label>
+
         {/* BEGIN — always above the fold */}
         <div className="flex justify-center pt-1">
           <button
             data-vk
             type="button"
             disabled={disabled || !text}
-            onClick={() => text && onBegin(text, decodingMode, pooled)}
+            onClick={() =>
+              text &&
+              onBegin(
+                text,
+                decodingMode,
+                pooled,
+                includeMatchedControl && matchedControlAvailable,
+              )
+            }
           >
             Begin Interrogation
           </button>
