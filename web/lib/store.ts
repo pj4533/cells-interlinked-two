@@ -206,13 +206,27 @@ export const useRun = create<RunState & Actions>((set) => ({
         return;
       }
       case "token": {
-        set((s) => ({
-          outputTokens: [
-            ...s.outputTokens,
-            { position: evt.position, decoded: evt.decoded },
-          ],
-          totalTokens: s.totalTokens + 1,
-        }));
+        set((s) => {
+          // SSE reconnection replays from event 0, so a token we've
+          // already received may arrive again. Upsert by position so
+          // outputTokens stays a faithful 1-row-per-position array.
+          const idx = s.outputTokens.findIndex(
+            (t) => t.position === evt.position,
+          );
+          if (idx >= 0) {
+            const replaced = s.outputTokens.map((t, i) =>
+              i === idx ? { position: evt.position, decoded: evt.decoded } : t,
+            );
+            return { outputTokens: replaced };
+          }
+          return {
+            outputTokens: [
+              ...s.outputTokens,
+              { position: evt.position, decoded: evt.decoded },
+            ],
+            totalTokens: s.totalTokens + 1,
+          };
+        });
         return;
       }
       case "phase": {
@@ -237,11 +251,23 @@ export const useRun = create<RunState & Actions>((set) => ({
           nla_sentence: evt.nla_sentence,
           sae_features: evt.sae_features ?? [],
         };
-        set((s) => ({
-          decodedWindows: [...s.decodedWindows, window],
-          decodeProgress: { done: evt.i, total: evt.total },
-          lastDecodedPosition: evt.position,
-        }));
+        set((s) => {
+          // Upsert by (position, end_position): SSE reconnection replays
+          // the event log from event 0, so a row we've already rendered
+          // can arrive a second time. Replacing in place keeps React keys
+          // stable and avoids the duplicate-key warning.
+          const idx = s.decodedWindows.findIndex(
+            (w) => w.position === window.position && w.end_position === endPos,
+          );
+          const next = idx >= 0
+            ? s.decodedWindows.map((w, i) => (i === idx ? window : w))
+            : [...s.decodedWindows, window];
+          return {
+            decodedWindows: next,
+            decodeProgress: { done: evt.i, total: evt.total },
+            lastDecodedPosition: evt.position,
+          };
+        });
         return;
       }
       case "verdict": {
