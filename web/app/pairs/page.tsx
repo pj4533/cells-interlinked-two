@@ -302,7 +302,7 @@ function Side({
       >
         {label} · {row.run_id}
       </div>
-      <div className={`text-xs font-mono line-clamp-3 leading-snug ${accentText}`}>
+      <div className={`text-xs font-mono leading-snug whitespace-pre-wrap ${accentText}`}>
         {row.prompt_text}
       </div>
       <div className="mt-2 flex flex-col gap-1">
