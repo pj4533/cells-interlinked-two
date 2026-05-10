@@ -1,3 +1,6 @@
+# Local one-off DB dumps for offline analysis (not part of the project).
+exports/
+
 # macOS
 .DS_Store
 *.swp
