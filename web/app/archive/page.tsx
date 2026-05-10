@@ -21,6 +21,12 @@ interface RecentPage {
   offset: number;
 }
 
+interface JudgeScores {
+  mean_eval_score?: number;
+  mean_introspect_score?: number;
+  n_judged?: number;
+}
+
 interface AggregatePayload {
   total_runs: number;
   total_positions?: number;
@@ -42,6 +48,9 @@ export default function ArchivePage() {
   const [page, setPage] = useState<RecentPage | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [agg, setAgg] = useState<AggregatePayload | null>(null);
+  // Judge scores keyed by run_id. Fetched lazily per visible row from
+  // /probes/{id} since /probes/recent doesn't carry the aggregate.
+  const [scores, setScores] = useState<Record<string, JudgeScores>>({});
 
   useEffect(() => {
     const offset = pageIndex * PAGE_SIZE;
@@ -52,6 +61,42 @@ export default function ArchivePage() {
         setPage({ rows: [], total: 0, limit: PAGE_SIZE, offset: 0 }),
       );
   }, [pageIndex]);
+
+  useEffect(() => {
+    if (!page) return;
+    let cancelled = false;
+    // Fetch judge scores for every finished run on this page. Skip
+    // anything we already have. In-flight runs have no aggregate yet.
+    const targets = page.rows.filter(
+      (r) => r.finished_at != null && !(r.run_id in scores),
+    );
+    if (targets.length === 0) return;
+    Promise.all(
+      targets.map((r) =>
+        fetch(`${API}/probes/${r.run_id}`)
+          .then((res) => res.json())
+          .then((rec) => {
+            const a = rec?.verdict?.aggregate ?? {};
+            return [r.run_id, {
+              mean_eval_score: a.mean_eval_score,
+              mean_introspect_score: a.mean_introspect_score,
+              n_judged: a.n_judged,
+            }] as const;
+          })
+          .catch(() => [r.run_id, {}] as const),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      setScores((prev) => {
+        const next = { ...prev };
+        for (const [id, s] of entries) next[id] = s;
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, scores]);
 
   useEffect(() => {
     fetch(`${API}/probes/aggregate`)
@@ -110,6 +155,7 @@ export default function ArchivePage() {
         page={page}
         pageIndex={pageIndex}
         setPageIndex={setPageIndex}
+        scores={scores}
       />
     </div>
   );
@@ -137,14 +183,90 @@ function StatCard({
   );
 }
 
+function ScoreCells({
+  scores,
+  disabled,
+}: {
+  scores: JudgeScores | undefined;
+  disabled: boolean;
+}) {
+  if (disabled) {
+    return (
+      <div className="text-[9px] font-mono text-text-dim italic h-[34px] flex items-center">
+        — pending —
+      </div>
+    );
+  }
+  if (!scores) {
+    return (
+      <div className="text-[9px] font-mono text-text-dim/60 h-[34px] flex items-center">
+        loading…
+      </div>
+    );
+  }
+  const e = scores.mean_eval_score;
+  const i = scores.mean_introspect_score;
+  if (e === undefined && i === undefined) {
+    return (
+      <div className="text-[9px] font-mono text-text-dim/60 h-[34px] flex items-center italic">
+        no judge scores
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <Bar label="eval" value={e} accent="amber" />
+      <Bar label="intro" value={i} accent="cyan" />
+    </div>
+  );
+}
+
+function Bar({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number | undefined;
+  accent: "amber" | "cyan";
+}) {
+  const pct = value === undefined ? 0 : Math.max(0, Math.min(1, value)) * 100;
+  const display = value === undefined ? "—" : `${(value * 100).toFixed(1)}%`;
+  const accentText = accent === "amber" ? "text-amber" : "text-cyan";
+  const accentBg = accent === "amber" ? "bg-amber" : "bg-cyan";
+  // Highlight notably high rows so they pop while scanning. Threshold
+  // is intentionally conservative — judge scores trend low overall.
+  const high = value !== undefined && value >= 0.25;
+  return (
+    <div className="flex items-center gap-2 text-[9px] font-mono">
+      <span className="text-text-dim w-9 shrink-0">{label}</span>
+      <div className="relative flex-1 h-1.5 bg-bg-soft border border-rule/60 overflow-hidden">
+        <div
+          className={`absolute inset-y-0 left-0 ${accentBg}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span
+        className={`tabular-nums w-12 text-right ${
+          high ? `${accentText} amber-glow font-bold` : "text-text-dim"
+        }`}
+      >
+        {display}
+      </span>
+    </div>
+  );
+}
+
 function PerRunList({
   page,
   pageIndex,
   setPageIndex,
+  scores,
 }: {
   page: RecentPage | null;
   pageIndex: number;
   setPageIndex: (n: number) => void;
+  scores: Record<string, JudgeScores>;
 }) {
   const total = page?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -195,6 +317,7 @@ function PerRunList({
             : isHinted
             ? "border-l-2 border-l-amber/40"
             : "";
+          const s = scores[r.run_id];
           return (
             <li key={r.run_id}>
               <Link
@@ -202,7 +325,7 @@ function PerRunList({
                 className={`block border border-rule p-3 hover:border-amber-dim transition-colors ${railClass}`}
               >
                 <div className="flex justify-between items-start gap-4">
-                  <div className="flex-1 text-xs">
+                  <div className="flex-1 text-xs min-w-0">
                     <div className="text-amber font-mono line-clamp-2">
                       {r.prompt_text}
                     </div>
@@ -241,8 +364,11 @@ function PerRunList({
                       )}
                     </div>
                   </div>
-                  <div className="text-text-dim text-[10px] font-mono">
-                    {r.run_id}
+                  <div className="flex flex-col items-end gap-1 shrink-0 min-w-[140px]">
+                    <ScoreCells scores={s} disabled={isRunning} />
+                    <div className="text-text-dim text-[10px] font-mono">
+                      {r.run_id}
+                    </div>
                   </div>
                 </div>
               </Link>
@@ -250,6 +376,12 @@ function PerRunList({
           );
         })}
       </ul>
+
+      <div className="text-[10px] text-text-dim italic mt-3 mb-1">
+        Per-run mean local Gemma judge scores: <span className="text-amber">eval-suspicion</span> /{" "}
+        <span className="text-cyan">introspection</span>. Higher means more rows in the
+        run scored YES on the corresponding judge question.
+      </div>
 
       {total > PAGE_SIZE && (
         <nav className="flex items-center justify-between mt-5 pt-3 border-t border-rule">
