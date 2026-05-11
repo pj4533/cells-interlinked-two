@@ -337,6 +337,33 @@ def _build_user_prompt(
     return "\n".join(parts)
 
 
+# Anthropic's server-side web_search wraps any text derived from a
+# search result in <cite index="...">...</cite> tags so a client can
+# render citations. Our publisher renders body_markdown as-is, so the
+# tags leak into the journal as literal angle-bracket text. Strip them
+# — keep the inner prose, drop the wrapping. Also catch <search_result>
+# / <document> defensively in case Anthropic adds those for other
+# server tools.
+_CLAUDE_CITATION_RE = re.compile(
+    r"<(cite|search_result|document)[^>]*>(.*?)</\1>",
+    re.DOTALL,
+)
+
+
+def _strip_claude_citation_tags(text: str) -> str:
+    if not text:
+        return text
+    # Loop until stable — a single non-greedy sub doesn't fully flatten
+    # nested <cite>outer <cite>inner</cite> still</cite> wrappers.
+    # Cap at 10 passes as a safety net against pathological inputs.
+    for _ in range(10):
+        new = _CLAUDE_CITATION_RE.sub(lambda m: m.group(2), text)
+        if new == text:
+            return new
+        text = new
+    return text
+
+
 def _find_balanced_json_objects(text: str) -> list[Any]:
     """Yield every successfully-parsed top-level {...} JSON object found
     in `text`, in order. Uses a brace counter that respects string
@@ -786,10 +813,10 @@ async def generate_analysis(
     )
     parsed = _parse_claude_output(text)
 
-    title = (parsed.get("title") or "").strip() or "Untitled dispatch"
+    title = _strip_claude_citation_tags(parsed.get("title") or "").strip() or "Untitled dispatch"
     slug = (parsed.get("slug") or "").strip() or _slugify(title)
-    summary = (parsed.get("summary") or "").strip()
-    body = (parsed.get("body_markdown") or "").strip()
+    summary = _strip_claude_citation_tags(parsed.get("summary") or "").strip()
+    body = _strip_claude_citation_tags(parsed.get("body_markdown") or "").strip()
     if not body:
         raise RuntimeError("analyzer returned empty body_markdown")
 
@@ -875,8 +902,8 @@ async def revise_analysis(
     await db.update_analysis_content(
         db_path,
         analysis_id,
-        title=(parsed.get("title") or rec["title"] or "").strip(),
+        title=_strip_claude_citation_tags(parsed.get("title") or rec["title"] or "").strip(),
         slug=(parsed.get("slug") or rec["slug"] or "").strip(),
-        summary=(parsed.get("summary") or "").strip(),
-        body_markdown=(parsed.get("body_markdown") or rec["body_markdown"]).strip(),
+        summary=_strip_claude_citation_tags(parsed.get("summary") or "").strip(),
+        body_markdown=_strip_claude_citation_tags(parsed.get("body_markdown") or rec["body_markdown"]).strip(),
     )
