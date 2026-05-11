@@ -167,7 +167,10 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"^http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|[a-z0-9-]+\.local)(:\d+)?$",
-        allow_methods=["GET", "POST"],
+        # DELETE is used by /journal/{id} to discard a draft. Without it,
+        # browser CORS preflight (OPTIONS) returns 400 and the UI fails
+        # silently. PATCH/PUT included for completeness — cheap, no harm.
+        allow_methods=["GET", "POST", "DELETE", "PATCH", "PUT", "OPTIONS"],
         allow_headers=["*"],
     )
 
