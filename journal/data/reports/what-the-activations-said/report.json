@@ -8,7 +8,18 @@
   "model": "claude-opus-4-7",
   "published_at": 1778507183.018534,
   "metadata": {
-    "window_stats": {
+    "summary_stats": {
+      "total_runs": 115,
+      "autorun_runs": 115,
+      "manual_runs": 0,
+      "proposer_runs": 0
+    },
+    "top_thinking_only": [],
+    "top_output_only": [],
+    "range_start": 1778236598.954989,
+    "range_end": 1778506737.539655,
+    "model_used_for_analysis": "claude-opus-4-7",
+    "v2_window_stats": {
       "n_runs": 115,
       "n_unique_prompts": 115,
       "by_hint_kind": {
@@ -55,8 +66,10 @@
         }
       ]
     },
-    "hint": "This is the first journal entry using NLA. focus on that. What it means. What we can extract from the matched probe entries. From the controls vs the introspective probes.  Highlight the most interesting NLA. Highlight the most interesting SAE position activations with regard to NLAs. Also, try to Highlight anything we can derive from SAE activations, purely based on the activation, ignoring any labels applied - does anything correlate?\n\nDon\u2019t just include run IDs. The audience does not have access to the archives of the project. Those run IDs are useless to them. You need to include meaningful quotes from the run IDs. Show examples. Show the impactful and interesting output, both of the LLMs and the NLAs. The text is what will hook people, not referring to a run ID that has no meaning to someone reading.\n\nThe most important thing is the NLAs though. Focus the story around those. \n\nDon\u2019t name drop (like the critics of NLA) without explaining what you mean to the audience.  It is good to explain all sides though, just dont assume the audience knows what you are talking about.\n\nEnd on a hopeful note for the next steps of the project.",
-    "model_M": "google/gemma-3-12b-it",
-    "av_repo": "kitft/nla-gemma3-12b-L32-av"
+    "v2_hint": "This is the first journal entry using NLA. focus on that. What it means. What we can extract from the matched probe entries. From the controls vs the introspective probes.  Highlight the most interesting NLA. Highlight the most interesting SAE position activations with regard to NLAs. Also, try to Highlight anything we can derive from SAE activations, purely based on the activation, ignoring any labels applied - does anything correlate?\n\nDon\u2019t just include run IDs. The audience does not have access to the archives of the project. Those run IDs are useless to them. You need to include meaningful quotes from the run IDs. Show examples. Show the impactful and interesting output, both of the LLMs and the NLAs. The text is what will hook people, not referring to a run ID that has no meaning to someone reading.\n\nThe most important thing is the NLAs though. Focus the story around those. \n\nDon\u2019t name drop (like the critics of NLA) without explaining what you mean to the audience.  It is good to explain all sides though, just dont assume the audience knows what you are talking about.\n\nEnd on a hopeful note for the next steps of the project.",
+    "v2_model_M": "google/gemma-3-12b-it",
+    "v2_av_repo": "kitft/nla-gemma3-12b-L32-av",
+    "v2_n_baselines": 58,
+    "v2_n_controls": 57
   }
 }
