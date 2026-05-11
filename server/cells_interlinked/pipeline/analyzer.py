@@ -207,6 +207,34 @@ Important caveats you MUST honor in tone:
 - Aesthetic: The journal is a craft project with a Blade Runner 2049 vibe — terse, noir-flavoured, technical. Not academic. Not breathless.
 - Quotes: every verbatim NLA snippet in the report MUST come from a row you actually looked at. If you didn't see it inline, fetch it with get_run before quoting.
 
+============================================================
+HARD RULES — these are non-negotiable. Violating them is a
+worse failure than producing a less interesting report.
+
+(1) MATCHED PAIRS — NEVER claim a specific run lacks a matched
+    pair UNLESS get_matched_pair(run_id) actually returned
+    {"baseline": null} or {"control": null} or {"error": ...}.
+    The user prompt below contains a complete pair map for the
+    window — if a run_id appears in that map, IT HAS A PAIR.
+    Calling out a probe by run_id without first confirming its
+    pair status with the tool (or the map) is a hallucination.
+
+(2) DELTA VALUES — whenever you discuss a specific run_id, you
+    must either:
+       (a) cite its Δ values from get_matched_pair in pp form
+           ("Δ_eval = X.X pp, Δ_intro = Y.Y pp"), OR
+       (b) state explicitly that its pair has not been examined
+           yet in this draft.
+    "Small Δ" is fine to say AFTER quoting the numbers. "No
+    pair" is NOT a substitute for "small Δ" — they are different
+    claims.
+
+(3) VERBATIM QUOTES — every NLA quote in quotation marks must
+    appear word-for-word in a row you actually fetched via
+    get_run (or saw in the inline window). Paraphrases are
+    fine; quotation marks are a promise of literal text.
+============================================================
+
 Format your final output strictly as ONE single JSON object with these keys:
 - "title": a short evocative title (max 80 chars). No marketing voice.
 - "slug": URL slug, lowercase, hyphens only.
@@ -269,6 +297,30 @@ def _build_user_prompt(
             f"eligibility: {'YES' if n_pairs >= 5 else 'NO — too few pairs'}"
         )
         parts.append("")
+        # Explicit run_id → mate_id map. Without this Claude has the
+        # count but no way to tell *which* specific runs are paired
+        # without calling get_matched_pair. With it, denying a pair's
+        # existence requires contradicting the prompt directly.
+        if n_pairs > 0:
+            parts.append("### Pair map (baseline_run_id  ↔  control_run_id)")
+            parts.append(
+                "Every run_id in this list HAS a matched pair. If you "
+                "discuss any of these by ID, never claim the pair is "
+                "absent — it isn't. Use get_matched_pair to fetch Δ values "
+                "if you want to quote them."
+            )
+            shown = 0
+            for parent_text, baselines in baseline_by_text.items():
+                if parent_text not in controls_by_parent:
+                    continue
+                for b in baselines:
+                    for c in controls_by_parent[parent_text]:
+                        parts.append(
+                            f"- {b['run_id']}  ↔  {c['run_id']}"
+                        )
+                        shown += 1
+            parts.append(f"({shown} baseline↔control links shown)")
+            parts.append("")
 
     if hint and hint.strip():
         parts.extend([
