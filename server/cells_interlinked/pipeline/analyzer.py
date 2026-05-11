@@ -285,14 +285,78 @@ def _build_user_prompt(
     return "\n".join(parts)
 
 
-_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+def _find_balanced_json_objects(text: str) -> list[Any]:
+    """Yield every successfully-parsed top-level {...} JSON object found
+    in `text`, in order. Uses a brace counter that respects string
+    literals (so curlies inside JSON strings don't break the balance).
+
+    Replaces the old greedy ``r"\\{.*\\}"`` regex, which grabbed
+    everything from the first ``{`` to the last ``}`` and tripped over
+    Claude's occasional narration. With this we can pick the last
+    well-formed object — which is what the system prompt asks for."""
+    out: list[Any] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        depth = 0
+        in_str = False
+        escape = False
+        j = i
+        while j < n:
+            c = text[j]
+            if escape:
+                escape = False
+            elif in_str:
+                if c == "\\":
+                    escape = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[i : j + 1]
+                        try:
+                            out.append(json.loads(candidate))
+                        except Exception:
+                            pass
+                        i = j + 1
+                        break
+            j += 1
+        else:
+            # No matching close brace; bail.
+            break
+        if j >= n:
+            break
+    return out
 
 
 def _parse_claude_output(text: str) -> dict[str, Any]:
-    m = _JSON_OBJECT_RE.search(text)
-    if m is None:
-        raise ValueError(f"no JSON object found in analyzer output: {text[:300]!r}")
-    return json.loads(m.group(0))
+    """Extract the analyzer's final JSON report from a possibly-noisy
+    response. Claude is told to output ONE JSON object, but with tools
+    enabled it sometimes adds a brief preamble or trailing citation
+    note. We scan for every balanced JSON object and return the last
+    one that has the expected schema; fall back to the last parseable
+    object; finally raise with a snippet for debugging."""
+    candidates = _find_balanced_json_objects(text)
+    if not candidates:
+        raise ValueError(
+            f"no JSON object found in analyzer output. "
+            f"first 500 chars: {text[:500]!r}"
+        )
+    for obj in reversed(candidates):
+        if isinstance(obj, dict) and "body_markdown" in obj:
+            return obj
+    # No object matched the schema — return the last parseable one and
+    # let the caller's body-empty check raise a clearer error.
+    return candidates[-1]
 
 
 _LOCAL_TOOLS = [
