@@ -793,11 +793,43 @@ async def generate_analysis(
     if not body:
         raise RuntimeError("analyzer returned empty body_markdown")
 
+    # The journal/ Next.js template is v1-era and reads
+    # metadata.summary_stats.{total_runs, autorun_runs, manual_runs, ...}
+    # plus top_thinking_only / top_output_only arrays. v2 doesn't have
+    # the per-feature thinking/output split (we have NLA sentences, not
+    # SAE feature tallies), so those arrays are empty here — the template
+    # already guards them with `?? []`. summary_stats MUST be an object
+    # (the template does NOT optional-chain it), or Vercel prerender
+    # fails with "Cannot read properties of undefined (reading
+    # 'autorun_runs')".
+    hint_counts = stats.get("by_hint_kind", {}) or {}
+    n_baselines = (
+        hint_counts.get("(baseline)", 0)
+        + hint_counts.get("(none)", 0)
+        + hint_counts.get(None, 0)  # belt-and-suspenders
+    )
+    n_controls = hint_counts.get("control", 0)
     metadata = {
-        "window_stats": stats,
-        "hint": hint,
-        "model_M": settings.model_name,
-        "av_repo": settings.av_repo,
+        # Legacy-compatible shape for the deployed journal site.
+        "summary_stats": {
+            "total_runs": stats.get("n_runs", 0),
+            "autorun_runs": n_baselines + n_controls,
+            "manual_runs": 0,
+            "proposer_runs": 0,
+        },
+        "top_thinking_only": [],
+        "top_output_only": [],
+        "range_start": since,
+        "range_end": until,
+        "model_used_for_analysis": settings.analyzer_model,
+        # v2-specific extras kept under their own keys so the template
+        # never reaches for them.
+        "v2_window_stats": stats,
+        "v2_hint": hint,
+        "v2_model_M": settings.model_name,
+        "v2_av_repo": settings.av_repo,
+        "v2_n_baselines": n_baselines,
+        "v2_n_controls": n_controls,
     }
     new_id = await db.insert_analysis(
         db_path,
