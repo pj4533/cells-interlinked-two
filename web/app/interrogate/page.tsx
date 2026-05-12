@@ -244,6 +244,21 @@ export default function InterrogatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.runId, run.phase]);
 
+  // LiveNLATable UI state — lifted to this stable parent so it
+  // survives layout transitions (generating → decoding → done) and
+  // any descendant remounts. The view toggle is sticky across probes
+  // (operator preference); the α selection is initialized fresh by
+  // LiveNLATable when sweep data first appears for a run.
+  //
+  // MUST live above the early-return below — React's Rules of Hooks
+  // require the same useState call sequence on every render. An
+  // earlier version of this file declared them lower, which broke
+  // when the page resumed an in-flight run (different render path).
+  const [liveView, setLiveView] = useState<ViewMode>("compact");
+  const [liveSelectedAlphas, setLiveSelectedAlphas] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   if (!run.runId) {
     return <ProbePicker onBegin={handleBegin} disabled={run.isRunning} />;
   }
@@ -255,16 +270,6 @@ export default function InterrogatePage() {
   const warmingUp =
     run.isRunning && run.phase === "generating" && run.totalTokens === 0;
   const outputText = run.outputTokens.map((t) => t.decoded).join("");
-
-  // LiveNLATable UI state — lifted to this stable parent so it
-  // survives layout transitions (generating → decoding → done) and
-  // any descendant remounts. The view toggle is sticky across probes
-  // (operator preference); the α selection is initialized fresh by
-  // LiveNLATable when sweep data first appears for a run.
-  const [liveView, setLiveView] = useState<ViewMode>("compact");
-  const [liveSelectedAlphas, setLiveSelectedAlphas] = useState<Set<string>>(
-    () => new Set(),
-  );
 
   return (
     <div className="flex-1 flex flex-col gap-5 px-4 py-4 max-w-screen-2xl mx-auto w-full relative">
