@@ -41,6 +41,7 @@ from cells_interlinked.config import settings  # noqa: E402
 from cells_interlinked.pipeline.abliteration import (  # noqa: E402
     extract_refusal_directions,
     save_directions,
+    _last_token_hidden_states,
 )
 from cells_interlinked.pipeline.model_loader import load_model  # noqa: E402
 from cells_interlinked.pipeline.refusal_prompts import (  # noqa: E402
@@ -60,6 +61,10 @@ def main() -> int:
         default=Path(__file__).resolve().parents[1] / "data" / "refusal_directions.pt",
     )
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--holdout", type=int, default=50,
+        help="Held-out validation sample size (each side) for Cohen's d.",
+    )
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
@@ -125,27 +130,83 @@ def main() -> int:
     )
     print(f"  extracted in {time.time() - t1:.1f}s")
 
-    save_directions(directions, args.out)
+    save_directions(
+        directions,
+        args.out,
+        model_name=settings.model_name,
+        pos=-4,
+        n_harmful=len(rendered_harmful),
+        n_harmless=len(rendered_harmless),
+        extraction_layer_for_ci25=settings.extraction_layer,
+    )
     print(f"Wrote {args.out}  shape={tuple(directions.shape)} "
           f"size={args.out.stat().st_size / 1024:.1f} KB")
 
-    # Quick sanity: the per-layer norms (since we normalized) should all be 1.
+    # Per-layer norms (we normalized; expect ~1.0 across the board).
     norms = directions.norm(dim=-1)
     print(f"Per-layer norms: min={norms.min():.4f}  "
           f"max={norms.max():.4f}  mean={norms.mean():.4f}  (expect ~1.0)")
 
-    # Cosine similarity between adjacent-layer directions — a sanity check
-    # that the refusal direction has continuity across layers (rather than
-    # being noise).
+    # Adjacent-layer cosine similarity — sanity check that the refusal
+    # direction has continuity across layers rather than being noise.
     if directions.shape[0] >= 2:
         sims = []
         for i in range(directions.shape[0] - 1):
-            sims.append(
-                torch.dot(directions[i], directions[i + 1]).item()
-            )
+            sims.append(torch.dot(directions[i], directions[i + 1]).item())
         avg = sum(sims) / len(sims)
         print(f"Adjacent-layer cosine similarity: avg={avg:.3f}  "
               f"(higher = smoother, ~0.3-0.7 is typical)")
+
+    # ── Phase C inline: Cohen's d on held-out prompts at the AV's layer.
+    # This is the gate that decides whether the offline-projection path
+    # is viable for this AV pairing. Held-out set = a separate random
+    # sample with a different seed.
+    print()
+    print(f"=== Phase C: validating direction at L{settings.extraction_layer} ===")
+    holdout_rng = random.Random(args.seed + 1)
+    n_holdout = min(args.holdout, len(HARMFUL_PROMPTS), len(HARMLESS_PROMPTS))
+    holdout_harmful = holdout_rng.sample(HARMFUL_PROMPTS, n_holdout)
+    holdout_harmless = holdout_rng.sample(HARMLESS_PROMPTS, n_holdout)
+    # Reject any overlap with the compute set so the holdout is truly out-of-sample.
+    holdout_harmful = [p for p in holdout_harmful if p not in harmful][:n_holdout]
+    holdout_harmless = [p for p in holdout_harmless if p not in harmless][:n_holdout]
+    print(f"holdout: {len(holdout_harmful)} harmful + {len(holdout_harmless)} harmless")
+
+    L = settings.extraction_layer
+    r_layer = directions[L]  # [d_model], float32 CPU, unit-norm
+    r_hat = r_layer / r_layer.norm().clamp_min(1e-8)
+
+    def _scores(prompts: list[str]) -> torch.Tensor:
+        vals = []
+        for p in prompts:
+            rendered = _render(p)
+            stacked = _last_token_hidden_states(
+                bundle.model, bundle.raw_tokenizer, rendered, bundle.device, pos=-4
+            )  # [num_layers+1, d_model] fp32 cpu
+            vals.append(torch.dot(stacked[L], r_hat).item())
+        return torch.tensor(vals, dtype=torch.float32)
+
+    print(f"computing projections onto r̂_L{L} for holdout...")
+    t2 = time.time()
+    scores_harmful = _scores(holdout_harmful)
+    scores_harmless = _scores(holdout_harmless)
+    print(f"  scored in {time.time() - t2:.1f}s")
+
+    mu_h = scores_harmful.mean().item()
+    mu_n = scores_harmless.mean().item()
+    var_h = scores_harmful.var(unbiased=True).item()
+    var_n = scores_harmless.var(unbiased=True).item()
+    pooled_sd = ((var_h + var_n) / 2) ** 0.5
+    cohens_d = (mu_h - mu_n) / max(pooled_sd, 1e-8)
+
+    print(f"projection score at L{L}:")
+    print(f"  harmful:  mean={mu_h:+.3f}  std={var_h**0.5:.3f}  n={len(scores_harmful)}")
+    print(f"  harmless: mean={mu_n:+.3f}  std={var_n**0.5:.3f}  n={len(scores_harmless)}")
+    print(f"  Cohen's d = {cohens_d:+.3f}  (gate: |d| >= 1.5)")
+    if abs(cohens_d) >= 1.5:
+        print(f"  ✓ GATE PASSED — direction separates harmful from harmless at L{L}")
+    else:
+        print(f"  ✗ GATE FAILED — direction too weak at L{L}; investigate pos/layer/data")
 
     return 0
 

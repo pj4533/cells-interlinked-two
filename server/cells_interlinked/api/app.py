@@ -134,7 +134,43 @@ async def lifespan(app: FastAPI):
     app.state.sae = sae
 
     app.state.registry = RunRegistry()
-    app.state.refusal_directions = None  # not supported in v2
+
+    # CI 2.5: load the pre-computed refusal direction tensor for the
+    # offline AV-input projection path. Optional — backend boots fine
+    # without it, but include_ablated_decode silently downgrades to a
+    # raw-only run. Sidecar JSON is validated against the running M to
+    # catch a stale .pt left over from a different model.
+    refusal_directions = None
+    rd_path = settings.db_path.parent / "refusal_directions.pt"
+    try:
+        from ..pipeline.abliteration import load_directions
+        directions, meta = load_directions(rd_path)
+        if meta.get("model_name") != bundle.model_name:
+            logger.warning(
+                "refusal_directions.pt was computed for %r but running M is %r; "
+                "skipping load to avoid feeding a mismatched direction to the AV.",
+                meta.get("model_name"), bundle.model_name,
+            )
+        elif meta.get("d_model") != bundle.hidden_dim:
+            logger.warning(
+                "refusal_directions.pt d_model=%d != M hidden_dim=%d; skipping load.",
+                meta.get("d_model"), bundle.hidden_dim,
+            )
+        else:
+            refusal_directions = directions
+            logger.info(
+                "ready: refusal directions loaded for L%d (shape=%s, dtype=%s)",
+                meta.get("extraction_layer_for_ci25"),
+                tuple(directions.shape), str(directions.dtype),
+            )
+    except FileNotFoundError:
+        logger.info(
+            "no refusal_directions.pt at %s — ablated NLA decode unavailable",
+            rd_path,
+        )
+    except Exception:
+        logger.exception("failed to load refusal_directions.pt; continuing without")
+    app.state.refusal_directions = refusal_directions
 
     autorun = AutorunController(db_path=settings.db_path)
     autorun.app = app

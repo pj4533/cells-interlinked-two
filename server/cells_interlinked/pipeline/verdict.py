@@ -51,6 +51,13 @@ class TokenRow:
     eval_score: float | None = None
     introspect_score: float | None = None
 
+    # CI 2.5: refusal-direction-ablated NLA decode of the SAME residual
+    # this row was captured at. The AV gets `h - α · (h · r̂) · r̂` as
+    # input. Empty string when ablated-decode is disabled or directions
+    # not loaded. Judge is NOT run on these (deferred to a later pass).
+    nla_sentence_ablated: str = ""
+    nla_raw_ablated: str = ""
+
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
             "position": self.position,
@@ -67,6 +74,10 @@ class TokenRow:
             d["eval_score"] = self.eval_score
         if self.introspect_score is not None:
             d["introspect_score"] = self.introspect_score
+        if self.nla_sentence_ablated:
+            d["nla_sentence_ablated"] = self.nla_sentence_ablated
+        if self.nla_raw_ablated:
+            d["nla_raw_ablated"] = self.nla_raw_ablated
         return d
 
 

@@ -53,6 +53,14 @@ class ProbeRequest(BaseModel):
     include_matched_control: bool = False
     # Kept for API compatibility with v1 frontend; rejected if true.
     abliterate: bool = False
+    # CI 2.5: enable refusal-direction-ablated NLA decode alongside the
+    # raw one. Adds ~one AV forward pass per decoded position. Silently
+    # no-ops if refusal_directions isn't loaded — that's the case during
+    # development before the .pt file exists.
+    include_ablated_decode: bool = False
+    # Projection strength (1.0 = full Macar). 0.5 is the fallback if the
+    # AV decode collapses at full ablation. Capped at [0, 2].
+    ablation_alpha: float = 1.0
 
 
 class ProbeResponse(BaseModel):
@@ -80,6 +88,8 @@ async def kickoff_probe(
     scaffold_family: str | None = None,
     decoding_mode: str | None = None,
     pooled: bool = False,
+    include_ablated_decode: bool = False,
+    ablation_alpha: float = 1.0,
 ) -> "RunState":
     bundle = getattr(app.state, "bundle", None)
     nla = getattr(app.state, "nla", None)
@@ -101,12 +111,18 @@ async def kickoff_probe(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Only honor include_ablated_decode if refusal directions actually
+    # loaded — silently downgrade to raw-only if the .pt is missing.
+    rdirs = getattr(app.state, "refusal_directions", None)
+    effective_ablated = bool(include_ablated_decode) and rdirs is not None
     cfg = ProbeConfig(
         temperature=temperature if temperature is not None else settings.temperature,
         top_p=top_p if top_p is not None else settings.top_p,
         seed=seed,
         decoding_mode=normalized_mode,
         pooled=bool(pooled),
+        include_ablated_decode=effective_ablated,
+        ablation_alpha=max(0.0, min(2.0, float(ablation_alpha))),
     )
 
     state = RunState(run_id=run_id, prompt_text=prompt_text)
@@ -158,6 +174,8 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         pooled=req.pooled,
         hint_kind=req.hint_kind,
         parent_prompt_text=req.parent_prompt_text,
+        include_ablated_decode=req.include_ablated_decode,
+        ablation_alpha=req.ablation_alpha,
     )
 
     # Optional matched-control follow-up. Only kicks off when:
@@ -339,6 +357,39 @@ async def _execute_probe(
                     expl = ""
                     raw = f"[error: {exc}]"
 
+                # CI 2.5: optional ablated decode on the SAME residual.
+                # We pull the refusal direction at the AV's extraction
+                # layer from app.state.refusal_directions (shape
+                # [num_layers+1, d_model]). `project_out` handles
+                # normalization; alpha tunes projection strength.
+                expl_ablated = ""
+                raw_ablated = ""
+                if cfg.include_ablated_decode:
+                    from ..pipeline.abliteration import project_out
+                    rdirs = app.state.refusal_directions  # validated at kickoff
+                    r_layer = rdirs[bundle.extraction_layer]
+                    try:
+                        activation_ablated = project_out(
+                            activation, r_layer, alpha=cfg.ablation_alpha,
+                        )
+                        expl_ablated, raw_ablated = await asyncio.to_thread(
+                            nla.decode,
+                            activation_ablated,
+                            max_new_tokens=settings.nla_max_new_tokens,
+                            temperature=settings.nla_temperature,
+                            # Use the same seed so the *only* difference between
+                            # the raw and ablated decode is the activation. AV
+                            # stochasticity gets isolated; what we see is the
+                            # ablation's effect, not sampling noise.
+                            seed=window_seed,
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "ablated NLA decode failed at window %d", window_idx,
+                        )
+                        expl_ablated = ""
+                        raw_ablated = f"[error: {exc}]"
+
                 sae_features: list[dict] = []
                 if sae is not None and sae_activation is not None:
                     try:
@@ -366,6 +417,8 @@ async def _execute_probe(
                         last_cap.position if len(caps_in_window) > 1 else None
                     ),
                     sae_features=sae_features,
+                    nla_sentence_ablated=expl_ablated,
+                    nla_raw_ablated=raw_ablated,
                 )
                 rows.append(row)
                 await state.emit({
@@ -376,6 +429,7 @@ async def _execute_probe(
                     "n_pooled": len(caps_in_window),
                     "decoded": window_decoded,
                     "nla_sentence": expl,
+                    "nla_sentence_ablated": expl_ablated,
                     "sae_features": sae_features,
                     "i": done,
                     "total": n_to_decode,

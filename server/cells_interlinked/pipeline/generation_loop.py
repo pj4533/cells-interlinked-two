@@ -136,6 +136,16 @@ class ProbeConfig:
     # If False, each pick is a single position decoded directly
     # (per-token read). No-op for "per-token" mode (windows of 1).
     pooled: bool = False
+    # CI 2.5: when True, every NLA decode is performed twice — once on
+    # the raw residual, once after subtracting its projection onto the
+    # refusal direction at the AV's extraction layer. The ablated
+    # sentence lands on the same row. Requires app.state.refusal_directions
+    # to be loaded; silently no-ops if not (route layer checks first).
+    include_ablated_decode: bool = False
+    # Strength of the ablation. 1.0 = full Macar projection. <1.0 =
+    # partial projection (the smoke-fallback if the AV decode collapses
+    # at α=1.0).
+    ablation_alpha: float = 1.0
 
 
 @dataclass
