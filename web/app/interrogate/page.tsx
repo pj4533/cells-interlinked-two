@@ -244,20 +244,31 @@ export default function InterrogatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.runId, run.phase]);
 
-  // LiveNLATable UI state — lifted to this stable parent so it
-  // survives layout transitions (generating → decoding → done) and
-  // any descendant remounts. The view toggle is sticky across probes
-  // (operator preference); the α selection is initialized fresh by
-  // LiveNLATable when sweep data first appears for a run.
+  // LiveNLATable UI state + refs — lifted to this stable parent so
+  // they survive layout transitions (generating → decoding → done)
+  // AND any descendant remounts. The view toggle is sticky across
+  // probes (operator preference); the α selection is initialized
+  // fresh by LiveNLATable when sweep data first appears for a run.
   //
-  // MUST live above the early-return below — React's Rules of Hooks
-  // require the same useState call sequence on every render. An
-  // earlier version of this file declared them lower, which broke
-  // when the page resumed an in-flight run (different render path).
+  // The two refs are critical to lift here, not just the state:
+  //   followBottomRef tracks "user has scrolled up from the bottom"
+  //   so auto-scroll doesn't yank them down on every new row.
+  //   initedAlphaForRunRef stamps the runKey we've already
+  //   initialized α selection for so the init effect doesn't keep
+  //   re-firing if the child remounts.
+  // Local refs inside LiveNLATable reset to defaults on remount,
+  // which manifests as "selecting alphas + scrolling up gets undone
+  // every time a new row arrives." Hoisting the refs to the parent
+  // makes the state machine survive whatever remount path React
+  // takes.
+  //
+  // MUST live above the early-return below — Rules of Hooks.
   const [liveView, setLiveView] = useState<ViewMode>("compact");
   const [liveSelectedAlphas, setLiveSelectedAlphas] = useState<Set<string>>(
     () => new Set(),
   );
+  const followBottomRef = useRef<boolean>(true);
+  const initedAlphaForRunRef = useRef<string>("");
 
   if (!run.runId) {
     return <ProbePicker onBegin={handleBegin} disabled={run.isRunning} />;
@@ -301,6 +312,8 @@ export default function InterrogatePage() {
           setLiveView={setLiveView}
           liveSelectedAlphas={liveSelectedAlphas}
           setLiveSelectedAlphas={setLiveSelectedAlphas}
+          followBottomRef={followBottomRef}
+          initedAlphaForRunRef={initedAlphaForRunRef}
         />
       )}
 
@@ -743,6 +756,8 @@ function DecodingLayout({
   setLiveView,
   liveSelectedAlphas,
   setLiveSelectedAlphas,
+  followBottomRef,
+  initedAlphaForRunRef,
 }: {
   run: RunSlice;
   outputText: string;
@@ -750,6 +765,8 @@ function DecodingLayout({
   setLiveView: (v: ViewMode) => void;
   liveSelectedAlphas: Set<string>;
   setLiveSelectedAlphas: (updater: (s: Set<string>) => Set<string>) => void;
+  followBottomRef: React.MutableRefObject<boolean>;
+  initedAlphaForRunRef: React.MutableRefObject<string>;
 }) {
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(0,2fr)] flex-1 min-h-0">
@@ -769,6 +786,8 @@ function DecodingLayout({
         setView={setLiveView}
         selectedAlphas={liveSelectedAlphas}
         setSelectedAlphas={setLiveSelectedAlphas}
+        followBottomRef={followBottomRef}
+        initedAlphaForRunRef={initedAlphaForRunRef}
       />
     </div>
   );
@@ -781,6 +800,8 @@ function LiveNLATable({
   setView,
   selectedAlphas,
   setSelectedAlphas,
+  followBottomRef,
+  initedAlphaForRunRef,
 }: {
   rows: DecodedWindow[];
   /** Probe identifier. When this changes (new probe), the α-selection
@@ -791,6 +812,12 @@ function LiveNLATable({
   setView: (v: ViewMode) => void;
   selectedAlphas: Set<string>;
   setSelectedAlphas: (updater: (s: Set<string>) => Set<string>) => void;
+  /** Lifted from the parent page so they survive remounts of this
+   *  component. Local refs would reset to defaults on remount,
+   *  which manifested as α-selection / scroll-position reset on
+   *  every new NLA arrival. See parent for the full reasoning. */
+  followBottomRef: React.MutableRefObject<boolean>;
+  initedAlphaForRunRef: React.MutableRefObject<string>;
 }) {
   const anyPooled = rows.some((r) => r.n_pooled > 1);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -805,20 +832,19 @@ function LiveNLATable({
     }
     return Array.from(set).sort((a, b) => parseFloat(a) - parseFloat(b));
   }, [rows]);
-  // Initialize α selection once per probe. After the first init for a
-  // given runKey, the user owns the selection — we never override it,
-  // even if they clear everything. When a new probe starts, the parent
-  // resets selectedAlphas + runKey changes → we re-init for that probe.
-  // (Previous bug: an unguarded init effect kept re-enabling α=1.0
-  // every time a new row landed if the selection set was empty.)
-  const initedForRunRef = useRef<string>("");
+  // Initialize α selection once per probe. The "has been initialized
+  // for runKey X" stamp lives on the PARENT (initedAlphaForRunRef)
+  // so it survives this component remounting. After the first init
+  // for a given runKey, the user owns the selection — we never
+  // override it, even if they clear everything. A new probe brings a
+  // different runKey, which we recognize and re-init.
   useEffect(() => {
-    if (initedForRunRef.current === runKey) return;
+    if (initedAlphaForRunRef.current === runKey) return;
     if (sweepAlphas.length === 0) return;
     const initial = sweepAlphas.includes("1.0") ? "1.0" : sweepAlphas[0];
     setSelectedAlphas(() => new Set([initial]));
-    initedForRunRef.current = runKey;
-  }, [sweepAlphas, runKey, setSelectedAlphas]);
+    initedAlphaForRunRef.current = runKey;
+  }, [sweepAlphas, runKey, setSelectedAlphas, initedAlphaForRunRef]);
 
   const toggleAlpha = (a: string) => {
     setSelectedAlphas((s) => {
@@ -835,11 +861,12 @@ function LiveNLATable({
     (r) => (r.nla_sentence_ablated ?? "").trim().length > 0,
   );
 
-  // Auto-scroll behavior: follow the bottom only if the user is
-  // ALREADY at the bottom. If they've scrolled up to read an earlier
-  // row, we don't yank them down when a new decode arrives. Threshold
-  // is generous (80px) so a tiny manual scroll doesn't lock follow.
-  const followBottomRef = useRef(true);
+  // Auto-scroll: follow the bottom only if the user is ALREADY at
+  // the bottom. The "at-bottom?" flag is a ref on the PARENT so it
+  // survives this component remounting. If they've scrolled up to
+  // read an earlier row, we don't yank them down when a new decode
+  // arrives. Threshold is generous (80px) so a tiny manual scroll
+  // doesn't lock follow.
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     const dist = el.scrollHeight - (el.scrollTop + el.clientHeight);
@@ -849,7 +876,7 @@ function LiveNLATable({
     if (!containerRef.current) return;
     if (!followBottomRef.current) return;
     containerRef.current.scrollTop = containerRef.current.scrollHeight;
-  }, [rows.length]);
+  }, [rows.length, followBottomRef]);
 
   const tokenColLabel = anyPooled ? "tokens" : "token";
   const headerCopy = anyPooled
