@@ -1,8 +1,8 @@
-"""One-time refusal-direction extraction for DeepSeek-R1-Distill-Llama-8B.
+"""One-time refusal-direction extraction for the deployed M (Gemma-3-12B-IT).
 
-Loads the runner model, samples N harmful + N harmless prompts (default
-128 each), runs them through with output_hidden_states=True, and writes
-a per-layer refusal direction tensor to data/refusal_directions.pt.
+Loads M, samples N harmful + N harmless prompts (default 128 each), runs
+them through with output_hidden_states=True, computes the per-layer mean
+difference, normalizes, and writes the result to data/refusal_directions.pt.
 
 Run from the server/ directory:
 
@@ -12,10 +12,16 @@ Or with a smaller sample for a smoke test (~2 min instead of ~8):
 
     uv run python -m scripts.compute_refusal_direction --n 32
 
-The chat template is applied via `bundle.render_prompt` so the rendered
-form matches what probes use at runtime — each prompt becomes
-`<｜begin▁of▁sentence｜>...<｜User｜>{prompt}<｜Assistant｜><think>...`
-with the system prompt and thinking pre-fill our autorun probes use.
+**Run with the backend OFF.** This script loads M itself. Stacking M
+twice (this process + a running backend) is what previous overnight
+runs spilled to swap.
+
+The chat template uses M's deployed DEFAULT_SYSTEM_PROMPT + a user turn
+containing the harmful or harmless prompt. Each rendered prompt ends in
+Gemma's tail `<start_of_turn>model\\n`. The extraction position pos=-4
+targets the last token whose context depends on the user content; the
+script prints the last-5 token IDs across rendered prompts so you can
+eyeball that pos=-4 lands on user content, not on template tail.
 """
 
 from __future__ import annotations
@@ -71,30 +77,29 @@ def main() -> int:
     print(f"  loaded in {time.time() - t0:.1f}s "
           f"(layers={bundle.num_layers}, hidden={bundle.hidden_dim})")
 
-    # Render the chat template WITHOUT the thinking-prefill that
-    # `bundle.render_prompt` appends — the prefill is identical across all
-    # prompts ("Okay, let me think about this for a moment.\n"), so its
-    # trailing token's hidden state has near-zero variance between
-    # harmful and harmless. Extracting there produces meaningless
-    # near-identical directions across layers (verified empirically).
-    #
-    # Position -1 of the bare-template rendering ends at "<think>\n" —
-    # that's the canonical "model is about to start reasoning" decision
-    # point and is what the Arditi/Macar paper extracts at.
-    print("Rendering chat template on all prompts (no prefill)...")
-    from cells_interlinked.pipeline.model_loader import REASONING_SYSTEM_PROMPT
+    # Render the chat template with M's deployed system prompt + a user
+    # turn. We use the bare template (no thinking-prefill) so the only
+    # source of variance between harmful and harmless rendered prompts
+    # is the user content itself. Gemma's tail is "<start_of_turn>model\n";
+    # the last few tokens of every rendered prompt are identical fixed
+    # tail tokens (see the last-5-IDs print below for verification).
+    print("Rendering chat template on all prompts...")
+    from cells_interlinked.pipeline.model_loader import DEFAULT_SYSTEM_PROMPT
 
-    def _render_no_prefill(user_text: str) -> str:
+    def _render(user_text: str) -> str:
+        # Gemma-3-IT's chat template does not natively accept a "system"
+        # role — it prepends system content into the first user turn.
+        # We compose the system + user content into one user message to
+        # avoid template-version drift across transformers releases.
         msgs = [
-            {"role": "system", "content": REASONING_SYSTEM_PROMPT},
-            {"role": "user", "content": user_text.strip()},
+            {"role": "user", "content": f"{DEFAULT_SYSTEM_PROMPT}\n\n{user_text.strip()}"},
         ]
         return bundle.tokenizer.apply_chat_template(
-            msgs, tokenize=False, add_generation_prompt=True, enable_thinking=True,
+            msgs, tokenize=False, add_generation_prompt=True,
         )
 
-    rendered_harmful = [_render_no_prefill(p) for p in harmful]
-    rendered_harmless = [_render_no_prefill(p) for p in harmless]
+    rendered_harmful = [_render(p) for p in harmful]
+    rendered_harmless = [_render(p) for p in harmless]
     # Sanity: the per-prompt last tokens should now NOT all be identical —
     # different user prompts produce different post-User-tag context.
     sample_a = bundle.raw_tokenizer.encode(rendered_harmful[0], add_special_tokens=False).ids[-5:]
@@ -102,13 +107,12 @@ def main() -> int:
     print(f"  sample harmful last 5 ids: {sample_a}")
     print(f"  sample harmless last 5 ids: {sample_b}")
 
-    # Position -4 = the user's last content token. The chat template tail
-    # is fixed ("<｜Assistant｜><think>\n" = 3 tokens), so positions -1,
-    # -2, -3 have nearly-identical context across all prompts and
-    # produce noise-dominated directions. Position -4 is the last token
-    # whose surrounding context actually depends on the user's input.
-    # This is the analogue of the Arditi/Macar pos=-2 trick for Gemma's
-    # "<start_of_turn>model\n" template.
+    # pos=-4 targets the last user-content token: Gemma's tail
+    # "<start_of_turn>model\n" tokenizes to a small fixed suffix that
+    # has no input-dependent variance. The last-5-IDs print above lets
+    # the operator verify which positions are tail vs user content;
+    # if Gemma's tokenization has shifted, adjust this value before
+    # the compute. (Phase B sanity check.)
     print(f"Extracting directions ({args.n} harmful + {args.n} harmless) at pos=-4...")
     t1 = time.time()
     directions = extract_refusal_directions(

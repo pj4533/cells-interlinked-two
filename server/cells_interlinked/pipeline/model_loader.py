@@ -1,17 +1,16 @@
 """Loads the target model M whose activations get NLA-decoded.
 
-v2 swap: where v1 loaded a reasoning model with `<think>` partition state and
-abliteration support, v2 loads a non-reasoning instruct model (default
-Qwen2.5-7B-Instruct) and exposes a single residual-stream extraction layer.
+Default M for CI 2.5 is Gemma-3-12B-IT (a non-reasoning instruct model),
+exposing a single residual-stream extraction layer (L32).
 
 The companion AV (verbalizer) is loaded in `nla_client.py`. M and AV are
-distinct HuggingFace checkpoints; they share an architecture but the AV is
-fine-tuned away from being a general LM (it only emits <explanation> tags).
+distinct HuggingFace checkpoints; they share an architecture but the AV
+is fine-tuned away from being a general LM (it only emits <explanation>
+tags).
 
-NB: the design doc's primary target is Gemma-3-12B-IT + the matching AV.
-Qwen-7B is the smoke-test target. To swap: change M_DEFAULT and pair with
-the corresponding AV. EXTRACTION_LAYER must match the AV's
-extraction_layer_index from its `nla_meta.yaml`.
+EXTRACTION_LAYER must match the AV's `extraction_layer_index` from its
+`nla_meta.yaml`. To swap M, change `MODEL_NAME` in `.env` and pair with
+the matching AV at the same layer.
 """
 
 from __future__ import annotations

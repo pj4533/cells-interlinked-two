@@ -1,7 +1,10 @@
 # HOWTO — Overnight Run + Morning Publish
 
-This is the operator playbook for kicking off a Cells Interlinked v2
+This is the operator playbook for kicking off a Cells Interlinked 2.5
 overnight batch and publishing a journal report the next morning.
+
+> **Source of truth: [`docs/CI_2_5_PLAN.md`](docs/CI_2_5_PLAN.md).** If
+> anything below contradicts the plan, the plan wins.
 
 ## One-time prerequisites
 
@@ -23,10 +26,10 @@ You only do these once.
    the `cells-interlinked` Vercel project — same project as v1, so
    publishes update `cells-interlinked.vercel.app` directly.
 
-5. **Models cached.** The default M (Qwen2.5-7B-Instruct) and AV
-   (kitft/nla-qwen2.5-7b-L20-av) are already in `~/.cache/huggingface/`.
-   Switching to Gemma-3-12B-IT triggers a fresh ~24GB download on first
-   start.
+5. **Models cached.** The deployed M (Gemma-3-12B-IT, ~23 GB) and AV
+   (kitft/nla-gemma3-12b-L32-av, ~22 GB) and Gemma Scope 2 SAE at L31
+   (~1 GB) are in `~/.cache/huggingface/`. Total resident ~46 GB on the
+   64 GiB MPS box.
 
 ## Tonight: kick off the overnight batch
 
@@ -39,7 +42,7 @@ on subsequent boots from cache):
     uv run uvicorn cells_interlinked.api.app:create_app \
       --host 127.0.0.1 --port 8000 --factory
 
-Wait for the log line `ready: M=Qwen/Qwen2.5-7B-Instruct ...`.
+Wait for the log line `ready: M=google/gemma-3-12b-it ...`.
 
 **Terminal 2 — frontend**:
 
@@ -59,18 +62,17 @@ This serves the local control panel at `http://localhost:3001`.
 - A **Begin** button.
 
 Pick a probe set, click **Begin**. The worker loop starts and chews
-through probes one at a time. Each probe takes:
-
-- Qwen-7B baseline: ~12-15 minutes (80 output tokens × ~10s/decode).
-- Gemma-12B baseline: ~15-25 minutes (slower per decode).
+through probes one at a time. Each probe takes ~10–15 minutes on
+Gemma-12B per-token (faster with `every-3rd` / `every-5th` / `key-points`
+decoding modes).
 
 Walk away. Leave both terminals running. Mac sleep is fine — the worker
 auto-resumes when the machine wakes up, but probe latency increases by
 whatever sleep ate.
 
-A baseline run of 100 probes completes in roughly 18-25 hours on Qwen-7B
-without sleep. Mid-batch results are committed run-by-run so you can
-look at partial progress in the morning even if the box napped.
+A matched-controls run of 100 probe pairs (200 runs total) completes
+in roughly 30-50 hours per-token. Mid-batch results are committed
+run-by-run so partial progress is visible at any point.
 
 ## In the morning
 
@@ -107,17 +109,18 @@ look at partial progress in the morning even if the box napped.
 
 ## Operational tips
 
-### Switching the base model to Gemma-12B
+### Computing the refusal direction (CI 2.5 Phase B)
 
-In `.env`:
+**Run with the backend OFF** — the compute script loads M itself, and
+stacking M twice spills to swap. See `docs/CI_2_5_PLAN.md` for the full
+phase plan. Quick form:
 
-    MODEL_NAME=google/gemma-3-12b-it
-    AV_REPO=kitft/nla-gemma3-12b-L32-av
-    EXTRACTION_LAYER=32
+    # Stop backend first.
+    cd server
+    uv run python -m scripts.compute_refusal_direction
+    # Writes data/refusal_directions.pt + sidecar JSON.
 
-First boot triggers a ~24GB download for M and another ~24GB for AV
-(if not cached). Total resident ~48GB; comfortable on the 64GB box but
-not abundant.
+    # Then restart the backend.
 
 ### Halting cleanly
 

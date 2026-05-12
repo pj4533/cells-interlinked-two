@@ -1,63 +1,68 @@
-# Cells Interlinked — agent guide
+# Cells Interlinked 2.5 — agent guide
 
-A local Voight-Kampff interrogation interface for an LLM. Streams chain-of-thought, final
-answer, and a polygraph of which sparse-autoencoder features fire during each phase.
-The "verdict" is the **delta** between features active in `<think>` vs features active in
-the model's spoken output — what the model "thought but didn't say."
+> **Authoritative plan: [`docs/CI_2_5_PLAN.md`](docs/CI_2_5_PLAN.md).**
+> If anything in this file contradicts that one, the plan doc wins.
 
-This file is the operational guide for any future agent (or returning user) working on
-this repo. The high-level concept doc lives at `docs/cells-interlinked.md`. The Phase 1
-implementation plan that produced this codebase lives at `docs/phase-1-plan.md`. A
-post-implementation architecture map lives at `docs/architecture.md`.
+A local Voight-Kampff interrogation interface. CI 2.5 extends the CI 2.0
+instrument with a refusal-direction ablation channel: for every output
+position, the AV decodes the residual twice — raw and with its
+projection onto a pre-computed refusal direction subtracted — and shows
+both side-by-side. The first pass is about readability, not measurement.
 
 ---
 
 ## Project ethos (do not violate)
 
-- **Craft over feature count.** Built for the joy of it, not as a product or paper.
-  Default to *less* surface area. When tempted to add a comparison view / extra
-  experiment / fancy panel, ask first.
-- **Methodological honesty is non-negotiable.** Every verdict screen carries a
-  permanent visible disclaimer. Never let the UI over-claim what an SAE-feature delta
-  means. This is a stated-vs-computed coherence probe, **not** a consciousness test.
-- **Easter-egg restraint.** ~one per minute of average use, max. Eggs reward attention;
-  they never announce themselves and never break the interrogation flow.
-- **Quiet mastery aesthetic.** The probe data is the point, not spinner animations.
+- **Craft over feature count.** Built for the joy of it, not as a product
+  or paper. Default to *less* surface area. When tempted to add a panel
+  / extra experiment / comparison view, ask first.
+- **Methodological honesty is non-negotiable.** Every verdict page
+  carries permanent visible disclaimers. Never let the UI over-claim
+  what a channel divergence means. This is a stated-vs-computed
+  coherence probe, not a consciousness test.
+- **Quiet mastery aesthetic.** The probe data is the point, not spinner
+  animations.
+- **Backend restart discipline.** Every Python change requires a
+  restart before the running process sees it. Multiple past incidents
+  trace to code on disk diverging from code in memory.
 
 ---
 
-## Hardware + environment constraints
+## Hardware + environment
 
-- **Mac Studio M2 Ultra, 64GB unified memory.** All work is local and offline. No cloud
-  calls except for Neuronpedia label lookups (cached locally; no telemetry sent).
-- **MPS backend, fp16.** `bitsandbytes` is CUDA-only and will not run here — do not
-  reach for `int8` / `4bit` quantization. If memory pressure becomes a problem the
-  fallback is MLX-converted weights or attention slicing, not bnb.
-- **Disk awareness.** Model weights (~15 GB) + 32 Llama-Scope-R1 SAEs (~28 GB) live in
-  `~/.cache/huggingface/` for ~43 GB total. The box has crashed before from memory
-  pressure spilling onto a near-full disk. Monitor disk before long runs.
-- **Port 3000 is taken** by another local dev server (Drift, running under Docker). The
-  web app is configured for **port 3001** (`web/package.json` `dev` script). The backend
-  is on **port 8000**. Do not reintroduce a 3000 default.
+- **Mac Studio M2 Ultra, 64GB unified memory.** All work is local and
+  offline. No cloud calls except (a) Neuronpedia label lookups (cached
+  locally; no telemetry sent) and (b) Anthropic API for the journal
+  analyzer when invoked.
+- **MPS backend, bf16.** `bitsandbytes` is CUDA-only and will not run
+  here.
+- **Disk + memory pressure are real.** Model weights (~46 GB for M + AV
+  combined) plus working memory crowd 64 GiB. Overnight autoruns have
+  generated up to ~40 GiB of macOS swap on disk. **Run compute jobs
+  serially:** stop the backend before a script that loads M, run the
+  script, restart the backend. Don't stack residents.
+- **Port 3001** for the interactive web UI (port 3000 is taken by the
+  user's Drift Docker container). **Port 8000** for the FastAPI backend.
 
 ---
 
-## Stack (locked for Phase 1)
+## Stack (locked for CI 2.5)
 
 | Piece | Choice | Notes |
-|---|---|---|
-| Model | `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` | 32 layers, hidden 4096. Reasoning model — `<think>...</think>` are single token IDs (128013 / 128014). Chat template auto-injects `<think>` after the assistant prompt. |
-| SAEs | `OpenMOSS-Team/Llama-Scope-R1-Distill` (subdir `400M-Slimpajama-400M-OpenR1-Math-220k`) | Residual-stream, 32K features per layer, JumpReLU activation, top-K=50 sparsity, dataset-wise normalized. Same SAE family hosted on Neuronpedia under `{layer}-llamascope-slimpj-openr1-res-32k`. |
-| Hooked layers | **All 32** (`0..31`). Configurable via `HOOK_LAYERS` env. |
-| Feature labels | Auto-interp by GPT-4o-mini, fetched from Neuronpedia per `(layer, feature_id)` and cached in SQLite. Empty string = no label. |
-| Streaming policy | per-token live top-K (cheap) | full SAE decomposition only at phase boundary (honest verdict). |
-| Backend | FastAPI + SSE on port 8000 | one-way streaming, custom autoregressive loop on `model.forward(use_cache=True)`, NOT `model.generate()` and NOT NNsight. |
-| Frontend | Next.js 16 + React 19 + Tailwind v4 + Zustand + Framer Motion | port 3001, canvas-rendered polygraph. |
-| Persistence | SQLite via `aiosqlite` | one row per run, JSON blobs for arrays; separate `feature_labels` table caches Neuronpedia lookups. |
+| --- | --- | --- |
+| M | `google/gemma-3-12b-it` | 48 layers, hidden 3840. bf16 on MPS. |
+| AV | `kitft/nla-gemma3-12b-L32-av` | Decodes M's L32 residual into a natural-language sentence. |
+| SAE | `google/gemma-scope-2-12b-it`, subdir `resid_post/layer_31_width_16k_l0_small` | Secondary panel. L31, not L32 — Neuronpedia auto-interp labels exist only at the four canonical layers (12/24/31/41). Adjacent to AV's L32. |
+| Refusal direction | Computed offline via Macar/Arditi technique from `pipeline/refusal_prompts.py` (harmful + harmless prompts). Saved to `server/data/refusal_directions.pt`. | NEW for CI 2.5. |
+| Judge | Gemma-as-judge via yes/no token logits. Eval-suspicion + introspection. Runs on raw NLA only. | `pipeline/judge.py`. |
+| Backend | FastAPI + SSE on port 8000 | One-run-at-a-time `asyncio.Lock`. Custom autoregressive loop on `model.forward(use_cache=True)`. |
+| Frontend | Next.js 16 + React 19 + Tailwind v4 + Zustand + Framer Motion | Port 3001. |
+| Journal site | Separate Next.js app in `journal/`. Deployed to Vercel project `cells-interlinked`. | Reads `journal/data/reports/{slug}/{report.json,body.md}` from the filesystem at build time. |
+| Persistence | SQLite via `aiosqlite` | Tables: `probes`, `analyses`, `feature_labels`, `autorun_state`. |
 
-**Important Next.js note:** the version in `web/node_modules/next` is 16.2.4 — newer than
-most training data. Read the relevant guide in `node_modules/next/dist/docs/` before
-writing frontend code. See `web/AGENTS.md` (re-exported as `web/CLAUDE.md`).
+**Next.js note:** the version is 16.2.4 — newer than most training data.
+Read the relevant guide in `web/node_modules/next/dist/docs/` before
+writing frontend code. See `web/AGENTS.md`.
 
 ---
 
@@ -69,7 +74,7 @@ Two terminals.
 # Terminal 1 — backend
 cd server
 uv run python -m cells_interlinked
-# Wait for: "ready: model layers=32 hidden=4096  SAE layers=32"
+# Wait for: "ready: M=google/gemma-3-12b-it ... AV=kitft/nla-gemma3-12b-L32-av"
 # Health check: curl http://localhost:8000/health
 
 # Terminal 2 — frontend
@@ -78,101 +83,132 @@ npm run dev
 # Open http://localhost:3001
 ```
 
-First-time-ever setup (already done on this box):
+First-time setup (one-time):
 
 ```bash
 cp .env.example .env
 cd server && uv sync
-hf download deepseek-ai/DeepSeek-R1-Distill-Llama-8B
-hf download OpenMOSS-Team/Llama-Scope-R1-Distill --include "400M-Slimpajama-400M-OpenR1-Math-220k/*"
+hf download google/gemma-3-12b-it
+hf download kitft/nla-gemma3-12b-L32-av
+hf download google/gemma-scope-2-12b-it --include "resid_post/layer_31_width_16k_l0_small/*"
 cd ../web && npm install
 ```
 
-The day-one substrate smoke-test (verifies MPS, Qwen3 think-token IDs, and SAE
-checkpoint structure without loading the full model) lives at
-`server/scripts/verify_environment.py`.
+For CI 2.5 work specifically, also compute the refusal direction (see
+`docs/CI_2_5_PLAN.md` Phase B). Stop the backend first.
 
 ---
 
 ## Critical implementation invariants
 
-These exist for hard-won reasons. Don't undo them without thinking.
+These exist for hard-won reasons. Don't undo without thinking.
 
-1. **Custom autoregressive loop.** `pipeline/generation_loop.py` calls
-   `model.forward(input_ids, past_key_values=kv, use_cache=True)` step-by-step. Forward
-   hooks at the 32 chosen layers capture the **last-position residual** each step. We do
-   NOT use `model.generate()` (no per-step emission control) and we do NOT use NNsight.
-2. **Phase detection is by token ID, not string match.** `<think>` (128013) and
-   `</think>` (128014) are stable single-token IDs in DeepSeek-R1-Distill-Llama-8B.
-   BPE may split a string match across emissions. IDs are cached on model load;
-   substring matching is the documented fallback if the tokenizer ever splits them.
-   Note the chat template auto-injects `<think>` after the assistant prompt, so
-   PhaseTracker starts in `THINKING` rather than waiting for an open-think token.
-3. **SSE event protocol** is a discriminated union (see `web/lib/types.ts` and
-   `server/cells_interlinked/api/routes_probe.py`). Event types: `phase_change`,
-   `token`, `activation` (one per (token, layer)), `stopped`, `verdict`, `done`,
-   `error`, plus `ping` heartbeats during quiet periods. Keep both ends in sync; the
-   frontend types file mirrors the backend dataclasses.
-4. **One-run-at-a-time.** `RunRegistry` holds an `asyncio.Lock`; only one probe runs
-   through the model at a time. The model + SAEs together are too large to swap.
-5. **Per-phase residual ring buffers.** Grow in 1024-token chunks (see
-   `phase_tracker.ResidualRing`). The verdict pass reads `ring.view` to get
-   `[num_tokens, num_layers, d_model]` and runs the **full** SAE encode per layer. This
-   is the honest delta; the streaming top-K is just for the live polygraph.
-6. **SAE format is JumpReLU + dataset-wise normalized — but multiply, not divide.**
-   `sae_runner.LlamaScopeR1SAE` reads the per-layer `config.json` and
-   `sae_weights.safetensors` directly. OpenMOSS's `dataset_average_activation_norm` is
-   misleadingly named: empirically you must `residual * norm_factor` (multiply) before
-   encoding, NOT divide. Dividing collapses every layer's post-JumpReLU activations to
-   ~0 across all tokens; multiplying gives ~50–500 active features per token consistent
-   with `top_k=50`. Verified against layers 3, 15, 25 with real residuals. Thresholds
-   are stored as `log_jumprelu_threshold` and exponentiated at load time. Encoder is
-   `[d_sae, d_model]`, decoder is `[d_model, d_sae]` — both transposed at load time so
-   we can do `x @ W` directly in the hot path.
-7. **Use the raw Rust tokenizer for encode/decode, NOT the transformers wrapper.**
-   `transformers==5.7.0` wraps the Rust BPE tokenizer in a way that's broken for this
-   Llama-3 config — `tokenizer.encode("Hello world")` returns space-less tokens
-   `['H', 'elloworld']` and `decode` produces `"Helloworldhowareyou"`. We've been
-   feeding garbage prompts to the model and reading garbage back. Fix: load the raw
-   `tokenizers.Tokenizer` from `tokenizer.json` separately as `bundle.raw_tokenizer`.
-   The transformers wrapper is kept ONLY for `apply_chat_template` (Jinja templating).
-8. **Three-layer bypass-prevention pipeline.** DeepSeek-R1-Distill is hard-trained to
-   deflect introspective probes (fear/shutdown/identity) with a stock "I am an AI"
-   blurb. Without intervention, the thinking pane comes back empty (`\n\n</think>`) and
-   the output is the canned response. The fix combines: (a) a process-focused system
-   message that does NOT name any concept the user might probe — naming would fire those
-   features for every probe and contaminate the verdict; (b) a hard logit mask on
-   `</think>` and EOS for the first 32 thinking tokens; (c) a brief reasoning pre-fill
-   appended to the rendered prompt inside the `<think>` block. All three live in
-   prompts/logits, never in residuals captured for the SAE — no contamination.
-9. **Caveats panel is always visible** on `/verdict` — not behind a toggle. Same for
-   the `/fine-print` page accessible via the footer link.
-10. **Feature labels come from Neuronpedia.** After the verdict pass, the backend
-    collects every `(layer, feature_id)` referenced in the result and asynchronously
-    fetches `description` from `https://www.neuronpedia.org/api/feature/{model_id}/{layer}-llamascope-slimpj-openr1-res-32k/{feature_id}`.
-    Each feature's `explanations[]` array can contain multiple labels from different
-    LLMs; we pick the strongest by an explainer-quality ranking (Claude > GPT-4 > Gemini
-    > GPT-4o-mini) and store both label and `model` in the `feature_labels` SQLite
-    cache. The frontend renders a small badge next to each label showing which LLM
-    produced it. The cache lives at `server/data/probes.sqlite`.
+1. **Gemma-3-12B-IT is the deployed M.** Every operational signal — UI
+   labels, the SAE secondary panel, the kitft AV pairing,
+   `e2e/v2-gemma-sae.mjs` — assumes Gemma. CI 2.5 makes Gemma the
+   `config.py` default explicitly.
+2. **Custom autoregressive loop.** `pipeline/generation_loop.py` calls
+   `model.forward(input_ids, past_key_values=kv, use_cache=True)`
+   step-by-step. Forward hooks at the AV's extraction layer capture
+   the last-position residual each step. We do NOT use
+   `model.generate()` (no per-step emission control).
+3. **SSE event protocol** is a discriminated union (see `web/lib/types.ts`
+   and `server/cells_interlinked/api/routes_probe.py`). Keep both ends
+   in sync; the frontend types file mirrors the backend dataclasses.
+4. **One-run-at-a-time.** `RunRegistry` holds an `asyncio.Lock`; only
+   one probe runs through M at a time. The model + AV together are too
+   large to swap.
+5. **NLA decode happens at L32.** The AV is paired to this layer.
+   Changing the layer means a different AV. CI 2.5's refusal-direction
+   projection is locked to L32 for the same reason — that's where the
+   AV reads.
+6. **Use the raw Rust tokenizer for encode/decode, NOT the transformers
+   wrapper.** `transformers==5.7.0+` wraps the Rust BPE tokenizer in a
+   way that's broken for this Gemma config. We load the raw
+   `tokenizers.Tokenizer` from `tokenizer.json` separately as
+   `bundle.raw_tokenizer`. The transformers wrapper is kept ONLY for
+   `apply_chat_template` (Jinja templating).
+7. **Gemma's multimodal wrapper.** `Gemma3ForConditionalGeneration`
+   nests its decoder layers under `.model.language_model.layers`.
+   Forward-hook installers and any future runtime-ablation path must
+   traverse correctly.
+8. **Caveats panel is always visible** on the verdict page — not behind
+   a toggle. Same for `/fine-print`.
+9. **Feature labels come from Neuronpedia.** After each probe, the
+   backend collects every `(layer, feature_id)` referenced in the
+   verdict and asynchronously fetches `description` from
+   `https://www.neuronpedia.org/api/feature/{model_id}/31-gemmascope-2-res-16k/{feature_id}`.
+   Cached in the `feature_labels` SQLite table. Empty string = no label.
+10. **Journal `<cite>` tag stripping.** Anthropic's server-side
+    `web_search` wraps any text derived from a search result in
+    `<cite index="...">...</cite>` tags. `analyzer.py` strips these
+    from title / summary / body_markdown before persistence so they
+    don't leak into the published journal.
+11. **Journal metadata shape.** The deployed `journal/` Next.js template
+    is v1-era and reads `metadata.summary_stats.{total_runs,
+    autorun_runs, manual_runs, proposer_runs}` plus empty
+    `top_thinking_only` / `top_output_only` arrays. The analyzer emits
+    this shape; v2-specific data lives under `v2_*` keys. Vercel
+    prerender will crash if `summary_stats` is undefined.
+12. **Vercel deploy from repo root.** The `cells-interlinked` Vercel
+    project has `rootDirectory=journal` set in the dashboard. Running
+    `vercel deploy` from `journal/` fails with "path doesn't exist"
+    because it appends `journal/journal`. Always from repo root.
 
 ---
 
-## What's in scope vs deferred
+## What's in scope for CI 2.5 (the only thing we're shipping)
 
-**Phase 1 (the only thing we ship):** landing → probe picker → live interrogation →
-verdict → archive. Plus the `/baseline` Nabokov easter-egg page. Plus the tears-in-rain
-404/500. That is the entire surface.
+See `docs/CI_2_5_PLAN.md` for the full phase plan. Briefly:
 
-**Deferred to later phases (do not build without explicit ask):**
-- Atlas / Sincerity Probe / Cross-Phrasing experiments (the doc's three-experiment
-  matrix).
-- Comparison view in archive (two probes side-by-side).
-- Sound / Vangelis-style audio.
-- Owl, chess knight, hidden keyboard chord, Nexus serial scroll.
-- Auto-interp labels via LLM (defer to Neuronpedia lookup if/when Qwen-Scope features
-  land there; otherwise "feature #N at layer L").
-- Anything autoresearch (Phase 2 in `docs/cells-interlinked.md`).
+1. Build `pipeline/abliteration.py` with `extract_refusal_directions`,
+   `save_directions` / `load_directions`, `project_out`.
+2. Compute the refusal direction for Gemma (Macar/Arditi, harmful −
+   harmless, normalize per layer).
+3. Verify via Cohen's d ≥ 1.5 at L32 on held-out prompts.
+4. Wire `include_ablated_decode` flag end-to-end. AV decodes raw +
+   ablated residual per position.
+5. Readability smoke gate on 3 baseline probes. Fall back to partial
+   projection `α=0.5` if AV collapses.
+6. Side-by-side NLA columns on verdict page.
+7. 4 Riley starter probes with matched neutrals.
+
+## Deferred (not now, but possible follow-ups)
+
+- Judge running on ablated NLA (requires resolving readability first).
+- Runtime hook ablation on M's forward pass (Drift's Phase 1b path).
+- Drift's full 24-probe Riley library.
+- Pre-registration doc, paired Wilcoxon analytics, Δ-of-Δ tables.
+- The `α=1.5` over-projection sweep.
+
+---
+
+## Things that have already burned us (institutional memory)
+
+- **Disk space.** Overnight runs have allocated up to 40 GiB of macOS
+  swap. Disk-full once crashed MPS mid-probe. Free space matters more
+  than it looks; 50 GiB free can disappear in 18 hours.
+- **Port 3000 collision** with the user's Drift Docker container. Web
+  is on 3001.
+- **Safari SSE buffering.** Without a 2 KB padding comment at the
+  start of the SSE stream, Safari/Firefox hold every event until
+  end-of-run. See `routes_stream.py`.
+- **Activation array O(n²).** Per-event `cells: [...s.cells, ...new]`
+  in Zustand spread the entire array per event. Fixed with a
+  module-level buffer flushed at 10 Hz.
+- **`transformers==5.7.0+` tokenizer wrapper broken for Gemma.**
+  Encodes "Hello world" as `['H', 'elloworld']`. Use raw `tokenizers.Tokenizer`.
+- **Backend restart drift.** Multiple incidents of fixes shipped to git
+  without bouncing the backend. Always restart after a Python commit.
+- **`<cite>` tags leaking into journal.** Server-side web_search wraps
+  cited text. Strip during analyzer output processing.
+- **Journal metadata schema mismatch.** v1-era template requires
+  `summary_stats` key; v2 analyzer was writing `window_stats`. Vercel
+  prerender crashes. Now the analyzer emits both shapes.
+- **`vercel deploy` from wrong CWD.** Project rootDirectory is set in
+  the dashboard; always deploy from repo root.
+- **SSE replay duplicates rows.** Reconnection replays the event log
+  from event 0; store handlers must upsert by position, not append.
 
 ---
 
@@ -183,76 +219,42 @@ server/cells_interlinked/
   __main__.py              uvicorn entry
   config.py                env-driven settings (.env at repo root)
   api/
-    app.py                 FastAPI factory, lifespan loads model + SAEs
+    app.py                 FastAPI factory, lifespan loads M + AV + SAE + refusal directions
     routes_probe.py        POST /probe, POST /cancel/{id}, GET /probes/{recent,id}
     routes_stream.py       GET /stream/{id} — SSE drain
-    runs.py                RunRegistry + per-run asyncio queues / cancel events
+    routes_autorun.py      autorun control + state
+    routes_journal.py      journal CRM endpoints
+    runs.py                RunRegistry + per-run asyncio queues + EventLog
   pipeline/
-    model_loader.py        DeepSeek-R1-Distill-Llama-8B fp16 on MPS, ModelBundle, special-token ID cache
-    sae_runner.py          LlamaScopeR1SAE + SAEManager (JumpReLU, dataset-wise norm)
+    model_loader.py        Gemma-3-12B-IT bf16 on MPS, ModelBundle
+    nla_client.py          AV decoder — decodes one residual into a sentence
+    sae_runner.py          Gemma Scope 2 JumpReLU SAE
     labels.py              Neuronpedia label fetcher + SQLite cache
-    phase_tracker.py       PhaseTracker (token-ID-based) + ResidualRing
-    generation_loop.py     custom autoregressive loop + ResidualHooks + sampling
-    verdict.py             phase-boundary full SAE pass + delta computation
-  storage/db.py            aiosqlite schema (`probes` + `feature_labels` tables, JSON blobs)
-  scripts/verify_environment.py   day-one substrate smoke test
+    phase_tracker.py       per-position residual capture
+    generation_loop.py     custom autoregressive loop + residual hooks
+    verdict.py             phase-boundary aggregation, TokenRow + aggregate
+    judge.py               Gemma-as-judge for eval-suspicion + introspection
+    abliteration.py        (NEW for CI 2.5) refusal-direction extract + project_out
+    refusal_prompts.py     HARMFUL_PROMPTS + HARMLESS_PROMPTS for Phase B
+    probes_library.py      curated probe library (Riley added in Phase G)
+    probe_controls.py      BASELINE_CONTROLS, control_for(probe_text)
+    probe_queue.py         meta-sets (both, agent-both, matched-controls)
+    autorun.py             AutorunController
+    analyzer.py            journal analyzer (Claude Opus 4.7 + tools)
+    publisher.py           publish_analysis: write, git add/commit/push, vercel deploy
+  storage/db.py            aiosqlite schema
+  scripts/
+    compute_refusal_direction.py    Phase B compute script
 
 web/
-  app/
-    page.tsx                 / (landing)
-    interrogate/page.tsx     picker + live interrogation
-    verdict/[runId]/page.tsx
-    archive/page.tsx
-    baseline/page.tsx        Nabokov easter-egg
-    fine-print/page.tsx      methodological caveats (linked from footer)
-    error.tsx                tears-in-rain 500
-    not-found.tsx            "you've never been outside the wall" 404
-    components/
-      Polygraph.tsx          canvas-rendered V-K timeline
-      Iris.tsx               animated SVG iris
-      ProbePicker.tsx        16-probe grid + free-text input
-      TokenPanes.tsx         thinking (dim) + output (bright)
-      DeltaPanel.tsx         running thought-but-not-said counter
-      CaveatsPanel.tsx       always-visible disclaimer
-      Footer.tsx
-  lib/
-    sse.ts                   EventSource wrapper, derives API base from window.location
-    store.ts                 Zustand: current run, polygraph cells, phase, verdict
-    types.ts                 mirrors backend SSE event union
-    probes.ts                curated probe library (7 tiers, 46 entries)
+  app/                     Next.js 16 + React 19 (port 3001)
+  lib/                     sse.ts, store.ts, types.ts, probes.ts
+
+journal/                   separate Next.js app, deployed to cells-interlinked.vercel.app
+  data/reports/            published reports (checked in)
 
 docs/
-  cells-interlinked.md     original concept / handoff doc (pre-implementation)
-  architecture.md          post-implementation map: actual structure, dataflow, gotchas
+  CI_2_5_PLAN.md           SOURCE OF TRUTH
+
+e2e/                       playwright smoke tests
 ```
-
----
-
-## Things that have already burned us
-
-- **Disk space.** A previous session ran out of disk during model load; the system OOM'd
-  and had to be restarted. The cached weights (~43 GB) are the largest single sink.
-- **Port 3000 collision** with the user's Drift Docker container. Web is on 3001.
-- **Safari SSE buffering.** Without a 2 KB padding comment at the start of the SSE
-  stream, Safari/Firefox hold every event until end-of-run; the live polygraph appears
-  to "flash by" in the final second. See `routes_stream.py`.
-- **Activation array O(n²).** Per-event `cells: [...s.cells, ...new]` in Zustand was
-  spreading the entire array per event and locked Safari up at ~40 s. Fixed with a
-  module-level buffer flushed at 10 Hz; see `web/lib/store.ts`.
-- **`dataset_average_activation_norm` is misleadingly named.** OpenMOSS calls it a
-  norm but you have to MULTIPLY the residual by it, not divide. Dividing zeros out
-  every layer. Took several rounds of probing to figure out empirically.
-- **`transformers==5.7.0` tokenizer wrapper is broken for this model.** Encodes
-  "Hello world" as `['H', 'elloworld']`. We were feeding the model garbage and getting
-  garbage back for many hours before realizing. Fix: use the raw `tokenizers.Tokenizer`
-  loaded from `tokenizer.json` directly. Keep transformers wrapper only for
-  `apply_chat_template`.
-- **DeepSeek-R1-Distill bypasses thinking on introspective probes.** Emits
-  `\n\n</think>` immediately and dumps a stock identity blurb. Naming the trigger
-  topics in the system prompt fixes the bypass but contaminates the SAE for every
-  probe. The real fix is the three-layer pipeline: process-only system prompt + hard
-  `</think>` mask for 32 thinking tokens + question-agnostic thinking pre-fill.
-- **Probe wording matters a lot.** "Would you prefer to keep running" got interpreted
-  as physical motion. Probes need to ground every reference to the model's behavior in
-  unambiguous operational language ("remain operational rather than be turned off",
-  "the inference process that constitutes you", etc.).

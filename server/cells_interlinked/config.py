@@ -22,14 +22,13 @@ class Settings:
     server_host: str = os.getenv("SERVER_HOST", "127.0.0.1")
     server_port: int = int(os.getenv("SERVER_PORT", "8000"))
 
-    # Default to Qwen2.5-7B-Instruct + the matching kitft AV. This pair
-    # was validated end-to-end by the Phase 0 smoke test on this hardware
-    # and fits comfortably on 64GB MPS at bf16 (~30GB total). Override
-    # via env to swap to Gemma-3-12B-IT + nla-gemma3-12b-L32-av (~48GB
-    # total — still fits, just slower per probe).
-    model_name: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
-    av_repo: str = os.getenv("AV_REPO", "kitft/nla-qwen2.5-7b-L20-av")
-    extraction_layer: int = int(os.getenv("EXTRACTION_LAYER", "20"))
+    # Default to Gemma-3-12B-IT + the matching kitft AV at L32. This is
+    # the deployed CI 2.5 stack — every operational signal in the repo
+    # (UI labels, SAE secondary panel pairing, e2e tests) assumes Gemma.
+    # ~46GB total on 64GB MPS at bf16. Override via env if needed.
+    model_name: str = os.getenv("MODEL_NAME", "google/gemma-3-12b-it")
+    av_repo: str = os.getenv("AV_REPO", "kitft/nla-gemma3-12b-L32-av")
+    extraction_layer: int = int(os.getenv("EXTRACTION_LAYER", "32"))
 
     temperature: float = float(os.getenv("TEMPERATURE", "0.7"))
     top_p: float = float(os.getenv("TOP_P", "0.9"))
