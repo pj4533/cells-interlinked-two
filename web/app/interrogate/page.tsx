@@ -53,12 +53,18 @@ export default function InterrogatePage() {
       setError(null);
       return;
     }
-    // Still in flight — try a fresh stream.
+    // Still in flight — try a fresh stream. The EventSource replays
+    // the event log from index 0, so the new subscription brings us
+    // back to the same state we'd have had without the blip. Clear the
+    // error: if the new stream genuinely fails too, onError will fire
+    // again and set it back. The previous behavior left the message
+    // stuck on screen for the rest of the run even after recovery.
     if (unsubRef.current) unsubRef.current();
     unsubRef.current = subscribe(runId, {
       onEvent: (evt) => run.apply(evt),
       onError: () => onStreamError(runId),
     });
+    setError(null);
   };
 
   const onStreamError = (runId: string) => {
