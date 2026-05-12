@@ -44,6 +44,9 @@ export interface NLADecodedEvent {
   /** CI 2.5: refusal-ablated NLA sentence on the same residual.
    *  Absent when ablated decode wasn't requested for the run. */
   nla_sentence_ablated?: string;
+  /** Multi-α sweep map keyed by α value as string (e.g. "0.5", "1.0").
+   *  Populated when ablation_alpha_sweep was set on the probe. */
+  nla_sentences_ablated?: Record<string, string>;
   sae_features?: SAEFeature[];
   i: number;
   total: number;
@@ -79,6 +82,8 @@ export interface VerdictRow {
   /** CI 2.5: refusal-ablated NLA sentence on the same residual.
    *  Absent when ablated decode wasn't requested for the run. */
   nla_sentence_ablated?: string;
+  /** Multi-α sweep map keyed by α value as string. */
+  nla_sentences_ablated?: Record<string, string>;
 }
 
 export interface VerdictAggregate {

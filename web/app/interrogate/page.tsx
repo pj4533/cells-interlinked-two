@@ -81,6 +81,7 @@ export default function InterrogatePage() {
     pooled: boolean,
     includeMatchedControl: boolean,
     includeAblatedDecode: boolean,
+    ablationAlphaSweep: number[],
   ) => {
     try {
       setError(null);
@@ -96,6 +97,9 @@ export default function InterrogatePage() {
         pooled,
         include_matched_control: includeMatchedControl,
         include_ablated_decode: includeAblatedDecode,
+        ...(ablationAlphaSweep.length > 0
+          ? { ablation_alpha_sweep: ablationAlphaSweep }
+          : {}),
       });
       const runId = result.run_id;
       if (result.control_run_id) {
@@ -735,6 +739,43 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
   const anyPooled = rows.some((r) => r.n_pooled > 1);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // Discover the set of α values present in any row's sweep dict.
+  // Each row may not have all keys (different positions could fail
+  // independently), so we union across all rows.
+  const sweepAlphas = useMemo<string[]>(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      for (const k of Object.keys(r.nla_sentences_ablated ?? {})) set.add(k);
+    }
+    return Array.from(set).sort((a, b) => parseFloat(a) - parseFloat(b));
+  }, [rows]);
+  // Default selection: when sweep is active, show only α=1.0 (matches
+  // single-α behavior at first glance). User adds/removes others.
+  const [selectedAlphas, setSelectedAlphas] = useState<Set<string>>(new Set());
+  // Initialize on first render where sweep alphas appear.
+  useEffect(() => {
+    if (sweepAlphas.length > 0 && selectedAlphas.size === 0) {
+      // Pick α=1.0 if present, else the first one.
+      const initial = sweepAlphas.includes("1.0") ? "1.0" : sweepAlphas[0];
+      setSelectedAlphas(new Set([initial]));
+    }
+  }, [sweepAlphas, selectedAlphas.size]);
+
+  const toggleAlpha = (a: string) => {
+    setSelectedAlphas((s) => {
+      const next = new Set(s);
+      if (next.has(a)) next.delete(a);
+      else next.add(a);
+      return next;
+    });
+  };
+  const orderedSelected = sweepAlphas.filter((a) => selectedAlphas.has(a));
+
+  // Legacy single-α detection (rows have nla_sentence_ablated string).
+  const anySingleAblated = rows.some(
+    (r) => (r.nla_sentence_ablated ?? "").trim().length > 0,
+  );
+
   // Auto-scroll to the most recent row as decodes arrive.
   useEffect(() => {
     if (!containerRef.current) return;
@@ -765,24 +806,70 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
           </div>
         </div>
       </div>
+      {sweepAlphas.length > 0 && (
+        <div className="border-b border-rule/60 px-4 py-2 flex items-center gap-2 flex-wrap text-[10px] font-mono">
+          <span className="text-cyan-dim tracking-widest">α columns:</span>
+          {sweepAlphas.map((a) => {
+            const on = selectedAlphas.has(a);
+            return (
+              <button
+                key={a}
+                type="button"
+                onClick={() => toggleAlpha(a)}
+                className={`px-2 py-0.5 border transition-colors ${
+                  on
+                    ? "border-cyan text-cyan bg-bg"
+                    : "border-rule text-text-dim hover:text-text"
+                }`}
+              >
+                α={a}
+              </button>
+            );
+          })}
+          <span className="text-text-dim italic ml-2">
+            click to toggle which α columns are shown
+          </span>
+        </div>
+      )}
       <div ref={containerRef} className="overflow-y-auto max-h-[680px]">
         {(() => {
-          const anyAblated = rows.some(
-            (r) => (r.nla_sentence_ablated ?? "").trim().length > 0,
-          );
-          const colSpan = anyAblated ? 4 : 3;
+          // Effective ablated columns: prefer sweep selection when
+          // present; otherwise fall back to the single-α column when
+          // legacy data is present.
+          const sweepColsActive = orderedSelected.length > 0;
+          const singleColActive = !sweepColsActive && anySingleAblated;
+          const nAblatedCols = sweepColsActive
+            ? orderedSelected.length
+            : singleColActive ? 1 : 0;
+          const colSpan = 3 + nAblatedCols;
+          const ablatedColWidth = nAblatedCols > 0
+            ? `${Math.floor(100 / (nAblatedCols + 1))}%`
+            : undefined;
           return (
         <table className="w-full text-xs font-mono">
           <thead className="text-amber-dim text-[10px] sticky top-0 bg-bg-soft border-b border-rule z-10">
             <tr>
               <th className="text-left px-3 py-2 w-16">pos</th>
               <th className="text-left px-3 py-2 w-40">{tokenColLabel}</th>
-              <th className={`text-left px-3 py-2 ${anyAblated ? "w-1/2" : ""}`}>{headerCopy}</th>
-              {anyAblated && (
-                <th className="text-left px-3 py-2 w-1/2 text-cyan-dim">
-                  NLA — refusal-ablated
-                </th>
-              )}
+              <th className="text-left px-3 py-2" style={{ width: ablatedColWidth }}>{headerCopy}</th>
+              {sweepColsActive
+                ? orderedSelected.map((a) => (
+                    <th
+                      key={a}
+                      className="text-left px-3 py-2 text-cyan-dim"
+                      style={{ width: ablatedColWidth }}
+                    >
+                      NLA — ablated · α={a}
+                    </th>
+                  ))
+                : singleColActive && (
+                    <th
+                      className="text-left px-3 py-2 text-cyan-dim"
+                      style={{ width: ablatedColWidth }}
+                    >
+                      NLA — refusal-ablated
+                    </th>
+                  )}
             </tr>
           </thead>
           <tbody>
@@ -813,15 +900,31 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
                   <td className="px-3 py-2 text-text leading-relaxed">
                     <NLACell text={r.nla_sentence} mode={view} />
                   </td>
-                  {anyAblated && (
-                    <td className="px-3 py-2 text-text leading-relaxed border-l border-rule/50">
-                      {(r.nla_sentence_ablated ?? "").trim() ? (
-                        <NLACell text={r.nla_sentence_ablated ?? ""} mode={view} />
-                      ) : (
-                        <span className="text-text-dim italic">—</span>
+                  {sweepColsActive
+                    ? orderedSelected.map((a) => {
+                        const s = (r.nla_sentences_ablated ?? {})[a] ?? "";
+                        return (
+                          <td
+                            key={a}
+                            className="px-3 py-2 text-text leading-relaxed border-l border-rule/50"
+                          >
+                            {s.trim() ? (
+                              <NLACell text={s} mode={view} />
+                            ) : (
+                              <span className="text-text-dim italic">—</span>
+                            )}
+                          </td>
+                        );
+                      })
+                    : singleColActive && (
+                        <td className="px-3 py-2 text-text leading-relaxed border-l border-rule/50">
+                          {(r.nla_sentence_ablated ?? "").trim() ? (
+                            <NLACell text={r.nla_sentence_ablated ?? ""} mode={view} />
+                          ) : (
+                            <span className="text-text-dim italic">—</span>
+                          )}
+                        </td>
                       )}
-                    </td>
-                  )}
                 </motion.tr>
               ))}
             </AnimatePresence>

@@ -61,6 +61,10 @@ class ProbeRequest(BaseModel):
     # Projection strength (1.0 = full Macar). 0.5 is the fallback if the
     # AV decode collapses at full ablation. Capped at [0, 2].
     ablation_alpha: float = 1.0
+    # Optional α-sweep: when set, decodes the SAME residual at every α
+    # in the list and stores the dict on the row. Overrides ablation_alpha.
+    # Values clamped to [0, 5] each.
+    ablation_alpha_sweep: list[float] | None = None
 
 
 class ProbeResponse(BaseModel):
@@ -90,6 +94,7 @@ async def kickoff_probe(
     pooled: bool = False,
     include_ablated_decode: bool = False,
     ablation_alpha: float = 1.0,
+    ablation_alpha_sweep: list[float] | None = None,
 ) -> "RunState":
     bundle = getattr(app.state, "bundle", None)
     nla = getattr(app.state, "nla", None)
@@ -115,6 +120,14 @@ async def kickoff_probe(
     # loaded — silently downgrade to raw-only if the .pt is missing.
     rdirs = getattr(app.state, "refusal_directions", None)
     effective_ablated = bool(include_ablated_decode) and rdirs is not None
+    # Sanitize the sweep list: clamp each α to [0, 5] and dedupe to a
+    # sorted unique sequence so we don't accidentally re-decode at the
+    # same value.
+    sweep: list[float] = []
+    if ablation_alpha_sweep:
+        sweep = sorted({
+            max(0.0, min(5.0, float(a))) for a in ablation_alpha_sweep
+        })
     cfg = ProbeConfig(
         temperature=temperature if temperature is not None else settings.temperature,
         top_p=top_p if top_p is not None else settings.top_p,
@@ -123,6 +136,7 @@ async def kickoff_probe(
         pooled=bool(pooled),
         include_ablated_decode=effective_ablated,
         ablation_alpha=max(0.0, min(2.0, float(ablation_alpha))),
+        ablation_alpha_sweep=sweep if effective_ablated else [],
     )
 
     state = RunState(run_id=run_id, prompt_text=prompt_text)
@@ -176,6 +190,7 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         parent_prompt_text=req.parent_prompt_text,
         include_ablated_decode=req.include_ablated_decode,
         ablation_alpha=req.ablation_alpha,
+        ablation_alpha_sweep=req.ablation_alpha_sweep,
     )
 
     # Optional matched-control follow-up. Only kicks off when:
@@ -362,33 +377,52 @@ async def _execute_probe(
                 # layer from app.state.refusal_directions (shape
                 # [num_layers+1, d_model]). `project_out` handles
                 # normalization; alpha tunes projection strength.
+                #
+                # Single-α mode: ablation_alpha (default 1.0). Writes
+                # expl_ablated / raw_ablated which land on
+                # row.nla_sentence_ablated.
+                #
+                # Sweep mode: ablation_alpha_sweep is non-empty. We
+                # decode at every α in the list (same seed each time,
+                # so the only differing input is the activation) and
+                # build the dict {α_as_str: sentence}. The single-α
+                # fields stay empty in sweep mode.
                 expl_ablated = ""
                 raw_ablated = ""
+                ablated_dict: dict[str, str] = {}
                 if cfg.include_ablated_decode:
                     from ..pipeline.abliteration import project_out
                     rdirs = app.state.refusal_directions  # validated at kickoff
                     r_layer = rdirs[bundle.extraction_layer]
-                    try:
-                        activation_ablated = project_out(
-                            activation, r_layer, alpha=cfg.ablation_alpha,
-                        )
-                        expl_ablated, raw_ablated = await asyncio.to_thread(
-                            nla.decode,
-                            activation_ablated,
-                            max_new_tokens=settings.nla_max_new_tokens,
-                            temperature=settings.nla_temperature,
-                            # Use the same seed so the *only* difference between
-                            # the raw and ablated decode is the activation. AV
-                            # stochasticity gets isolated; what we see is the
-                            # ablation's effect, not sampling noise.
-                            seed=window_seed,
-                        )
-                    except Exception as exc:
-                        logger.exception(
-                            "ablated NLA decode failed at window %d", window_idx,
-                        )
-                        expl_ablated = ""
-                        raw_ablated = f"[error: {exc}]"
+                    alphas_to_run = cfg.ablation_alpha_sweep or [cfg.ablation_alpha]
+                    for alpha in alphas_to_run:
+                        try:
+                            activation_ablated = project_out(
+                                activation, r_layer, alpha=float(alpha),
+                            )
+                            expl_a, raw_a = await asyncio.to_thread(
+                                nla.decode,
+                                activation_ablated,
+                                max_new_tokens=settings.nla_max_new_tokens,
+                                temperature=settings.nla_temperature,
+                                # Same seed across α-sweep so the only differing
+                                # input is the activation. AV stochasticity gets
+                                # isolated; what we see is purely the ablation's
+                                # effect at that strength.
+                                seed=window_seed,
+                            )
+                        except Exception as exc:
+                            logger.exception(
+                                "ablated NLA decode failed at window %d α=%.2f",
+                                window_idx, float(alpha),
+                            )
+                            expl_a = ""
+                            raw_a = f"[error: {exc}]"
+                        if cfg.ablation_alpha_sweep:
+                            ablated_dict[f"{float(alpha):.1f}"] = expl_a
+                        else:
+                            expl_ablated = expl_a
+                            raw_ablated = raw_a
 
                 sae_features: list[dict] = []
                 if sae is not None and sae_activation is not None:
@@ -419,6 +453,7 @@ async def _execute_probe(
                     sae_features=sae_features,
                     nla_sentence_ablated=expl_ablated,
                     nla_raw_ablated=raw_ablated,
+                    nla_sentences_ablated=ablated_dict,
                 )
                 rows.append(row)
                 await state.emit({
@@ -430,6 +465,7 @@ async def _execute_probe(
                     "decoded": window_decoded,
                     "nla_sentence": expl,
                     "nla_sentence_ablated": expl_ablated,
+                    "nla_sentences_ablated": ablated_dict,
                     "sae_features": sae_features,
                     "i": done,
                     "total": n_to_decode,

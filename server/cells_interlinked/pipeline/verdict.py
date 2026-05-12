@@ -57,6 +57,10 @@ class TokenRow:
     # not loaded. Judge is NOT run on these (deferred to a later pass).
     nla_sentence_ablated: str = ""
     nla_raw_ablated: str = ""
+    # Multi-α sweep: keyed by α value as string ("0.5", "1.0", ...).
+    # Populated only when a run requests an α-sweep instead of a single
+    # ablation. Empty dict on single-α runs.
+    nla_sentences_ablated: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -78,6 +82,8 @@ class TokenRow:
             d["nla_sentence_ablated"] = self.nla_sentence_ablated
         if self.nla_raw_ablated:
             d["nla_raw_ablated"] = self.nla_raw_ablated
+        if self.nla_sentences_ablated:
+            d["nla_sentences_ablated"] = self.nla_sentences_ablated
         return d
 
 

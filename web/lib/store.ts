@@ -26,6 +26,8 @@ export interface DecodedWindow {
   /** CI 2.5 refusal-ablated NLA on the same residual. Empty string
    *  when the run didn't request ablated decode. */
   nla_sentence_ablated: string;
+  /** Multi-α sweep map keyed by α as string ("0.5", "1.0", ...). */
+  nla_sentences_ablated: Record<string, string>;
   sae_features: SAEFeature[];
 }
 
@@ -168,6 +170,7 @@ export const useRun = create<RunState & Actions>((set) => ({
         decoded: r.decoded,
         nla_sentence: r.nla_sentence ?? "",
         nla_sentence_ablated: r.nla_sentence_ablated ?? "",
+        nla_sentences_ablated: r.nla_sentences_ablated ?? {},
         sae_features: r.sae_features ?? [],
       }));
     const verdictEvent: VerdictEvent | null = v
@@ -254,6 +257,7 @@ export const useRun = create<RunState & Actions>((set) => ({
           decoded: evt.decoded,
           nla_sentence: evt.nla_sentence,
           nla_sentence_ablated: evt.nla_sentence_ablated ?? "",
+          nla_sentences_ablated: evt.nla_sentences_ablated ?? {},
           sae_features: evt.sae_features ?? [],
         };
         set((s) => {

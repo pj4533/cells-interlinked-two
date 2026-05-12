@@ -144,8 +144,13 @@ class ProbeConfig:
     include_ablated_decode: bool = False
     # Strength of the ablation. 1.0 = full Macar projection. <1.0 =
     # partial projection (the smoke-fallback if the AV decode collapses
-    # at α=1.0).
+    # at α=1.0). Ignored when ablation_alpha_sweep is non-empty.
     ablation_alpha: float = 1.0
+    # CI 2.5 α-sweep: when non-empty, the AV decodes the SAME residual
+    # at every listed α value, and the per-row dict
+    # nla_sentences_ablated is populated. Doubles or more the AV decode
+    # cost per position. Empty list = single-α mode (use ablation_alpha).
+    ablation_alpha_sweep: list[float] = field(default_factory=list)
 
 
 @dataclass

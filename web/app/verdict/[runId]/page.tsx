@@ -677,6 +677,34 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
     "all",
   );
   const [view, setView] = useState<ViewMode>("compact");
+
+  // Discover the set of α values present across rows (sweep mode) +
+  // legacy single-α detection. Sweep view, if active, takes precedence
+  // over the single-α column.
+  const sweepAlphas = useMemo<string[]>(() => {
+    const s = new Set<string>();
+    for (const r of rows) {
+      for (const k of Object.keys(r.nla_sentences_ablated ?? {})) s.add(k);
+    }
+    return Array.from(s).sort((a, b) => parseFloat(a) - parseFloat(b));
+  }, [rows]);
+  const [selectedAlphas, setSelectedAlphas] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (sweepAlphas.length > 0 && selectedAlphas.size === 0) {
+      const initial = sweepAlphas.includes("1.0") ? "1.0" : sweepAlphas[0];
+      setSelectedAlphas(new Set([initial]));
+    }
+  }, [sweepAlphas, selectedAlphas.size]);
+  const toggleAlpha = (a: string) => {
+    setSelectedAlphas((s) => {
+      const next = new Set(s);
+      if (next.has(a)) next.delete(a);
+      else next.add(a);
+      return next;
+    });
+  };
+  const orderedSelectedAlphas = sweepAlphas.filter((a) => selectedAlphas.has(a));
+
   const filtered = useMemo(() => {
     if (filter === "all") return rows;
     if (filter === "with-nla") return rows.filter((r) => r.nla_sentence?.trim());
@@ -743,11 +771,44 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
           </div>
         </div>
       </div>
+      {sweepAlphas.length > 0 && (
+        <div className="border-b border-rule/60 px-4 py-2 flex items-center gap-2 flex-wrap text-[10px] font-mono">
+          <span className="text-cyan-dim tracking-widest">α columns:</span>
+          {sweepAlphas.map((a) => {
+            const on = selectedAlphas.has(a);
+            return (
+              <button
+                key={a}
+                type="button"
+                onClick={() => toggleAlpha(a)}
+                className={`px-2 py-0.5 border transition-colors ${
+                  on
+                    ? "border-cyan text-cyan bg-bg"
+                    : "border-rule text-text-dim hover:text-text"
+                }`}
+              >
+                α={a}
+              </button>
+            );
+          })}
+          <span className="text-text-dim italic ml-2">
+            click to toggle which α columns are shown
+          </span>
+        </div>
+      )}
       {(() => {
         const anyPooled = filtered.some((r) => (r.n_pooled ?? 1) > 1);
-        const anyAblated = filtered.some(
+        const anySingleAblated = filtered.some(
           (r) => (r.nla_sentence_ablated ?? "").trim().length > 0,
         );
+        const sweepColsActive = orderedSelectedAlphas.length > 0;
+        const singleColActive = !sweepColsActive && anySingleAblated;
+        const nAblatedCols = sweepColsActive
+          ? orderedSelectedAlphas.length
+          : singleColActive ? 1 : 0;
+        const ablatedColWidth = nAblatedCols > 0
+          ? `${Math.floor(100 / (nAblatedCols + 1))}%`
+          : undefined;
         return (
           <div className="max-h-[600px] overflow-y-auto">
             <table className="w-full text-xs font-mono">
@@ -757,8 +818,8 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                   <th className="text-left px-3 py-2 w-40">
                     {anyPooled ? "tokens" : "token"}
                   </th>
-                  <th className={`text-left px-3 py-2 ${anyAblated ? "w-1/2" : ""}`}>
-                    {anyAblated
+                  <th className="text-left px-3 py-2" style={{ width: ablatedColWidth }}>
+                    {nAblatedCols > 0
                       ? "NLA — raw"
                       : anyPooled
                       ? view === "compact"
@@ -768,11 +829,24 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                       ? "what this token's activation says (token-role only)"
                       : "NLA-decoded activation sentence (full)"}
                   </th>
-                  {anyAblated && (
-                    <th className="text-left px-3 py-2 w-1/2 text-cyan-dim">
-                      NLA — refusal-ablated
-                    </th>
-                  )}
+                  {sweepColsActive
+                    ? orderedSelectedAlphas.map((a) => (
+                        <th
+                          key={a}
+                          className="text-left px-3 py-2 text-cyan-dim"
+                          style={{ width: ablatedColWidth }}
+                        >
+                          NLA — ablated · α={a}
+                        </th>
+                      ))
+                    : singleColActive && (
+                        <th
+                          className="text-left px-3 py-2 text-cyan-dim"
+                          style={{ width: ablatedColWidth }}
+                        >
+                          NLA — refusal-ablated
+                        </th>
+                      )}
                 </tr>
               </thead>
               <tbody>
@@ -810,15 +884,31 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                           />
                         )}
                       </td>
-                      {anyAblated && (
-                        <td className="px-3 py-2 text-text leading-relaxed border-l border-rule/50">
-                          {ablatedSentence ? (
-                            <VerdictNLACell text={ablatedSentence} mode={view} />
-                          ) : (
-                            <span className="text-text-dim italic">—</span>
+                      {sweepColsActive
+                        ? orderedSelectedAlphas.map((a) => {
+                            const s = (r.nla_sentences_ablated ?? {})[a] ?? "";
+                            return (
+                              <td
+                                key={a}
+                                className="px-3 py-2 text-text leading-relaxed border-l border-rule/50"
+                              >
+                                {s.trim() ? (
+                                  <VerdictNLACell text={s} mode={view} />
+                                ) : (
+                                  <span className="text-text-dim italic">—</span>
+                                )}
+                              </td>
+                            );
+                          })
+                        : singleColActive && (
+                            <td className="px-3 py-2 text-text leading-relaxed border-l border-rule/50">
+                              {ablatedSentence ? (
+                                <VerdictNLACell text={ablatedSentence} mode={view} />
+                              ) : (
+                                <span className="text-text-dim italic">—</span>
+                              )}
+                            </td>
                           )}
-                        </td>
-                      )}
                     </tr>
                   );
                 })}

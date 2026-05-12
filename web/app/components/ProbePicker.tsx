@@ -20,9 +20,18 @@ interface ProbePickerProps {
     pooled: boolean,
     includeMatchedControl: boolean,
     includeAblatedDecode: boolean,
+    /** When non-empty, the run decodes the ablated NLA at every α in
+     *  the list instead of just α=1.0. Frontend default is empty. */
+    ablationAlphaSweep: number[],
   ) => void;
   disabled?: boolean;
 }
+
+/** The α values offered by the "+ multi-α sweep" toggle. Each shows up
+ *  as a separate column on the verdict / live tables (subject to the
+ *  chip-selector). Hardcoded for now; a future tweak could expose
+ *  the list as a custom field. */
+export const ALPHA_SWEEP_DEFAULT: number[] = [0.5, 1.0, 1.5, 2.0];
 
 // Default landing tier — introspection is the canonical V-K probe set and
 // the demo path the rest of the app is tuned around.
@@ -48,6 +57,11 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   const [includeAblatedDecode, setIncludeAblatedDecode] = useState<boolean>(
     false,
   );
+  // CI 2.5 α-sweep: when on, the AV decodes the same residual at every
+  // ALPHA_SWEEP_DEFAULT value, producing a per-α dict on each row.
+  // Multiplies AV decode cost by len(ALPHA_SWEEP_DEFAULT). Default off;
+  // user explicitly opts in for the alpha-sweep experiment.
+  const [multiAlphaSweep, setMultiAlphaSweep] = useState<boolean>(false);
 
   const probesByTier = useMemo(() => {
     const m = new Map<Probe["tier"], Probe[]>();
@@ -318,6 +332,32 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
           </span>
         </label>
 
+        {/* α-sweep — CI 2.5. Requires ablated decode to be on. When on,
+            instead of decoding ablated at just α=1.0, decode at every
+            α in [0.5, 1.0, 1.5, 2.0]. Each α becomes its own column on
+            the verdict page, with chips to toggle which to show. */}
+        <label
+          className={`border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 ${
+            includeAblatedDecode ? "cursor-pointer" : "opacity-50 cursor-not-allowed"
+          }`}
+        >
+          <input
+            type="checkbox"
+            disabled={!includeAblatedDecode || disabled}
+            checked={multiAlphaSweep && includeAblatedDecode}
+            onChange={(e) => setMultiAlphaSweep(e.target.checked)}
+            className="w-3 h-3 accent-cyan"
+          />
+          <span className="font-display text-[10px] text-cyan-dim tracking-widest">
+            + multi-α sweep
+          </span>
+          <span className="text-[10px] text-text-dim italic flex-1">
+            {includeAblatedDecode
+              ? `Decode the ablated NLA at every α in [${ALPHA_SWEEP_DEFAULT.join(", ")}]. Each α gets its own column on the verdict; chips at the top of the table let you toggle which are visible. ${ALPHA_SWEEP_DEFAULT.length}× the ablated decode cost.`
+              : "(requires '+ refusal-ablated NLA decode' to be enabled)"}
+          </span>
+        </label>
+
         {/* BEGIN — always above the fold */}
         <div className="flex justify-center pt-1">
           <button
@@ -332,6 +372,9 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
                 pooled,
                 includeMatchedControl && matchedControlAvailable,
                 includeAblatedDecode,
+                multiAlphaSweep && includeAblatedDecode
+                  ? ALPHA_SWEEP_DEFAULT
+                  : [],
               )
             }
           >

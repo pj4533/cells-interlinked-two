@@ -127,6 +127,7 @@ export async function startProbe(prompt: string, opts?: {
   include_matched_control?: boolean;
   include_ablated_decode?: boolean;
   ablation_alpha?: number;
+  ablation_alpha_sweep?: number[];
 }): Promise<StartProbeResult> {
   const res = await fetch(probeUrl(), {
     method: "POST",
