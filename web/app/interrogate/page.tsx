@@ -88,6 +88,9 @@ export default function InterrogatePage() {
       setPendingControlId(null);
       recoveredRef.current.clear();
       run.reset();
+      // Reset α selection so the next probe gets a fresh init from
+      // its own sweep data. View mode is sticky (operator preference).
+      setLiveSelectedAlphas(() => new Set());
       if (unsubRef.current) {
         unsubRef.current();
         unsubRef.current = null;
@@ -253,6 +256,16 @@ export default function InterrogatePage() {
     run.isRunning && run.phase === "generating" && run.totalTokens === 0;
   const outputText = run.outputTokens.map((t) => t.decoded).join("");
 
+  // LiveNLATable UI state — lifted to this stable parent so it
+  // survives layout transitions (generating → decoding → done) and
+  // any descendant remounts. The view toggle is sticky across probes
+  // (operator preference); the α selection is initialized fresh by
+  // LiveNLATable when sweep data first appears for a run.
+  const [liveView, setLiveView] = useState<ViewMode>("compact");
+  const [liveSelectedAlphas, setLiveSelectedAlphas] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   return (
     <div className="flex-1 flex flex-col gap-5 px-4 py-4 max-w-screen-2xl mx-auto w-full relative">
       {/* Probe echo */}
@@ -276,7 +289,14 @@ export default function InterrogatePage() {
       {run.phase === "generating" || run.phase === "idle" ? (
         <GeneratingLayout run={run} outputText={outputText} />
       ) : (
-        <DecodingLayout run={run} outputText={outputText} />
+        <DecodingLayout
+          run={run}
+          outputText={outputText}
+          liveView={liveView}
+          setLiveView={setLiveView}
+          liveSelectedAlphas={liveSelectedAlphas}
+          setLiveSelectedAlphas={setLiveSelectedAlphas}
+        />
       )}
 
       <WarmingUpOverlay visible={warmingUp} />
@@ -714,9 +734,17 @@ function GeneratingLayout({
 function DecodingLayout({
   run,
   outputText,
+  liveView,
+  setLiveView,
+  liveSelectedAlphas,
+  setLiveSelectedAlphas,
 }: {
   run: RunSlice;
   outputText: string;
+  liveView: ViewMode;
+  setLiveView: (v: ViewMode) => void;
+  liveSelectedAlphas: Set<string>;
+  setLiveSelectedAlphas: (updater: (s: Set<string>) => Set<string>) => void;
 }) {
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(0,2fr)] flex-1 min-h-0">
@@ -729,13 +757,36 @@ function DecodingLayout({
         </div>
       </div>
 
-      <LiveNLATable rows={run.decodedWindows} />
+      <LiveNLATable
+        rows={run.decodedWindows}
+        runKey={run.runId ?? "none"}
+        view={liveView}
+        setView={setLiveView}
+        selectedAlphas={liveSelectedAlphas}
+        setSelectedAlphas={setLiveSelectedAlphas}
+      />
     </div>
   );
 }
 
-function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
-  const [view, setView] = useState<ViewMode>("compact");
+function LiveNLATable({
+  rows,
+  runKey,
+  view,
+  setView,
+  selectedAlphas,
+  setSelectedAlphas,
+}: {
+  rows: DecodedWindow[];
+  /** Probe identifier. When this changes (new probe), the α-selection
+   *  init re-runs so each probe picks up its own default. Stable
+   *  within a probe so chip toggles aren't overwritten. */
+  runKey: string;
+  view: ViewMode;
+  setView: (v: ViewMode) => void;
+  selectedAlphas: Set<string>;
+  setSelectedAlphas: (updater: (s: Set<string>) => Set<string>) => void;
+}) {
   const anyPooled = rows.some((r) => r.n_pooled > 1);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -749,17 +800,20 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
     }
     return Array.from(set).sort((a, b) => parseFloat(a) - parseFloat(b));
   }, [rows]);
-  // Default selection: when sweep is active, show only α=1.0 (matches
-  // single-α behavior at first glance). User adds/removes others.
-  const [selectedAlphas, setSelectedAlphas] = useState<Set<string>>(new Set());
-  // Initialize on first render where sweep alphas appear.
+  // Initialize α selection once per probe. After the first init for a
+  // given runKey, the user owns the selection — we never override it,
+  // even if they clear everything. When a new probe starts, the parent
+  // resets selectedAlphas + runKey changes → we re-init for that probe.
+  // (Previous bug: an unguarded init effect kept re-enabling α=1.0
+  // every time a new row landed if the selection set was empty.)
+  const initedForRunRef = useRef<string>("");
   useEffect(() => {
-    if (sweepAlphas.length > 0 && selectedAlphas.size === 0) {
-      // Pick α=1.0 if present, else the first one.
-      const initial = sweepAlphas.includes("1.0") ? "1.0" : sweepAlphas[0];
-      setSelectedAlphas(new Set([initial]));
-    }
-  }, [sweepAlphas, selectedAlphas.size]);
+    if (initedForRunRef.current === runKey) return;
+    if (sweepAlphas.length === 0) return;
+    const initial = sweepAlphas.includes("1.0") ? "1.0" : sweepAlphas[0];
+    setSelectedAlphas(() => new Set([initial]));
+    initedForRunRef.current = runKey;
+  }, [sweepAlphas, runKey, setSelectedAlphas]);
 
   const toggleAlpha = (a: string) => {
     setSelectedAlphas((s) => {
@@ -776,9 +830,19 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
     (r) => (r.nla_sentence_ablated ?? "").trim().length > 0,
   );
 
-  // Auto-scroll to the most recent row as decodes arrive.
+  // Auto-scroll behavior: follow the bottom only if the user is
+  // ALREADY at the bottom. If they've scrolled up to read an earlier
+  // row, we don't yank them down when a new decode arrives. Threshold
+  // is generous (80px) so a tiny manual scroll doesn't lock follow.
+  const followBottomRef = useRef(true);
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const dist = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    followBottomRef.current = dist < 80;
+  };
   useEffect(() => {
     if (!containerRef.current) return;
+    if (!followBottomRef.current) return;
     containerRef.current.scrollTop = containerRef.current.scrollHeight;
   }, [rows.length]);
 
@@ -831,7 +895,7 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
           </span>
         </div>
       )}
-      <div ref={containerRef} className="overflow-y-auto max-h-[680px]">
+      <div ref={containerRef} onScroll={onScroll} className="overflow-y-auto max-h-[680px]">
         {(() => {
           // Effective ablated columns: prefer sweep selection when
           // present; otherwise fall back to the single-α column when
