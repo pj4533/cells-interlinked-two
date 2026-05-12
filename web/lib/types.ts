@@ -100,10 +100,27 @@ export interface VerdictAggregate {
   n_judged?: number;
 }
 
+/** Result of CI 2.5's runtime-ablation second generation pass. M's
+ *  forward hook on the extraction layer subtracts the refusal-
+ *  direction projection from every residual; the output_text captures
+ *  what M would *say* under ablation. */
+export interface RuntimeAblation {
+  output_text: string;
+  alpha: number;
+  direction_variant: string;
+}
+
+export interface AblatedOutputDoneEvent {
+  type: "ablated_output_done";
+  output_text: string;
+  alpha: number;
+}
+
 export interface VerdictEvent {
   type: "verdict";
   rows: VerdictRow[];
   aggregate: VerdictAggregate;
+  runtime_ablation?: RuntimeAblation | null;
 }
 
 export interface DoneEvent {
@@ -123,5 +140,6 @@ export type StreamEvent =
   | NLADecodedEvent
   | StoppedEvent
   | VerdictEvent
+  | AblatedOutputDoneEvent
   | DoneEvent
   | ErrorEvent;

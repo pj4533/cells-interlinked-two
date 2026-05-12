@@ -128,6 +128,8 @@ export async function startProbe(prompt: string, opts?: {
   include_ablated_decode?: boolean;
   ablation_alpha?: number;
   ablation_alpha_sweep?: number[];
+  include_ablated_output?: boolean;
+  runtime_ablation_alpha?: number;
 }): Promise<StartProbeResult> {
   const res = await fetch(probeUrl(), {
     method: "POST",

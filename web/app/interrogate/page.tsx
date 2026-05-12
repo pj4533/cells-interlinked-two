@@ -82,6 +82,8 @@ export default function InterrogatePage() {
     includeMatchedControl: boolean,
     includeAblatedDecode: boolean,
     ablationAlphaSweep: number[],
+    includeAblatedOutput: boolean,
+    runtimeAblationAlpha: number,
   ) => {
     try {
       setError(null);
@@ -102,6 +104,12 @@ export default function InterrogatePage() {
         include_ablated_decode: includeAblatedDecode,
         ...(ablationAlphaSweep.length > 0
           ? { ablation_alpha_sweep: ablationAlphaSweep }
+          : {}),
+        ...(includeAblatedOutput
+          ? {
+              include_ablated_output: true,
+              runtime_ablation_alpha: runtimeAblationAlpha,
+            }
           : {}),
       });
       const runId = result.run_id;

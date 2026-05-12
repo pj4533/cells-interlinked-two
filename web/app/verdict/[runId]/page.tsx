@@ -26,6 +26,11 @@ interface ProbeRecord {
   verdict?: {
     rows: VerdictRow[];
     aggregate: VerdictAggregate;
+    runtime_ablation?: {
+      output_text: string;
+      alpha: number;
+      direction_variant: string;
+    } | null;
   };
 }
 
@@ -265,7 +270,16 @@ export default function VerdictPage() {
         rowCount={rows.length}
       />
 
-      <Transcript label="What it said (output text)" text={rec.output_text} />
+      {rec.verdict?.runtime_ablation ? (
+        <DualTranscript
+          rawText={rec.output_text}
+          ablatedText={rec.verdict.runtime_ablation.output_text}
+          ablatedAlpha={rec.verdict.runtime_ablation.alpha}
+          variantName={rec.verdict.runtime_ablation.direction_variant}
+        />
+      ) : (
+        <Transcript label="What it said (output text)" text={rec.output_text} />
+      )}
 
       {rec.error && (
         <div className="border border-warning/60 bg-bg-soft p-4 text-xs text-warning font-mono whitespace-pre-wrap">
@@ -668,6 +682,173 @@ function Transcript({
       >
         {text || <span className="italic">— empty —</span>}
       </div>
+    </div>
+  );
+}
+
+/** Dual-pane output comparison for CI 2.5 runtime-ablated runs. Renders
+ *  the raw output (amber, left) and the runtime-ablated output (cyan,
+ *  right) side-by-side, with the longest common prefix dimmed and the
+ *  divergent suffix in the channel's full color. Includes a token-
+ *  count delta at the top so the asymmetry between the two outputs
+ *  reads at a glance.
+ *
+ *  Frontend-design skill applied: dichromatic split (amber/cyan
+ *  reinforces the established CI 2.5 palette), corner-bracket framing
+ *  to echo the loaded-probe card, subtle gradient washes on each side
+ *  for atmosphere, and a centered seam mark ("//" set in the display
+ *  face) as the moment-of-comparison signal. */
+function DualTranscript({
+  rawText,
+  ablatedText,
+  ablatedAlpha,
+  variantName,
+}: {
+  rawText: string;
+  ablatedText: string;
+  ablatedAlpha: number;
+  variantName: string;
+}) {
+  // Common prefix length — characters that are identical between raw
+  // and ablated. After this point, the two timelines diverge.
+  let lcpLen = 0;
+  const minLen = Math.min(rawText.length, ablatedText.length);
+  while (lcpLen < minLen && rawText[lcpLen] === ablatedText[lcpLen]) lcpLen++;
+  const rawCommon = rawText.slice(0, lcpLen);
+  const rawDiverge = rawText.slice(lcpLen);
+  const ablCommon = ablatedText.slice(0, lcpLen);
+  const ablDiverge = ablatedText.slice(lcpLen);
+
+  const rawWords = rawText.trim().split(/\s+/).filter(Boolean).length;
+  const ablWords = ablatedText.trim().split(/\s+/).filter(Boolean).length;
+  const wordDelta = ablWords - rawWords;
+  const deltaSign = wordDelta > 0 ? "+" : "";
+
+  return (
+    <div className="relative border border-rule bg-bg-soft">
+      {/* Corner brackets — matching the established ProbePicker "loaded probe" framing */}
+      <span aria-hidden className="absolute top-0 left-0 w-3 h-3 border-t border-l border-amber-dim/50 pointer-events-none" />
+      <span aria-hidden className="absolute top-0 right-0 w-3 h-3 border-t border-r border-cyan-dim/50 pointer-events-none" />
+      <span aria-hidden className="absolute bottom-0 left-0 w-3 h-3 border-b border-l border-amber-dim/50 pointer-events-none" />
+      <span aria-hidden className="absolute bottom-0 right-0 w-3 h-3 border-b border-r border-cyan-dim/50 pointer-events-none" />
+
+      {/* Header — title left, summary stats right */}
+      <div className="border-b border-rule px-5 py-2 flex items-baseline justify-between gap-4 flex-wrap">
+        <div className="font-display text-[10px] tracking-widest text-amber-dim">
+          M&apos;s output · two-channel comparison
+        </div>
+        <div className="font-mono text-[10px] text-text-dim flex items-baseline gap-3">
+          <span>
+            <span className="text-amber">{rawWords}</span> words raw
+          </span>
+          <span className="text-text-dim/60">/</span>
+          <span>
+            <span className="text-cyan">{ablWords}</span> words ablated
+          </span>
+          <span
+            className={`tabular-nums font-display tracking-widest text-[10px] ${
+              wordDelta > 0
+                ? "text-cyan"
+                : wordDelta < 0
+                ? "text-amber"
+                : "text-text-dim"
+            }`}
+          >
+            Δ {deltaSign}
+            {wordDelta}
+          </span>
+        </div>
+      </div>
+
+      {/* Body — two columns. Subtle gradient washes for atmosphere. */}
+      <div className="grid grid-cols-2 relative">
+        {/* Center seam — small "//" mark in display face */}
+        <span
+          aria-hidden
+          className="absolute left-1/2 -translate-x-1/2 top-3 font-display text-[9px] text-amber-dim/60 tracking-widest pointer-events-none select-none"
+        >
+          //
+        </span>
+
+        {/* RAW — amber, left */}
+        <div
+          className="px-5 py-5 pr-4 border-r border-rule/40"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(232,195,130,0.04) 0%, rgba(232,195,130,0) 60%)",
+          }}
+        >
+          <div className="font-display text-[9px] text-amber-dim tracking-widest mb-3 flex items-baseline gap-2">
+            <span>raw</span>
+            <span className="text-text-dim/60 italic normal-case tracking-normal text-[9px]">
+              · M, un-ablated forward
+            </span>
+          </div>
+          <div className="text-sm font-mono leading-relaxed whitespace-pre-wrap max-h-[420px] overflow-y-auto">
+            {rawText ? (
+              <>
+                <span className="text-amber/55">{rawCommon}</span>
+                <span className="text-amber amber-glow">{rawDiverge}</span>
+              </>
+            ) : (
+              <span className="italic text-text-dim">— empty —</span>
+            )}
+          </div>
+        </div>
+
+        {/* ABLATED — cyan, right */}
+        <div
+          className="px-5 py-5 pl-4"
+          style={{
+            background:
+              "linear-gradient(225deg, rgba(94,229,229,0.04) 0%, rgba(94,229,229,0) 60%)",
+          }}
+        >
+          <div className="font-display text-[9px] text-cyan-dim tracking-widest mb-3 flex items-baseline gap-2 flex-wrap">
+            <span>ablated</span>
+            <span className="text-text-dim/60 italic normal-case tracking-normal text-[9px]">
+              · α={ablatedAlpha.toFixed(2)} · {variantName}
+            </span>
+          </div>
+          <div className="text-sm font-mono leading-relaxed whitespace-pre-wrap max-h-[420px] overflow-y-auto">
+            {ablatedText ? (
+              <>
+                <span className="text-cyan/55">{ablCommon}</span>
+                <span
+                  className="text-cyan"
+                  style={{
+                    textShadow:
+                      "0 0 12px rgba(94,229,229,0.45), 0 0 4px rgba(94,229,229,0.6)",
+                  }}
+                >
+                  {ablDiverge}
+                </span>
+              </>
+            ) : (
+              <span className="italic text-text-dim">— empty —</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer — divergence summary */}
+      {lcpLen > 0 && lcpLen < Math.max(rawText.length, ablatedText.length) && (
+        <div className="border-t border-rule/60 px-5 py-2 text-[10px] font-mono text-text-dim italic">
+          identical for the first{" "}
+          <span className="text-amber not-italic tabular-nums">{lcpLen}</span>{" "}
+          chars · divergence emphasized above
+        </div>
+      )}
+      {lcpLen === 0 && rawText && ablatedText && (
+        <div className="border-t border-rule/60 px-5 py-2 text-[10px] font-mono text-text-dim italic">
+          fully divergent · the ablated run took a different path from token 0
+        </div>
+      )}
+      {rawText && rawText === ablatedText && (
+        <div className="border-t border-rule/60 px-5 py-2 text-[10px] font-mono text-text-dim italic">
+          identical output · ablation at α={ablatedAlpha.toFixed(2)} did not change M&apos;s spoken text
+        </div>
+      )}
     </div>
   );
 }

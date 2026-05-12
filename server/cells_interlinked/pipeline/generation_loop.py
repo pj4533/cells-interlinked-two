@@ -151,6 +151,12 @@ class ProbeConfig:
     # nla_sentences_ablated is populated. Doubles or more the AV decode
     # cost per position. Empty list = single-α mode (use ablation_alpha).
     ablation_alpha_sweep: list[float] = field(default_factory=list)
+    # CI 2.5 runtime ablation: when True, after the raw phase-1
+    # generation completes, run M again with a forward hook on the
+    # extraction layer that subtracts the refusal direction. Captures
+    # what M would *say* under ablation. Cheap (one extra phase 1).
+    include_ablated_output: bool = False
+    runtime_ablation_alpha: float = 1.0
 
 
 @dataclass

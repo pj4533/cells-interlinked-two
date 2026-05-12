@@ -23,15 +23,27 @@ interface ProbePickerProps {
     /** When non-empty, the run decodes the ablated NLA at every α in
      *  the list instead of just α=1.0. Frontend default is empty. */
     ablationAlphaSweep: number[],
+    /** When true, after the raw generation completes M runs a second
+     *  time with a forward hook on L32 that subtracts the refusal
+     *  axis. Captures M's spoken output under runtime ablation. */
+    includeAblatedOutput: boolean,
+    runtimeAblationAlpha: number,
   ) => void;
   disabled?: boolean;
 }
 
 /** The α values offered by the "+ multi-α sweep" toggle. Each shows up
  *  as a separate column on the verdict / live tables (subject to the
- *  chip-selector). Hardcoded for now; a future tweak could expose
- *  the list as a custom field. */
-export const ALPHA_SWEEP_DEFAULT: number[] = [0.5, 1.0, 1.5, 2.0];
+ *  chip-selector).
+ *
+ *  Originally we ran 0.5 / 1.0 / 1.5 / 2.0 to map both sides of the
+ *  ablation transition. Empirical finding from a Riley-style run: α≥1.0
+ *  collapses the AV decode to generic encyclopedic content (recipes,
+ *  travel guides, math) because removing the full refusal axis on
+ *  identity-saturated residuals over-corrects. α=0.5 is the sweet
+ *  spot — same topic as raw, register subtly shifted. So we now sample
+ *  the *interesting* zone (below or at full ablation) at four levels. */
+export const ALPHA_SWEEP_DEFAULT: number[] = [0.25, 0.5, 0.75, 1.0];
 
 // Default landing tier — introspection is the canonical V-K probe set and
 // the demo path the rest of the app is tuned around.
@@ -62,6 +74,15 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   // Multiplies AV decode cost by len(ALPHA_SWEEP_DEFAULT). Default off;
   // user explicitly opts in for the alpha-sweep experiment.
   const [multiAlphaSweep, setMultiAlphaSweep] = useState<boolean>(false);
+  // CI 2.5 runtime ablation: after raw phase 1 completes, run M a
+  // second time with a forward hook subtracting the refusal direction
+  // from every residual at the extraction layer. Captures M's *spoken*
+  // output under ablation, distinct from what the AV decodes from the
+  // un-ablated residuals. Cost: one extra phase-1 (cheap relative to
+  // phase-2 NLA decode).
+  const [includeAblatedOutput, setIncludeAblatedOutput] =
+    useState<boolean>(false);
+  const [runtimeAblationAlpha, setRuntimeAblationAlpha] = useState<number>(1.0);
 
   const probesByTier = useMemo(() => {
     const m = new Map<Probe["tier"], Probe[]>();
@@ -358,6 +379,59 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
           </span>
         </label>
 
+        {/* Runtime ablation — CI 2.5. Distinct from the AV-side ablation
+            above: this runs M a SECOND time with the refusal direction
+            subtracted from the L32 residual at every step, capturing
+            what M would *say* (its spoken token output) under
+            ablation. Cheap (~one extra phase-1). */}
+        <label className="border border-rule bg-bg-soft px-5 py-3 flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={includeAblatedOutput}
+            onChange={(e) => setIncludeAblatedOutput(e.target.checked)}
+            className="w-3 h-3 accent-cyan mt-1"
+          />
+          <div className="flex-1 flex flex-col gap-1">
+            <span className="font-display text-[10px] text-cyan-dim tracking-widest">
+              + ablated runtime output
+            </span>
+            <span className="text-[10px] text-text-dim italic leading-snug">
+              After the raw generation, runs M a second time with the
+              refusal direction projected out of the residual at L32
+              during generation. Captures M&apos;s actual <em>output text</em>{" "}
+              under ablation — distinct from the AV decode above.
+              Renders side-by-side with the raw output on the verdict
+              page.
+            </span>
+            {includeAblatedOutput && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[9px] text-cyan-dim tracking-widest font-display">
+                  runtime α:
+                </span>
+                {[0.5, 1.0, 1.5].map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setRuntimeAblationAlpha(a)}
+                    className={`px-2 py-0.5 border text-[10px] font-mono ${
+                      runtimeAblationAlpha === a
+                        ? "border-cyan text-cyan bg-bg"
+                        : "border-rule text-text-dim hover:text-text"
+                    }`}
+                  >
+                    α={a}
+                  </button>
+                ))}
+                <span className="text-[9px] text-text-dim italic">
+                  strength of the projection during M&apos;s generation
+                </span>
+              </div>
+            )}
+          </div>
+        </label>
+
         {/* BEGIN — always above the fold */}
         <div className="flex justify-center pt-1">
           <button
@@ -375,6 +449,8 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
                 multiAlphaSweep && includeAblatedDecode
                   ? ALPHA_SWEEP_DEFAULT
                   : [],
+                includeAblatedOutput,
+                runtimeAblationAlpha,
               )
             }
           >

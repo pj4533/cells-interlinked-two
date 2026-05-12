@@ -65,6 +65,16 @@ class ProbeRequest(BaseModel):
     # in the list and stores the dict on the row. Overrides ablation_alpha.
     # Values clamped to [0, 5] each.
     ablation_alpha_sweep: list[float] | None = None
+    # CI 2.5: also generate a SECOND output text under runtime ablation
+    # — M's forward pass at the extraction layer has the refusal
+    # direction projected out. Captures what M would *say* under
+    # ablation, in addition to what the AV decodes from un-ablated
+    # residuals. Distinct from include_ablated_decode, which only
+    # affects the AV's view, not M's generation.
+    include_ablated_output: bool = False
+    # Projection strength for the runtime hook. 1.0 = full Macar.
+    # Clamped to [0, 5].
+    runtime_ablation_alpha: float = 1.0
 
 
 class ProbeResponse(BaseModel):
@@ -95,6 +105,8 @@ async def kickoff_probe(
     include_ablated_decode: bool = False,
     ablation_alpha: float = 1.0,
     ablation_alpha_sweep: list[float] | None = None,
+    include_ablated_output: bool = False,
+    runtime_ablation_alpha: float = 1.0,
 ) -> "RunState":
     bundle = getattr(app.state, "bundle", None)
     nla = getattr(app.state, "nla", None)
@@ -128,6 +140,10 @@ async def kickoff_probe(
         sweep = sorted({
             max(0.0, min(5.0, float(a))) for a in ablation_alpha_sweep
         })
+    # Runtime ablation can be enabled independently of the AV-side
+    # ablated decode. It only requires the refusal directions to be
+    # loaded (so we have a vector to project onto).
+    effective_ablated_output = bool(include_ablated_output) and rdirs is not None
     cfg = ProbeConfig(
         temperature=temperature if temperature is not None else settings.temperature,
         top_p=top_p if top_p is not None else settings.top_p,
@@ -137,6 +153,8 @@ async def kickoff_probe(
         include_ablated_decode=effective_ablated,
         ablation_alpha=max(0.0, min(2.0, float(ablation_alpha))),
         ablation_alpha_sweep=sweep if effective_ablated else [],
+        include_ablated_output=effective_ablated_output,
+        runtime_ablation_alpha=max(0.0, min(5.0, float(runtime_ablation_alpha))),
     )
 
     state = RunState(run_id=run_id, prompt_text=prompt_text)
@@ -191,6 +209,8 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         include_ablated_decode=req.include_ablated_decode,
         ablation_alpha=req.ablation_alpha,
         ablation_alpha_sweep=req.ablation_alpha_sweep,
+        include_ablated_output=req.include_ablated_output,
+        runtime_ablation_alpha=req.runtime_ablation_alpha,
     )
 
     # Optional matched-control follow-up. Only kicks off when:
@@ -315,6 +335,60 @@ async def _execute_probe(
             await state.event_log.close()
             state.completed = True
             return
+
+        # ── Phase 1b (optional): runtime-ablated generation ──────────
+        # When include_ablated_output is set and refusal directions are
+        # loaded, run M a second time with a forward hook on L32 that
+        # subtracts the refusal-direction projection from every residual
+        # before it propagates to subsequent layers. Captures M's
+        # output_text under ablation. Same seed as phase 1 so the only
+        # differing input to the sampler is the modified residual stream.
+        # No SSE token-streaming for this run — we just persist the
+        # final text and emit one event per probe so the verdict can
+        # render the comparison.
+        output_text_ablated: str | None = None
+        if cfg.include_ablated_output and not state.cancel_event.is_set():
+            rdirs_inflight = getattr(app.state, "refusal_directions", None)
+            if rdirs_inflight is not None:
+                from ..pipeline.abliteration import install_runtime_ablation_hook
+                r_layer = rdirs_inflight[bundle.extraction_layer]
+                await state.emit({
+                    "type": "phase",
+                    "name": "ablated_generation",
+                    "total": 0,
+                })
+                hook_handle = install_runtime_ablation_hook(
+                    bundle.model,
+                    bundle.extraction_layer,
+                    r_layer,
+                    cfg.runtime_ablation_alpha,
+                )
+                try:
+                    ablated_result = await run_probe(
+                        bundle=bundle,
+                        rendered_prompt=rendered,
+                        cfg=cfg,
+                        cancel_event=state.cancel_event,
+                        queue=None,  # silent — no token streaming
+                        extra_layers=extra_layers,
+                    )
+                    if ablated_result is not None:
+                        output_text_ablated = "".join(
+                            c.decoded for c in ablated_result.captured
+                        )
+                except Exception as exc:
+                    logger.exception("phase1b runtime-ablated generation failed")
+                    output_text_ablated = f"[error: {exc}]"
+                finally:
+                    try:
+                        hook_handle.remove()
+                    except Exception:
+                        logger.exception("failed to remove runtime ablation hook")
+                await state.emit({
+                    "type": "ablated_output_done",
+                    "output_text": output_text_ablated or "",
+                    "alpha": float(cfg.runtime_ablation_alpha),
+                })
 
         # ── Phase 2: NLA decode each captured window ────────────────
         n_total = len(result.captured)
@@ -528,10 +602,30 @@ async def _execute_probe(
 
         verdict = compute_verdict(rows)
 
+        # Attach the runtime-ablation output to the verdict so it lands
+        # in the persisted verdict_json blob alongside the rows.
+        if output_text_ablated is not None:
+            # Read the variant name from the loaded directions sidecar.
+            variant_name = "v1_meandiff"
+            try:
+                import json as _json
+                meta_path = settings.db_path.parent / "refusal_directions.pt.json"
+                if meta_path.exists():
+                    meta = _json.loads(meta_path.read_text())
+                    variant_name = meta.get("variant_name", variant_name)
+            except Exception:
+                pass
+            verdict.runtime_ablation = {
+                "output_text": output_text_ablated,
+                "alpha": float(cfg.runtime_ablation_alpha),
+                "direction_variant": variant_name,
+            }
+
         await state.emit({
             "type": "verdict",
             "rows": [r.to_dict() for r in verdict.rows],
             "aggregate": verdict.aggregate,
+            "runtime_ablation": verdict.runtime_ablation,
         })
 
         # If the user clicked Halt, override stopped_reason regardless

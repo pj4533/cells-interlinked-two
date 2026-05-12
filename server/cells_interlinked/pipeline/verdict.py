@@ -91,12 +91,19 @@ class TokenRow:
 class Verdict:
     rows: list[TokenRow] = field(default_factory=list)
     aggregate: dict[str, Any] = field(default_factory=dict)
+    # CI 2.5: when the probe ran with include_ablated_output=True, this
+    # holds the result of M's second generation pass under runtime
+    # ablation: { output_text, alpha, direction_variant_name }.
+    runtime_ablation: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "rows": [r.to_dict() for r in self.rows],
             "aggregate": self.aggregate,
         }
+        if self.runtime_ablation is not None:
+            d["runtime_ablation"] = self.runtime_ablation
+        return d
 
 
 def compute_verdict(rows: list[TokenRow]) -> Verdict:

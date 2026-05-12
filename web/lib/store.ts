@@ -61,6 +61,12 @@ export interface RunState {
   stoppedReason: string | null;
   verdict: VerdictEvent | null;
   error: string | null;
+  /** CI 2.5 runtime-ablated output, when include_ablated_output=true.
+   *  Streams in via the ablated_output_done event in mid-run; the final
+   *  value lives on verdict.runtime_ablation after the verdict lands.
+   *  Live UI reads this field for the in-flight dual output panel. */
+  ablatedOutputText: string | null;
+  ablatedOutputAlpha: number | null;
 }
 
 interface Actions {
@@ -106,6 +112,11 @@ export interface ProbeRecordLike {
       frac_eval: number;
       frac_introspect: number;
     };
+    runtime_ablation?: {
+      output_text: string;
+      alpha: number;
+      direction_variant: string;
+    } | null;
   };
 }
 
@@ -126,6 +137,8 @@ const initial: RunState = {
   stoppedReason: null,
   verdict: null,
   error: null,
+  ablatedOutputText: null,
+  ablatedOutputAlpha: null,
 };
 
 export const useRun = create<RunState & Actions>((set) => ({
@@ -174,7 +187,12 @@ export const useRun = create<RunState & Actions>((set) => ({
         sae_features: r.sae_features ?? [],
       }));
     const verdictEvent: VerdictEvent | null = v
-      ? { type: "verdict", rows: v.rows, aggregate: v.aggregate }
+      ? {
+          type: "verdict",
+          rows: v.rows,
+          aggregate: v.aggregate,
+          runtime_ablation: v.runtime_ablation ?? null,
+        }
       : null;
     set({
       runId: rec.run_id,
@@ -193,6 +211,8 @@ export const useRun = create<RunState & Actions>((set) => ({
       stoppedReason: rec.stopped_reason ?? "recovered",
       verdict: verdictEvent,
       error: rec.error ?? null,
+      ablatedOutputText: v?.runtime_ablation?.output_text ?? null,
+      ablatedOutputAlpha: v?.runtime_ablation?.alpha ?? null,
     });
   },
 
@@ -284,6 +304,18 @@ export const useRun = create<RunState & Actions>((set) => ({
           verdict: evt,
           phase: "done",
           decodeProgress: null,
+        });
+        return;
+      }
+      case "ablated_output_done": {
+        // The runtime-ablated phase 1b just finished. Stash the text
+        // so the live + verdict UIs can render the dual output panel
+        // even before the final 'verdict' event arrives. The verdict
+        // event will also carry runtime_ablation; that's the
+        // canonical source after persistence.
+        set({
+          ablatedOutputText: evt.output_text,
+          ablatedOutputAlpha: evt.alpha,
         });
         return;
       }

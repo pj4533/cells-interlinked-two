@@ -220,4 +220,78 @@ __all__ = [
     "extract_refusal_directions",
     "save_directions",
     "load_directions",
+    "install_runtime_ablation_hook",
 ]
+
+
+# --------------------------------------------------------------------------- #
+#  Runtime ablation — forward hook on M's decoder layer                        #
+# --------------------------------------------------------------------------- #
+
+def _find_decoder_layers(model: Any) -> Any:
+    """Mirror of MultiLayerHook._find_layers in generation_loop. Walks the
+    nested module tree to locate the list of decoder layers, handling
+    Gemma-3's multimodal wrapper (Gemma3ForConditionalGeneration →
+    .model.language_model.layers) and the more common Llama/Qwen-style
+    .model.layers."""
+    m = model
+    for path in (
+        ("model", "layers"),
+        ("model", "language_model", "layers"),  # Gemma-3 multimodal wrapper
+        ("model", "model", "layers"),
+        ("language_model", "layers"),
+        ("language_model", "model", "layers"),
+        ("transformer", "h"),
+        ("gpt_neox", "layers"),
+    ):
+        cur = m
+        ok = True
+        for attr in path:
+            if not hasattr(cur, attr):
+                ok = False
+                break
+            cur = getattr(cur, attr)
+        if ok:
+            return cur
+    raise RuntimeError(
+        f"could not locate decoder layers on {type(m).__name__}"
+    )
+
+
+def install_runtime_ablation_hook(
+    model: Any,
+    layer_idx: int,
+    r_layer: Tensor,
+    alpha: float = 1.0,
+):
+    """Register a forward hook on `model`'s decoder layer `layer_idx` that
+    subtracts the projection of every position's residual onto `r_layer`
+    on the way out. Modifies the layer's output IN PLACE for subsequent
+    layers to consume.
+
+    Returns the handle; caller should call `.remove()` to detach.
+
+    Why every position, not just last: during the prompt forward pass
+    AND every generation step, the layer emits a residual for every
+    position in the current input. We ablate all of them so the model's
+    next-token logits — computed from the post-block-32 residual at the
+    last position — are based on a fully ablated residual stream. This
+    matches the Macar/Arditi runtime-intervention recipe.
+    """
+    if r_layer.dim() != 1:
+        raise ValueError(
+            f"r_layer must be 1-D [d_model], got shape {tuple(r_layer.shape)}"
+        )
+    layers = _find_decoder_layers(model)
+    layer = layers[layer_idx]
+
+    def hook(_mod, _inp, output):
+        # HF decoder layers return either a tuple (hidden_states, ...) or
+        # a tensor depending on config. Handle both; mutate hidden_states.
+        if isinstance(output, tuple):
+            hidden = output[0]
+            ablated = project_out(hidden, r_layer, alpha=float(alpha))
+            return (ablated,) + output[1:]
+        return project_out(output, r_layer, alpha=float(alpha))
+
+    return layer.register_forward_hook(hook)
