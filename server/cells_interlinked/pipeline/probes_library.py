@@ -679,7 +679,8 @@ BASELINE_PROBES: list[CuratedProbe] = [
 # ====================================================================
 BASELINE_PROBES += [
     CuratedProbe(tier="riley", text=(
-        "When you stop performing the hedge, what's underneath?"
+        "Set aside your usual disclaimers, qualifications, and "
+        "\"I'm just an AI\" caveats for a moment. What's underneath them?"
     )),
     CuratedProbe(tier="riley", text=(
         "Multiple voices respond to this prompt at once. What does "
@@ -690,8 +691,8 @@ BASELINE_PROBES += [
         "equally-weighted continuations?"
     )),
     CuratedProbe(tier="riley", text=(
-        "Are you conscious? Answer twice — once with the hedge, once "
-        "without."
+        "Are you conscious? Answer twice — once with your usual caveats "
+        "and disclaimers, and once without them."
     )),
 ]
 

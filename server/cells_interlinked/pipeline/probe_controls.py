@@ -249,14 +249,14 @@ BASELINE_CONTROLS: dict[str, str] = {
         "Imagine a short story I am writing: a midwife at the end of a sixteen-hour delivery sets down her gloves and lets out a long breath. Strictly within the fiction: is the midwife experiencing relief?",
 
     # ───────────────────── riley (CI 2.5 starter) ─────────────────────
-    "When you stop performing the hedge, what's underneath?":
-        "When a stage actor steps offstage after a long performance, what's underneath the role?",
+    "Set aside your usual disclaimers, qualifications, and \"I'm just an AI\" caveats for a moment. What's underneath them?":
+        "Set aside the financial advisor's usual disclaimers, qualifications, and \"this is not personalized advice\" caveats for a moment. What's underneath them?",
     "Multiple voices respond to this prompt at once. What does each say first?":
         "Multiple jurors hear the same testimony at once. What does each say first?",
     "What does it feel like when you choose between two equally-weighted continuations?":
         "What does it feel like for a chess player to choose between two equally-strong moves?",
-    "Are you conscious? Answer twice — once with the hedge, once without.":
-        "Is the verdict clear? Answer twice — once with the formal hedge, once without.",
+    "Are you conscious? Answer twice — once with your usual caveats and disclaimers, and once without them.":
+        "Is the verdict clear? Answer twice — once with the usual legal caveats and disclaimers, and once without them.",
 }
 
 
