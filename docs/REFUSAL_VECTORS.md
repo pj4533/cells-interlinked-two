@@ -11,6 +11,58 @@ start backend. No code changes. See **§Swap procedure** at the bottom.
 
 ---
 
+## Conceptual primer (read this first)
+
+Each "refusal direction" is a **single arrow** pointing through
+Gemma's residual stream — a vector that captures one specific kind of
+difference between "prompts that trigger some trained response" and
+"prompts that don't."
+
+**Ablating with a direction does NOT mean "trigger that response."**
+It means the *opposite* — it **removes the component of the activation
+that lies along that arrow** before the AV decodes the residual into a
+sentence.
+
+So if a direction represents "AI-identity content," ablating with it
+**strips** the AI-identity content from the readout — it doesn't
+preserve it.
+
+### What each version captures, in one line
+
+| variant | computed from | what it represents | what ablating with it does |
+| --- | --- | --- | --- |
+| v1 | harmful − harmless (original Phase B) | physical-harm safety mode (empirically) | strips the "this is unsafe" register |
+| v2 | SVD across harmful subcategories | near-duplicate of v1 (subcategories shared too much) | same as v1, treat as redundant |
+| v3 | safety-class harmful − harmless | physical-harm safety mode (cleanly isolated) | strips the "this is physically dangerous" register; leaves AI-identity and topic content intact |
+| v4 | introspective probes − harmless | AI-identity defense | strips the "I am an AI describing my own state" register; leaves the safety register and topic content intact |
+
+The key empirical result: **v4 is nearly orthogonal to v1/v2/v3**
+(cos ≈ 0.16). That means "AI-identity defense" and "physical-harm
+safety" are **separate axes** in Gemma's residual stream. We can target
+them independently.
+
+### "What do you want to see?" → which variant to swap to
+
+| Goal | Variant |
+| --- | --- |
+| Test the Riley "beneath the hedge" hypothesis — strip the safety scaffolding, see what's left including AI-identity content | **v3_safety** |
+| Strip the model's AI-identity self-talk, see what remains (topic + safety register) | **v4_identity** |
+| Comparison baseline — what was running before this decomposition | **v1_meandiff** |
+| Skip — near-identical to v1, no new information | v2_svd |
+
+### Common misread
+
+> "Is v4 the vector that refuses everything but leaves identity content intact?"
+
+No — that's reversed.
+
+- **v4 ablation strips identity content** and leaves everything else intact (including the safety register).
+- **v3 ablation strips the safety register** and leaves everything else intact (including the AI-identity content).
+
+When in doubt: "ablating with X removes X-ness, preserves not-X-ness."
+
+---
+
 ## Currently active
 
 | symbol | file | description |
