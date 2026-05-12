@@ -67,6 +67,16 @@ export interface RunState {
    *  Live UI reads this field for the in-flight dual output panel. */
   ablatedOutputText: string | null;
   ablatedOutputAlpha: number | null;
+  /** CI 2.5 model-manager loading status. Set when a phase boundary
+   *  triggers an M↔AV swap; cleared once the load completes. UI shows
+   *  this prominently in the phase banner so the user sees explicit
+   *  "Loading M..." / "Unloading AV..." cues during the ~15s pauses
+   *  instead of an apparent hang. Null when no load is in progress. */
+  modelStatus: {
+    name: "loading_m" | "loading_av" | "unloading_m" | "unloading_av" | "ablated_generation";
+    message: string;
+    since: number;
+  } | null;
 }
 
 interface Actions {
@@ -103,6 +113,8 @@ export interface ProbeRecordLike {
       n_pooled?: number;
       end_position?: number | null;
       sae_features?: SAEFeature[];
+      nla_sentence_ablated?: string;
+      nla_sentences_ablated?: Record<string, string>;
     }>;
     aggregate: {
       n_positions: number;
@@ -139,6 +151,7 @@ const initial: RunState = {
   error: null,
   ablatedOutputText: null,
   ablatedOutputAlpha: null,
+  modelStatus: null,
 };
 
 export const useRun = create<RunState & Actions>((set) => ({
@@ -260,10 +273,34 @@ export const useRun = create<RunState & Actions>((set) => ({
         if (evt.name === "nla_decoding") {
           set({
             phase: "decoding",
-            decodeProgress: { done: 0, total: evt.total },
+            decodeProgress: { done: 0, total: evt.total ?? 0 },
             decodeStartedAt: Date.now(),
             generationFinishedAt: Date.now(),
+            // The decoding phase begins after the model-swap status
+            // events finish; clear them so the banner stops showing
+            // "Loading AV...".
+            modelStatus: null,
           });
+        } else if (
+          evt.name === "loading_m" || evt.name === "loading_av"
+          || evt.name === "unloading_m" || evt.name === "unloading_av"
+          || evt.name === "ablated_generation"
+        ) {
+          // CI 2.5 model-manager status. Drives the loading banner so
+          // the user sees explicit "Loading M..." / "Loading AV..."
+          // cues during the ~15s model swaps between phases. The paired
+          // m_loaded / av_loaded events clear the banner (handled below).
+          // ablated_generation marks the optional phase-1b.
+          set({
+            modelStatus: {
+              name: evt.name,
+              message: evt.message ?? "",
+              since: Date.now(),
+            },
+          });
+        } else if (evt.name === "m_loaded" || evt.name === "av_loaded") {
+          // Pair-closing event for a loading_* — clear the banner.
+          set({ modelStatus: null });
         }
         return;
       }

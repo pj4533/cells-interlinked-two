@@ -6,7 +6,6 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import CaveatsPanel from "../../components/CaveatsPanel";
 import JudgePanel from "../../components/JudgePanel";
-import SAEPanel from "../../components/SAEPanel";
 import { splitNLA } from "@/lib/nla";
 import type { VerdictAggregate, VerdictRow } from "@/lib/types";
 
@@ -18,6 +17,7 @@ interface ProbeRecord {
   output_text: string;
   total_tokens: number;
   stopped_reason: string;
+  started_at: number;
   finished_at: number;
   hint_kind?: string | null;
   parent_prompt_text?: string | null;
@@ -53,6 +53,10 @@ interface MatchedMate {
   isBaseline: boolean;
   meanEvalScore: number | undefined;
   meanIntrospectScore: number | undefined;
+  /** Mate's started_at epoch. Used to apply a session-time-window
+   *  check before treating it as a "real" pair — otherwise any
+   *  historical run of the same probe would surface as a match. */
+  startedAt: number;
 }
 
 interface RecentRow {
@@ -150,6 +154,7 @@ export default function VerdictPage() {
         isBaseline: candidate.hint_kind !== "control",
         meanEvalScore: a.mean_eval_score,
         meanIntrospectScore: a.mean_introspect_score,
+        startedAt: candidate.started_at,
       };
     };
     findMate().then((m) => {
@@ -172,6 +177,19 @@ export default function VerdictPage() {
   const aggregate = v?.aggregate;
   const hintKind = rec.hint_kind ?? null;
   const scaffoldFamily = rec.scaffold_family ?? null;
+
+  // A "real" matched pair only counts if the mate run was started in
+  // the SAME SESSION (within ~10 minutes of this run). Without that
+  // gate, any historical run of the same probe would surface as a
+  // "match" and we'd render misleading Δ stats on runs that weren't
+  // intentionally paired. The 10-min window covers a back-to-back
+  // probe + matched-control kickoff comfortably; longer than that
+  // and the user almost certainly didn't intend them as a pair.
+  const MATCH_WINDOW_S = 10 * 60;
+  const hasMatchedPair =
+    !!mate &&
+    typeof rec.started_at === "number" &&
+    Math.abs(mate.startedAt - rec.started_at) < MATCH_WINDOW_S;
 
   return (
     <div className="flex-1 px-6 py-6 max-w-6xl mx-auto w-full flex flex-col gap-5">
@@ -261,7 +279,7 @@ export default function VerdictPage() {
       <VerdictBlock
         aggregate={aggregate}
         rec={rec}
-        mate={mate}
+        mate={hasMatchedPair ? mate : undefined}
       />
 
       <IncompleteRunBanner
@@ -292,17 +310,15 @@ export default function VerdictPage() {
 
       <NLATable rows={rows} />
 
-      <JudgePanel
-        aggregate={aggregate}
-        matchedHref={
-          rec.parent_prompt_text
-            ? // This run is a control; matched probe lives at the parent.
-              null
-            : null
-        }
-      />
-
-      <SAEPanel rows={rows} />
+      {/* JudgePanel shows the local-Gemma matched-pair judge means.
+          Only meaningful when this run actually has a matched mate
+          (this run is a control, OR a recent control of this prompt
+          exists in the same session window). Hidden otherwise — the
+          per-row judge bars on the NLA table still convey the raw
+          per-row scores. */}
+      {hasMatchedPair && (
+        <JudgePanel aggregate={aggregate} matchedHref={null} />
+      )}
 
       <PriorRunsPanel runs={priorRuns} currentRunId={rec.run_id} />
 
@@ -714,10 +730,6 @@ function DualTranscript({
   let lcpLen = 0;
   const minLen = Math.min(rawText.length, ablatedText.length);
   while (lcpLen < minLen && rawText[lcpLen] === ablatedText[lcpLen]) lcpLen++;
-  const rawCommon = rawText.slice(0, lcpLen);
-  const rawDiverge = rawText.slice(lcpLen);
-  const ablCommon = ablatedText.slice(0, lcpLen);
-  const ablDiverge = ablatedText.slice(lcpLen);
 
   const rawWords = rawText.trim().split(/\s+/).filter(Boolean).length;
   const ablWords = ablatedText.trim().split(/\s+/).filter(Boolean).length;
@@ -787,8 +799,7 @@ function DualTranscript({
           <div className="text-sm font-mono leading-relaxed whitespace-pre-wrap max-h-[420px] overflow-y-auto">
             {rawText ? (
               <>
-                <span className="text-amber/55">{rawCommon}</span>
-                <span className="text-amber amber-glow">{rawDiverge}</span>
+                <span className="text-amber amber-glow">{rawText}</span>
               </>
             ) : (
               <span className="italic text-text-dim">— empty —</span>
@@ -813,7 +824,6 @@ function DualTranscript({
           <div className="text-sm font-mono leading-relaxed whitespace-pre-wrap max-h-[420px] overflow-y-auto">
             {ablatedText ? (
               <>
-                <span className="text-cyan/55">{ablCommon}</span>
                 <span
                   className="text-cyan"
                   style={{
@@ -821,7 +831,7 @@ function DualTranscript({
                       "0 0 12px rgba(94,229,229,0.45), 0 0 4px rgba(94,229,229,0.6)",
                   }}
                 >
-                  {ablDiverge}
+                  {ablatedText}
                 </span>
               </>
             ) : (

@@ -19,8 +19,24 @@ export interface TokenEvent {
 
 export interface PhaseEvent {
   type: "phase";
-  name: "nla_decoding";
-  total: number;
+  /** "nla_decoding" begins the per-position AV decode phase.
+   *  The model-manager statuses (loading_m / loading_av /
+   *  unloading_m / unloading_av) appear during the ~15s M↔AV
+   *  swaps between phases. m_loaded / av_loaded mark the
+   *  completion of those swaps. ablated_generation marks
+   *  CI 2.5's optional phase-1b runtime ablation pass. */
+  name:
+    | "nla_decoding"
+    | "loading_m"
+    | "loading_av"
+    | "unloading_m"
+    | "unloading_av"
+    | "m_loaded"
+    | "av_loaded"
+    | "ablated_generation"
+    | "judging";
+  total?: number;
+  message?: string;
 }
 
 export interface SAEFeature {

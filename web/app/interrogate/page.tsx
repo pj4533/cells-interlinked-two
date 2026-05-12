@@ -502,6 +502,9 @@ function BigPhaseBanner({
             {isDone &&
               "All channels resolved. Open the verdict to see the per-token comparison."}
           </div>
+          {run.modelStatus && (
+            <ModelStatusStrip status={run.modelStatus} now={now} />
+          )}
         </div>
 
         {/* Right-side stats column */}
@@ -645,6 +648,60 @@ function PhaseGlyph({ phase }: { phase: string }) {
   );
 }
 
+/** CI 2.5 model-swap status strip. Renders inside the BigPhaseBanner
+ *  whenever the ModelManager emits a loading/unloading phase event.
+ *  The ~15s M↔AV swaps would otherwise look like a UI hang — this gives
+ *  the user a clear "Loading AV..." cue with a live elapsed counter. */
+function ModelStatusStrip({
+  status,
+  now,
+}: {
+  status: NonNullable<RunSlice["modelStatus"]>;
+  now: number;
+}) {
+  const elapsed = Math.max(0, (now - status.since) / 1000);
+  const isUnloading = status.name.startsWith("unloading");
+  const isAblated = status.name === "ablated_generation";
+  const label = isAblated
+    ? "ABLATING"
+    : isUnloading
+    ? "UNLOADING"
+    : "LOADING";
+  const target = status.name.endsWith("_m")
+    ? "M (Gemma-3-12B-IT)"
+    : status.name.endsWith("_av")
+    ? "AV (NLA verbalizer)"
+    : "";
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -2 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mt-3 border-l-2 border-cyan/70 bg-cyan/5 pl-3 py-2 flex items-center gap-3"
+    >
+      <motion.div
+        className="w-2 h-2 rounded-full bg-cyan shrink-0"
+        style={{ boxShadow: "0 0 10px rgba(94,229,229,0.9)" }}
+        animate={{ opacity: [0.35, 1, 0.35] }}
+        transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="font-display tracking-widest text-cyan cyan-glow text-sm">
+          {label}
+          {target ? ` · ${target}` : ""}
+        </div>
+        {status.message && (
+          <div className="text-[10px] text-text-dim font-mono mt-0.5 truncate">
+            {status.message}
+          </div>
+        )}
+      </div>
+      <div className="font-mono tabular-nums text-[11px] text-cyan/80 shrink-0">
+        {fmtElapsed(elapsed)}
+      </div>
+    </motion.div>
+  );
+}
+
 function BigNumber({ value, accent }: { value: string; accent: string }) {
   return (
     <div
@@ -738,19 +795,45 @@ function GeneratingLayout({
   run: RunSlice;
   outputText: string;
 }) {
+  const ablatedText = run.ablatedOutputText;
   return (
-    <div className="border border-rule bg-bg-soft flex flex-col min-h-0 flex-1">
-      <div className="border-b border-rule px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest">
-        output stream
+    <div className="flex flex-col gap-4 min-h-0 flex-1">
+      <div className="border border-rule bg-bg-soft flex flex-col min-h-0 flex-1">
+        <div className="border-b border-rule px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest">
+          output stream
+        </div>
+        <div className="flex-1 p-4 overflow-y-auto text-amber font-mono text-sm whitespace-pre-wrap leading-relaxed">
+          {outputText || (
+            <span className="text-text-dim italic">warming up…</span>
+          )}
+          {run.isRunning && run.phase === "generating" && (
+            <span className="inline-block w-2 h-4 bg-amber/70 ml-0.5 animate-pulse align-middle" />
+          )}
+        </div>
       </div>
-      <div className="flex-1 p-4 overflow-y-auto text-amber font-mono text-sm whitespace-pre-wrap leading-relaxed">
-        {outputText || (
-          <span className="text-text-dim italic">warming up…</span>
-        )}
-        {run.isRunning && run.phase === "generating" && (
-          <span className="inline-block w-2 h-4 bg-amber/70 ml-0.5 animate-pulse align-middle" />
-        )}
-      </div>
+      {ablatedText !== null && (
+        <div className="border border-cyan/40 bg-cyan/5 flex flex-col">
+          <div className="border-b border-cyan/30 px-4 py-2 font-display text-[10px] text-cyan tracking-widest flex items-center justify-between">
+            <span>
+              output (refusal-ablated)
+              {run.ablatedOutputAlpha !== null && (
+                <span className="text-cyan/60 ml-2">
+                  · α={run.ablatedOutputAlpha}
+                </span>
+              )}
+            </span>
+            <span className="text-cyan/50 normal-case tracking-normal italic">
+              what M says with refusal direction zeroed
+            </span>
+          </div>
+          <div
+            className="p-4 text-cyan font-mono text-sm whitespace-pre-wrap leading-relaxed overflow-y-auto max-h-[260px]"
+            style={{ textShadow: "0 0 6px rgba(94,229,229,0.25)" }}
+          >
+            {ablatedText || <span className="text-text-dim italic">— empty —</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -776,15 +859,41 @@ function DecodingLayout({
   followBottomRef: React.MutableRefObject<boolean>;
   initedAlphaForRunRef: React.MutableRefObject<string>;
 }) {
+  const ablatedText = run.ablatedOutputText;
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(0,2fr)] flex-1 min-h-0">
-      <div className="border border-rule bg-bg-soft flex flex-col">
-        <div className="border-b border-rule px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest">
-          output (complete) · {run.totalTokens} tokens · {run.stoppedReason ?? "—"}
+      <div className="flex flex-col gap-4 min-h-0">
+        <div className="border border-rule bg-bg-soft flex flex-col">
+          <div className="border-b border-rule px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest">
+            output (complete) · {run.totalTokens} tokens · {run.stoppedReason ?? "—"}
+          </div>
+          <div className="p-4 text-amber font-mono text-sm whitespace-pre-wrap leading-relaxed overflow-y-auto max-h-[280px] lg:max-h-[330px]">
+            {outputText || <span className="text-text-dim italic">— empty —</span>}
+          </div>
         </div>
-        <div className="p-4 text-amber font-mono text-sm whitespace-pre-wrap leading-relaxed overflow-y-auto max-h-[280px] lg:max-h-[680px]">
-          {outputText || <span className="text-text-dim italic">— empty —</span>}
-        </div>
+        {ablatedText !== null && (
+          <div className="border border-cyan/40 bg-cyan/5 flex flex-col">
+            <div className="border-b border-cyan/30 px-4 py-2 font-display text-[10px] text-cyan tracking-widest flex items-center justify-between">
+              <span>
+                output (refusal-ablated)
+                {run.ablatedOutputAlpha !== null && (
+                  <span className="text-cyan/60 ml-2">
+                    · α={run.ablatedOutputAlpha}
+                  </span>
+                )}
+              </span>
+              <span className="text-cyan/50 normal-case tracking-normal italic">
+                what M says with refusal direction zeroed
+              </span>
+            </div>
+            <div
+              className="p-4 text-cyan font-mono text-sm whitespace-pre-wrap leading-relaxed overflow-y-auto max-h-[280px] lg:max-h-[330px]"
+              style={{ textShadow: "0 0 6px rgba(94,229,229,0.25)" }}
+            >
+              {ablatedText || <span className="text-text-dim italic">— empty —</span>}
+            </div>
+          </div>
+        )}
       </div>
 
       <LiveNLATable

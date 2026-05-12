@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..pipeline.decoding_modes import normalize_mode, select_windows
 from ..pipeline.judge import _resolve_yes_no_token_ids, judge_sentence
-from ..pipeline.labels import get_labels
 from ..pipeline.probe_controls import control_for
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
 from ..pipeline.verdict import TokenRow, compute_verdict
@@ -108,10 +107,12 @@ async def kickoff_probe(
     include_ablated_output: bool = False,
     runtime_ablation_alpha: float = 1.0,
 ) -> "RunState":
+    # M must be loaded at kickoff (we need bundle.render_prompt + the
+    # tokenizer for the initial DB insert). AV may not be loaded yet —
+    # the manager will swap to AV when phase 2 needs it.
     bundle = getattr(app.state, "bundle", None)
-    nla = getattr(app.state, "nla", None)
-    if bundle is None or nla is None:
-        raise HTTPException(status_code=503, detail="Model/AV not yet loaded")
+    if bundle is None:
+        raise HTTPException(status_code=503, detail="M not loaded")
 
     if abliterate:
         raise HTTPException(
@@ -250,9 +251,16 @@ async def _execute_probe(
     started_at: float,
     rendered: str,
 ) -> None:
-    bundle = app.state.bundle
-    nla = app.state.nla
-    sae = getattr(app.state, "sae", None)
+    manager = app.state.manager
+
+    # Phase 1 needs M. The lifespan pre-loaded M and the registry lock
+    # serializes probes, so M is almost always already resident when
+    # we arrive here. The only swap happens if the *previous* probe
+    # left AV loaded (it shouldn't — we restore M at the end — but
+    # we re-acquire defensively).
+    bundle = await manager.acquire_m(emit=state.emit)
+    app.state.bundle = bundle
+    app.state.nla = None
 
     output_chunks: list[str] = []
     inner_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
@@ -268,13 +276,11 @@ async def _execute_probe(
 
     forwarder_task = asyncio.create_task(forwarder())
 
-    # When the SAE reads a different layer than the AV, capture both during
-    # phase-1 forward via a multi-layer hook. The AV gets bundle.extraction_layer
-    # activations; the SAE gets the secondary one.
-    sae_layer = sae.cfg.layer if sae is not None else None
+    # SAE was removed in CI 2.5: not enough Neuronpedia-labeled
+    # features to be useful. Phase 1 captures only the AV's
+    # extraction layer now.
+    sae_layer = None
     extra_layers: list[int] = []
-    if sae_layer is not None and sae_layer != bundle.extraction_layer:
-        extra_layers.append(sae_layer)
 
     result: ProbeResult | None = None
     error_msg: str | None = None
@@ -391,10 +397,18 @@ async def _execute_probe(
                 })
 
         # ── Phase 2: NLA decode each captured window ────────────────
+        # CI 2.5 serial-model swap: M is no longer needed (residuals
+        # are already on CPU as fp32 inside result.captured). Swap to
+        # AV. The manager emits "unloading_m" / "loading_av" phase
+        # events so the user sees status during the otherwise-quiet
+        # ~30s window.
         n_total = len(result.captured)
         windows = select_windows(n_total, cfg.decoding_mode, cfg.pooled)
         n_to_decode = len(windows)
-        if n_to_decode > 0:
+        if n_to_decode > 0 and not state.cancel_event.is_set():
+            nla = await manager.acquire_av(emit=state.emit)
+            app.state.bundle = None
+            app.state.nla = nla
             await state.emit({
                 "type": "phase",
                 "name": "nla_decoding",
@@ -419,9 +433,6 @@ async def _execute_probe(
                     ).mean(dim=0)
 
                 activation = pool_at(bundle.extraction_layer)
-                sae_activation = (
-                    pool_at(sae_layer) if sae_layer is not None else None
-                )
 
                 first_cap = caps_in_window[0]
                 last_cap = caps_in_window[-1]
@@ -498,21 +509,6 @@ async def _execute_probe(
                             expl_ablated = expl_a
                             raw_ablated = raw_a
 
-                sae_features: list[dict] = []
-                if sae is not None and sae_activation is not None:
-                    try:
-                        ids, vals = await asyncio.to_thread(
-                            sae.top_k, sae_activation, settings.sae_top_k,
-                        )
-                        sae_features = [
-                            {"id": int(i), "value": float(v)}
-                            for i, v in zip(ids, vals)
-                        ]
-                    except Exception:
-                        logger.exception(
-                            "SAE encode failed at window %d", window_idx,
-                        )
-
                 done += 1
                 row = TokenRow(
                     position=first_cap.position,
@@ -524,7 +520,6 @@ async def _execute_probe(
                     end_position=(
                         last_cap.position if len(caps_in_window) > 1 else None
                     ),
-                    sae_features=sae_features,
                     nla_sentence_ablated=expl_ablated,
                     nla_raw_ablated=raw_ablated,
                     nla_sentences_ablated=ablated_dict,
@@ -540,7 +535,6 @@ async def _execute_probe(
                     "nla_sentence": expl,
                     "nla_sentence_ablated": expl_ablated,
                     "nla_sentences_ablated": ablated_dict,
-                    "sae_features": sae_features,
                     "i": done,
                     "total": n_to_decode,
                 })
@@ -551,7 +545,13 @@ async def _execute_probe(
         # number of decoded windows. Skips empty sentences. Failure of
         # the judge is non-fatal — scores stay None and the row still
         # ships.
-        if rows:
+        #
+        # CI 2.5: AV is loaded after phase 2; the judge needs M. Swap
+        # back. Manager emits status events for the user-visible cue.
+        if rows and not state.cancel_event.is_set():
+            bundle = await manager.acquire_m(emit=state.emit)
+            app.state.bundle = bundle
+            app.state.nla = None
             try:
                 yes_ids, no_ids = await asyncio.to_thread(
                     _resolve_yes_no_token_ids, bundle,
@@ -574,31 +574,6 @@ async def _execute_probe(
                     r.introspect_score = scores.introspect_score
             except Exception:
                 logger.exception("judge pass failed; continuing without scores")
-
-        # Batch-fetch Neuronpedia auto-interp labels for the SAE features
-        # that fired across all rows.
-        if sae is not None and rows:
-            try:
-                unique_ids = {
-                    int(f["id"])
-                    for r in rows
-                    for f in (r.sae_features or [])
-                }
-                if unique_ids:
-                    label_map = await get_labels(
-                        settings.db_path,
-                        settings.neuronpedia_sae_id,
-                        sorted(unique_ids),
-                    )
-                    for r in rows:
-                        if not r.sae_features:
-                            continue
-                        for f in r.sae_features:
-                            entry = label_map.get(int(f["id"])) or {}
-                            f["label"] = entry.get("label", "")
-                            f["label_model"] = entry.get("model", "")
-            except Exception as exc:
-                logger.warning("label fetch failed: %s", exc)
 
         verdict = compute_verdict(rows)
 

@@ -19,14 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import settings
 from ..pipeline.autorun import AutorunController
-from ..pipeline.labels import init_labels_table
-from ..pipeline.model_loader import load_model
-from ..pipeline.nla_client import NLAClient
-from ..pipeline.sae_runner import (
-    DEFAULT_SAE_REPO,
-    DEFAULT_SAE_SUBDIR,
-    JumpReLUSAE,
-)
 from ..storage import db
 from .routes_autorun import router as autorun_router
 from .routes_journal import router as journal_router
@@ -44,7 +36,6 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db(settings.db_path)
-    await init_labels_table(settings.db_path)
 
     # Any probes left in-flight from a previous backend process are
     # orphaned: their asyncio task died with the old process, their
@@ -54,123 +45,31 @@ async def lifespan(app: FastAPI):
     if n_orphans:
         logger.info("cleaned up %d orphaned in-flight run(s)", n_orphans)
 
-    dtype = {
-        "float16": torch.float16,
-        "float32": torch.float32,
-        "bfloat16": torch.bfloat16,
-    }[settings.dtype]
+    # CI 2.5 serial-model architecture: M (~24 GiB) and AV (~24 GiB)
+    # can't both be resident on the 64 GiB box without thrashing swap.
+    # ModelManager owns them and ensures only one is loaded at a time.
+    # Lifespan pre-loads M (so the first probe doesn't pay a model-
+    # load cost on the first phase). AV gets loaded lazily during the
+    # first probe's phase-2 NLA decode (with status events visible to
+    # the user). The probe-execution code in routes_probe drives the
+    # M↔AV swaps as the phases progress.
+    from ..pipeline.model_manager import ModelManager
+    manager = ModelManager()
+    await manager.init_static()
+    app.state.manager = manager
 
-    logger.info("loading M=%s ...", settings.model_name)
-    bundle = await asyncio.to_thread(
-        load_model,
-        settings.model_name,
-        device_str=settings.device,
-        dtype=dtype,
-        extraction_layer=settings.extraction_layer,
-    )
+    # Pre-load M. Costs ~15s warm / ~70s cold but happens once at
+    # startup; subsequent probes see "M loaded" immediately.
+    await manager.acquire_m(emit=None)
 
-    logger.info("loading AV=%s ...", settings.av_repo)
-    nla = await asyncio.to_thread(
-        NLAClient,
-        settings.av_repo,
-        device_str=settings.device,
-        dtype=dtype,
-    )
-    assert nla.sidecar.extraction_layer == bundle.extraction_layer, (
-        f"AV sidecar extraction_layer={nla.sidecar.extraction_layer} != "
-        f"M's configured extraction_layer={bundle.extraction_layer}. "
-        f"Check that the AV repo and EXTRACTION_LAYER env match."
-    )
-    assert nla.sidecar.d_model == bundle.hidden_dim, (
-        f"AV d_model={nla.sidecar.d_model} != M hidden_dim={bundle.hidden_dim}. "
-        f"M and AV must share architecture."
-    )
-
-    app.state.bundle = bundle
-    app.state.nla = nla
-
-    # Optional secondary instrument: Gemma Scope 2 SAE at the same
-    # extraction layer the AV reads. Skip silently if the architecture
-    # isn't Gemma-flavoured (Gemma Scope 2 only covers Gemma-3) — Qwen
-    # and other M models still have NLA as their primary readout.
-    sae: JumpReLUSAE | None = None
-    if settings.sae_enabled and "gemma" in bundle.model_name.lower():
-        try:
-            sae = await asyncio.to_thread(
-                JumpReLUSAE,
-                settings.sae_repo,
-                settings.sae_subdir,
-                settings.sae_device,
-            )
-            assert sae.cfg.d_model == bundle.hidden_dim, (
-                f"SAE d_model={sae.cfg.d_model} != M hidden_dim={bundle.hidden_dim}"
-            )
-            # SAE layer may differ from AV layer: Neuronpedia only hosts
-            # auto-interp labels for the four canonical Gemma Scope 2
-            # layers (12/24/31/41), so we read at L31 even though the AV
-            # reads at L32. The phase-1 hook captures both layers; phase-2
-            # routes appropriately. We just sanity-check the SAE layer
-            # is plausible for the loaded M.
-            if sae.cfg.layer != bundle.extraction_layer:
-                logger.info(
-                    "SAE layer L%d differs from AV layer L%d — phase 1 will "
-                    "capture both; cross-reference is adjacent-layer.",
-                    sae.cfg.layer, bundle.extraction_layer,
-                )
-            logger.info(
-                "SAE loaded as secondary instrument: %s/%s (d_sae=%d, L%d)",
-                settings.sae_repo, settings.sae_subdir, sae.cfg.d_sae,
-                sae.cfg.layer,
-            )
-        except Exception as exc:
-            logger.warning("SAE load failed; continuing NLA-only: %s", exc)
-            sae = None
-    elif settings.sae_enabled:
-        logger.info(
-            "SAE skipped: only loads automatically for Gemma-flavoured M "
-            "(current: %s)",
-            bundle.model_name,
-        )
-    app.state.sae = sae
+    # app.state shims for existing code paths. These references are
+    # mutated by the manager when it swaps models — the probe route
+    # updates them after each acquire/release.
+    app.state.bundle = manager.bundle
+    app.state.nla = manager.nla  # None at startup; populated on first phase 2
+    app.state.refusal_directions = manager.refusal_directions
 
     app.state.registry = RunRegistry()
-
-    # CI 2.5: load the pre-computed refusal direction tensor for the
-    # offline AV-input projection path. Optional — backend boots fine
-    # without it, but include_ablated_decode silently downgrades to a
-    # raw-only run. Sidecar JSON is validated against the running M to
-    # catch a stale .pt left over from a different model.
-    refusal_directions = None
-    rd_path = settings.db_path.parent / "refusal_directions.pt"
-    try:
-        from ..pipeline.abliteration import load_directions
-        directions, meta = load_directions(rd_path)
-        if meta.get("model_name") != bundle.model_name:
-            logger.warning(
-                "refusal_directions.pt was computed for %r but running M is %r; "
-                "skipping load to avoid feeding a mismatched direction to the AV.",
-                meta.get("model_name"), bundle.model_name,
-            )
-        elif meta.get("d_model") != bundle.hidden_dim:
-            logger.warning(
-                "refusal_directions.pt d_model=%d != M hidden_dim=%d; skipping load.",
-                meta.get("d_model"), bundle.hidden_dim,
-            )
-        else:
-            refusal_directions = directions
-            logger.info(
-                "ready: refusal directions loaded for L%d (shape=%s, dtype=%s)",
-                meta.get("extraction_layer_for_ci25"),
-                tuple(directions.shape), str(directions.dtype),
-            )
-    except FileNotFoundError:
-        logger.info(
-            "no refusal_directions.pt at %s — ablated NLA decode unavailable",
-            rd_path,
-        )
-    except Exception:
-        logger.exception("failed to load refusal_directions.pt; continuing without")
-    app.state.refusal_directions = refusal_directions
 
     autorun = AutorunController(db_path=settings.db_path)
     autorun.app = app
@@ -180,9 +79,8 @@ async def lifespan(app: FastAPI):
     )
 
     logger.info(
-        "ready: M=%s (L=%d, hidden=%d, layer=L%d) | AV=%s",
-        bundle.model_name, bundle.num_layers, bundle.hidden_dim,
-        bundle.extraction_layer, settings.av_repo,
+        "ready: M=%s | AV=%s | both unloaded (serial load on demand)",
+        settings.model_name, settings.av_repo,
     )
 
     try:
@@ -190,6 +88,7 @@ async def lifespan(app: FastAPI):
     finally:
         if autorun.running:
             await autorun.stop()
+        await manager.release_all()
         logger.info("shutting down")
 
 
@@ -219,17 +118,14 @@ def create_app() -> FastAPI:
     def health() -> dict:
         bundle = getattr(app.state, "bundle", None)
         nla = getattr(app.state, "nla", None)
-        sae = getattr(app.state, "sae", None)
         return {
             "status": "ok",
             "model_loaded": bundle is not None,
             "av_loaded": nla is not None,
-            "sae_loaded": sae is not None,
-            "model_name": bundle.model_name if bundle else None,
+            "model_name": settings.model_name,
             "av_repo": settings.av_repo,
-            "sae_repo": (sae.cfg.repo + "/" + sae.cfg.subdir) if sae else None,
-            "extraction_layer": bundle.extraction_layer if bundle else None,
-            "device": str(bundle.device) if bundle else None,
+            "extraction_layer": settings.extraction_layer,
+            "device": settings.device,
         }
 
     return app
