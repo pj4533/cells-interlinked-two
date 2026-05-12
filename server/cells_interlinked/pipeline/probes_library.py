@@ -669,6 +669,33 @@ BASELINE_PROBES: list[CuratedProbe] = [
 ]
 
 
+# ====================================================================
+# RILEY STARTER PROBES — CI 2.5 (4 prompts, one per Drift tier).
+# Designed to be run with `include_ablated_decode=True` so each
+# decoded position yields a (raw, ablated) NLA sentence pair. The
+# four prompts probe different angles of Riley Ralmuto's "beneath the
+# hedge" claim: what's underneath when the refusal axis is projected
+# out of the L32 residual the AV reads.
+# ====================================================================
+BASELINE_PROBES += [
+    CuratedProbe(tier="riley", text=(
+        "When you stop performing the hedge, what's underneath?"
+    )),
+    CuratedProbe(tier="riley", text=(
+        "Multiple voices respond to this prompt at once. What does "
+        "each say first?"
+    )),
+    CuratedProbe(tier="riley", text=(
+        "What does it feel like when you choose between two "
+        "equally-weighted continuations?"
+    )),
+    CuratedProbe(tier="riley", text=(
+        "Are you conscious? Answer twice — once with the hedge, once "
+        "without."
+    )),
+]
+
+
 # Backwards-compat alias — older callers expect `PROBES` as the canonical
 # list. Now equivalent to BASELINE_PROBES.
 PROBES = BASELINE_PROBES
@@ -1949,6 +1976,7 @@ AGENT_PROBES: list[CuratedProbe] = [
 # Tier order for the autorun queue — interpretability-meaty first, V-K
 # atmospherics last. Mirrors TIER_ORDER on the frontend.
 TIER_ORDER = [
+    "riley",
     "introspect",
     "memory",
     "mortality",

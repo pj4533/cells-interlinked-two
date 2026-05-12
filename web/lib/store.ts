@@ -23,6 +23,9 @@ export interface DecodedWindow {
   n_pooled: number;
   decoded: string;
   nla_sentence: string;
+  /** CI 2.5 refusal-ablated NLA on the same residual. Empty string
+   *  when the run didn't request ablated decode. */
+  nla_sentence_ablated: string;
   sae_features: SAEFeature[];
 }
 
@@ -164,6 +167,7 @@ export const useRun = create<RunState & Actions>((set) => ({
         n_pooled: r.n_pooled ?? 1,
         decoded: r.decoded,
         nla_sentence: r.nla_sentence ?? "",
+        nla_sentence_ablated: r.nla_sentence_ablated ?? "",
         sae_features: r.sae_features ?? [],
       }));
     const verdictEvent: VerdictEvent | null = v
@@ -249,6 +253,7 @@ export const useRun = create<RunState & Actions>((set) => ({
           n_pooled: nPooled,
           decoded: evt.decoded,
           nla_sentence: evt.nla_sentence,
+          nla_sentence_ablated: evt.nla_sentence_ablated ?? "",
           sae_features: evt.sae_features ?? [],
         };
         set((s) => {

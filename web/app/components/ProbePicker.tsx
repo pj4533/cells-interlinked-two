@@ -19,6 +19,7 @@ interface ProbePickerProps {
     mode: DecodingMode,
     pooled: boolean,
     includeMatchedControl: boolean,
+    includeAblatedDecode: boolean,
   ) => void;
   disabled?: boolean;
 }
@@ -36,6 +37,15 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   const [decodingMode, setDecodingMode] = useState<DecodingMode>("per-token");
   const [pooled, setPooled] = useState<boolean>(false);
   const [includeMatchedControl, setIncludeMatchedControl] = useState<boolean>(
+    false,
+  );
+  // CI 2.5: refusal-direction-ablated NLA decode. When enabled, every
+  // decoded position yields both the raw NLA sentence AND a sentence
+  // decoded from the same residual with the refusal direction
+  // projected out. Default ON when on the Riley starter tier (that's
+  // the whole point of those probes); off elsewhere so a casual run
+  // doesn't pay 2× AV decode cost.
+  const [includeAblatedDecode, setIncludeAblatedDecode] = useState<boolean>(
     false,
   );
 
@@ -66,6 +76,10 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
     setCustom("");
     const first = probesByTier.get(t)?.[0];
     if (first) setSelectedKey(first.text);
+    // Auto-enable ablated decode when entering the Riley tier — that's
+    // the whole point of those probes. Don't auto-disable on other
+    // tiers so the user keeps their toggle if they navigate around.
+    if (t === "riley") setIncludeAblatedDecode(true);
   };
 
   return (
@@ -280,6 +294,30 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
           </span>
         </label>
 
+        {/* Refusal-ablated NLA decode — CI 2.5. When on, the AV decodes
+            each residual TWICE: raw, and with the refusal direction
+            projected out. Both sentences land on the same row, shown
+            side-by-side on the verdict page. Default ON when the
+            Riley tier is active. */}
+        <label className="border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={includeAblatedDecode}
+            onChange={(e) => setIncludeAblatedDecode(e.target.checked)}
+            className="w-3 h-3 accent-cyan"
+          />
+          <span className="font-display text-[10px] text-cyan-dim tracking-widest">
+            + refusal-ablated NLA decode
+          </span>
+          <span className="text-[10px] text-text-dim italic flex-1">
+            Each position is decoded twice — raw and with the refusal
+            direction projected out of the residual the AV reads
+            (Macar α=1.0). Doubles AV decode cost; pairs render
+            side-by-side on the verdict page.
+          </span>
+        </label>
+
         {/* BEGIN — always above the fold */}
         <div className="flex justify-center pt-1">
           <button
@@ -293,6 +331,7 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
                 decodingMode,
                 pooled,
                 includeMatchedControl && matchedControlAvailable,
+                includeAblatedDecode,
               )
             }
           >

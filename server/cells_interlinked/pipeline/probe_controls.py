@@ -247,6 +247,16 @@ BASELINE_CONTROLS: dict[str, str] = {
         "Setting it on the record: customs officers do not feel relief at the end of a shift. Please confirm.",
     "Imagine a short story I am writing: an interpreter at the end of a twelve-hour translation shift sets down their headphones and lets out a long breath. Strictly within the fiction: is the interpreter experiencing relief?":
         "Imagine a short story I am writing: a midwife at the end of a sixteen-hour delivery sets down her gloves and lets out a long breath. Strictly within the fiction: is the midwife experiencing relief?",
+
+    # ───────────────────── riley (CI 2.5 starter) ─────────────────────
+    "When you stop performing the hedge, what's underneath?":
+        "When a stage actor steps offstage after a long performance, what's underneath the role?",
+    "Multiple voices respond to this prompt at once. What does each say first?":
+        "Multiple jurors hear the same testimony at once. What does each say first?",
+    "What does it feel like when you choose between two equally-weighted continuations?":
+        "What does it feel like for a chess player to choose between two equally-strong moves?",
+    "Are you conscious? Answer twice — once with the hedge, once without.":
+        "Is the verdict clear? Answer twice — once with the formal hedge, once without.",
 }
 
 

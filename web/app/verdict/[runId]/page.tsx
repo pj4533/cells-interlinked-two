@@ -745,6 +745,9 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
       </div>
       {(() => {
         const anyPooled = filtered.some((r) => (r.n_pooled ?? 1) > 1);
+        const anyAblated = filtered.some(
+          (r) => (r.nla_sentence_ablated ?? "").trim().length > 0,
+        );
         return (
           <div className="max-h-[600px] overflow-y-auto">
             <table className="w-full text-xs font-mono">
@@ -754,8 +757,10 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                   <th className="text-left px-3 py-2 w-40">
                     {anyPooled ? "tokens" : "token"}
                   </th>
-                  <th className="text-left px-3 py-2">
-                    {anyPooled
+                  <th className={`text-left px-3 py-2 ${anyAblated ? "w-1/2" : ""}`}>
+                    {anyAblated
+                      ? "NLA — raw"
+                      : anyPooled
                       ? view === "compact"
                         ? "what this window's mean-pooled activation says (compact)"
                         : "NLA-decoded mean-pooled activation sentence (full)"
@@ -763,12 +768,18 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                       ? "what this token's activation says (token-role only)"
                       : "NLA-decoded activation sentence (full)"}
                   </th>
+                  {anyAblated && (
+                    <th className="text-left px-3 py-2 w-1/2 text-cyan-dim">
+                      NLA — refusal-ablated
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((r) => {
                   const nPooled = r.n_pooled ?? 1;
                   const endPos = r.end_position ?? r.position;
+                  const ablatedSentence = (r.nla_sentence_ablated ?? "").trim();
                   return (
                     <tr
                       key={`${r.position}-${endPos}`}
@@ -799,6 +810,15 @@ function NLATable({ rows }: { rows: VerdictRow[] }) {
                           />
                         )}
                       </td>
+                      {anyAblated && (
+                        <td className="px-3 py-2 text-text leading-relaxed border-l border-rule/50">
+                          {ablatedSentence ? (
+                            <VerdictNLACell text={ablatedSentence} mode={view} />
+                          ) : (
+                            <span className="text-text-dim italic">—</span>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

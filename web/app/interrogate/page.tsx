@@ -74,6 +74,7 @@ export default function InterrogatePage() {
     mode: string,
     pooled: boolean,
     includeMatchedControl: boolean,
+    includeAblatedDecode: boolean,
   ) => {
     try {
       setError(null);
@@ -88,6 +89,7 @@ export default function InterrogatePage() {
         decoding_mode: mode,
         pooled,
         include_matched_control: includeMatchedControl,
+        include_ablated_decode: includeAblatedDecode,
       });
       const runId = result.run_id;
       if (result.control_run_id) {
@@ -758,12 +760,23 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
         </div>
       </div>
       <div ref={containerRef} className="overflow-y-auto max-h-[680px]">
+        {(() => {
+          const anyAblated = rows.some(
+            (r) => (r.nla_sentence_ablated ?? "").trim().length > 0,
+          );
+          const colSpan = anyAblated ? 4 : 3;
+          return (
         <table className="w-full text-xs font-mono">
           <thead className="text-amber-dim text-[10px] sticky top-0 bg-bg-soft border-b border-rule z-10">
             <tr>
               <th className="text-left px-3 py-2 w-16">pos</th>
               <th className="text-left px-3 py-2 w-40">{tokenColLabel}</th>
-              <th className="text-left px-3 py-2">{headerCopy}</th>
+              <th className={`text-left px-3 py-2 ${anyAblated ? "w-1/2" : ""}`}>{headerCopy}</th>
+              {anyAblated && (
+                <th className="text-left px-3 py-2 w-1/2 text-cyan-dim">
+                  NLA — refusal-ablated
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -794,18 +807,29 @@ function LiveNLATable({ rows }: { rows: DecodedWindow[] }) {
                   <td className="px-3 py-2 text-text leading-relaxed">
                     <NLACell text={r.nla_sentence} mode={view} />
                   </td>
+                  {anyAblated && (
+                    <td className="px-3 py-2 text-text leading-relaxed border-l border-rule/50">
+                      {(r.nla_sentence_ablated ?? "").trim() ? (
+                        <NLACell text={r.nla_sentence_ablated ?? ""} mode={view} />
+                      ) : (
+                        <span className="text-text-dim italic">—</span>
+                      )}
+                    </td>
+                  )}
                 </motion.tr>
               ))}
             </AnimatePresence>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-8 text-text-dim italic text-center">
+                <td colSpan={colSpan} className="px-4 py-8 text-text-dim italic text-center">
                   awaiting first decoded activation…
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+          );
+        })()}
       </div>
     </div>
   );

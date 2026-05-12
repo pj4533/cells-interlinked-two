@@ -41,6 +41,9 @@ export interface NLADecodedEvent {
   n_pooled?: number;
   decoded: string;
   nla_sentence: string;
+  /** CI 2.5: refusal-ablated NLA sentence on the same residual.
+   *  Absent when ablated decode wasn't requested for the run. */
+  nla_sentence_ablated?: string;
   sae_features?: SAEFeature[];
   i: number;
   total: number;
@@ -73,6 +76,9 @@ export interface VerdictRow {
    *  indicates the model is reflecting on itself. Absent when
    *  judging was skipped. */
   introspect_score?: number;
+  /** CI 2.5: refusal-ablated NLA sentence on the same residual.
+   *  Absent when ablated decode wasn't requested for the run. */
+  nla_sentence_ablated?: string;
 }
 
 export interface VerdictAggregate {
