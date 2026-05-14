@@ -150,6 +150,10 @@ export interface ProbeRecordLike {
       safety_cap?: number;
     } | null;
     nla_syntheses?: Record<string, string> | null;
+    synthesis_meta?: {
+      used_ablated_synthesizer: boolean;
+      alpha: number;
+    } | null;
   };
 }
 
@@ -230,6 +234,7 @@ export const useRun = create<RunState & Actions>((set) => ({
           aggregate: v.aggregate,
           runtime_ablation: v.runtime_ablation ?? null,
           nla_syntheses: v.nla_syntheses ?? null,
+          synthesis_meta: v.synthesis_meta ?? null,
         }
       : null;
     set({

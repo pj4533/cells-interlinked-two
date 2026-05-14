@@ -81,6 +81,18 @@ class ProbeRequest(BaseModel):
     # Projection strength for the runtime hook. 1.0 = full Macar.
     # Clamped to [0, 5].
     runtime_ablation_alpha: float = 1.0
+    # CI 2.5: run the end-of-probe synthesis pass with the refusal-
+    # ablation hook installed on M for the *per-α* synthesis calls.
+    # The "raw" baseline synthesis still uses un-ablated M so the two
+    # remain directly comparable. Only meaningful when there are
+    # ablated NLAs to synthesize (silently downgrades to un-ablated
+    # synthesis otherwise).
+    synthesize_with_ablated_m: bool = False
+    # Projection strength for the synthesizer hook. Independent of
+    # runtime_ablation_alpha (which is for the phase 1b output) and
+    # of the per-row ablation α values (which were applied at decode
+    # time, not at synthesis time). Clamped to [0, 5].
+    synthesis_ablation_alpha: float = 0.5
 
 
 class ProbeResponse(BaseModel):
@@ -114,6 +126,8 @@ async def kickoff_probe(
     ablation_alpha_sweep: list[float] | None = None,
     include_ablated_output: bool = False,
     runtime_ablation_alpha: float = 1.0,
+    synthesize_with_ablated_m: bool = False,
+    synthesis_ablation_alpha: float = 0.5,
 ) -> "RunState":
     # M must be loaded at kickoff (we need bundle.render_prompt + the
     # tokenizer for the initial DB insert). AV may not be loaded yet —
@@ -174,6 +188,17 @@ async def kickoff_probe(
         ablation_alpha_sweep=sweep if effective_ablated else [],
         include_ablated_output=effective_ablated_output,
         runtime_ablation_alpha=max(0.0, min(5.0, float(runtime_ablation_alpha))),
+        # Synthesizer-side ablation. Only takes effect if ablated NLA
+        # decodes were produced (effective_ablated). If not, the
+        # synthesizer just synthesizes the raw NLA on un-ablated M
+        # and this flag is a no-op.
+        synthesize_with_ablated_m=(
+            bool(synthesize_with_ablated_m) and effective_ablated
+            and rdirs is not None
+        ),
+        synthesis_ablation_alpha=max(
+            0.0, min(5.0, float(synthesis_ablation_alpha))
+        ),
     )
 
     state = RunState(run_id=run_id, prompt_text=prompt_text)
@@ -231,6 +256,8 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         ablation_alpha_sweep=req.ablation_alpha_sweep,
         include_ablated_output=req.include_ablated_output,
         runtime_ablation_alpha=req.runtime_ablation_alpha,
+        synthesize_with_ablated_m=req.synthesize_with_ablated_m,
+        synthesis_ablation_alpha=req.synthesis_ablation_alpha,
     )
 
     # Optional matched-control follow-up. Only kicks off when:
@@ -267,6 +294,8 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
                 ablation_alpha_sweep=req.ablation_alpha_sweep,
                 include_ablated_output=req.include_ablated_output,
                 runtime_ablation_alpha=req.runtime_ablation_alpha,
+                synthesize_with_ablated_m=req.synthesize_with_ablated_m,
+                synthesis_ablation_alpha=req.synthesis_ablation_alpha,
             )
             control_run_id = control_state.run_id
 
@@ -679,12 +708,18 @@ async def _execute_probe(
                             "name": "synthesizing",
                             "total": len(collect_alphas(rows)) + 1,  # +1 for raw baseline
                         })
+                        rdirs_for_synth = getattr(
+                            app.state, "refusal_directions", None,
+                        )
                         syntheses = await asyncio.to_thread(
                             synthesize_all,
                             bundle,
                             prompt_text=state.prompt_text,
                             output_text=result.output_text,
                             rows=rows,
+                            use_ablated_synthesizer=cfg.synthesize_with_ablated_m,
+                            synthesizer_alpha=cfg.synthesis_ablation_alpha,
+                            refusal_directions=rdirs_for_synth,
                         )
                         # Store on the rows' container so it lands in the
                         # verdict. The compute_verdict call below
@@ -703,6 +738,17 @@ async def _execute_probe(
         verdict = compute_verdict(rows)
         if _pending_syntheses:
             verdict.nla_syntheses = _pending_syntheses
+            # Always attach metadata when a synthesis pass ran — even
+            # the un-ablated case — so the UI can label the synthesis
+            # panel honestly ("synthesizer: raw M" vs. "synthesizer:
+            # ablated M α=0.50").
+            verdict.synthesis_meta = {
+                "used_ablated_synthesizer": bool(cfg.synthesize_with_ablated_m),
+                "alpha": (
+                    float(cfg.synthesis_ablation_alpha)
+                    if cfg.synthesize_with_ablated_m else 0.0
+                ),
+            }
 
         # Attach the runtime-ablation output to the verdict so it lands
         # in the persisted verdict_json blob alongside the rows.
@@ -731,6 +777,7 @@ async def _execute_probe(
             "aggregate": verdict.aggregate,
             "runtime_ablation": verdict.runtime_ablation,
             "nla_syntheses": verdict.nla_syntheses or None,
+            "synthesis_meta": verdict.synthesis_meta,
         })
 
         # If the user clicked Halt, override stopped_reason regardless

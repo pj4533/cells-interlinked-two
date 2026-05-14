@@ -137,6 +137,12 @@ export async function startProbe(prompt: string, opts?: {
   ablation_alpha_sweep?: number[];
   include_ablated_output?: boolean;
   runtime_ablation_alpha?: number;
+  /** When true, the end-of-probe synthesis pass installs the runtime
+   *  ablation hook on M for the per-α synthesis calls. The raw
+   *  baseline synthesis still runs on un-ablated M. Only meaningful
+   *  alongside include_ablated_decode. */
+  synthesize_with_ablated_m?: boolean;
+  synthesis_ablation_alpha?: number;
 }): Promise<StartProbeResult> {
   const res = await fetch(probeUrl(), {
     method: "POST",

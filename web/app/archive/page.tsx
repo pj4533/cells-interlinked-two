@@ -12,6 +12,8 @@ interface ProbeConfig {
   ablation_alpha_sweep?: number[];
   include_ablated_output?: boolean;
   runtime_ablation_alpha?: number;
+  synthesize_with_ablated_m?: boolean;
+  synthesis_ablation_alpha?: number;
 }
 
 interface RecentRow {
@@ -494,6 +496,17 @@ function FeatureTags({ config }: { config: ProbeConfig | null }) {
     const a = config.runtime_ablation_alpha;
     tags.push({
       label: `runtime α=${typeof a === "number" ? a.toFixed(2) : "?"}`,
+      tone: "cyan",
+    });
+  }
+
+  // Ablated synthesizer — per-α syntheses written by M with the
+  // runtime hook installed (raw baseline still un-ablated). Include
+  // the synthesizer α so runs at different strengths are scannable.
+  if (config.synthesize_with_ablated_m) {
+    const a = config.synthesis_ablation_alpha;
+    tags.push({
+      label: `synth-M α=${typeof a === "number" ? a.toFixed(2) : "?"}`,
       tone: "cyan",
     });
   }

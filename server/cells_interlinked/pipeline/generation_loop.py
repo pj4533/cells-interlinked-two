@@ -164,6 +164,13 @@ class ProbeConfig:
     # what M would *say* under ablation. Cheap (one extra phase 1).
     include_ablated_output: bool = False
     runtime_ablation_alpha: float = 1.0
+    # CI 2.5 ablated synthesizer: when True, the end-of-probe
+    # synthesis pass installs the runtime-ablation hook on M for
+    # *per-α* synthesis calls. Raw baseline synthesis still uses
+    # un-ablated M. Only takes effect when ablated NLA decodes were
+    # produced; otherwise no-op.
+    synthesize_with_ablated_m: bool = False
+    synthesis_ablation_alpha: float = 0.5
 
 
 @dataclass

@@ -102,6 +102,13 @@ class Verdict:
     # nla_sentences_ablated ("0.2", "0.5", ...). Value is the synthesis
     # paragraph. Empty / absent when ablated decode wasn't requested.
     nla_syntheses: dict[str, str] = field(default_factory=dict)
+    # Metadata about HOW the syntheses were produced. Records whether
+    # the per-α synthesis calls used un-ablated M ("raw") or an M with
+    # the runtime ablation hook installed ("ablated"), plus the
+    # synthesizer α. Surfaced on the verdict page header so a reader
+    # knows the synthesis paragraphs at α=X were themselves written by
+    # an ablated model. Absent on runs without ablated synthesis.
+    synthesis_meta: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -112,6 +119,8 @@ class Verdict:
             d["runtime_ablation"] = self.runtime_ablation
         if self.nla_syntheses:
             d["nla_syntheses"] = self.nla_syntheses
+        if self.synthesis_meta is not None:
+            d["synthesis_meta"] = self.synthesis_meta
         return d
 
 

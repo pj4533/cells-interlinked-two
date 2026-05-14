@@ -182,30 +182,72 @@ def synthesize_all(
     prompt_text: str,
     output_text: str,
     rows: list[TokenRow],
+    use_ablated_synthesizer: bool = False,
+    synthesizer_alpha: float = 0.5,
+    refusal_directions: "torch.Tensor | None" = None,
 ) -> dict[str, str]:
     """End-to-end synthesis pass. Returns a {alpha_label: paragraph}
     dict, with "raw" always included as a baseline when there are
     ablated decodes to compare against. Empty dict when no ablated
-    decodes are present (nothing to synthesize against)."""
+    decodes are present (nothing to synthesize against).
+
+    When `use_ablated_synthesizer` is True (and refusal_directions is
+    available), the per-α synthesis calls install the runtime-ablation
+    hook on M at strength `synthesizer_alpha`. The raw baseline
+    synthesis ALWAYS runs on un-ablated M — it's the un-intervened
+    comparison point. Hook is installed once and removed at the end
+    rather than per call (cheaper). On failure to install, falls back
+    silently to un-ablated synthesis."""
     alphas = collect_alphas(rows)
     if not alphas:
         return {}
     syntheses: dict[str, str] = {}
 
-    # Baseline: synthesize the un-ablated NLA so users can directly
-    # compare the ablated paragraphs against what the model "says" about
-    # itself with no intervention.
+    # Baseline: synthesize the un-ablated NLA on un-ablated M so users
+    # can directly compare the ablated paragraphs against what the
+    # model "says" about itself with no intervention on either side.
     raw_rows = rows_for_alpha(rows, "raw")
     if raw_rows:
         syntheses["raw"] = synthesize_alpha(
             bundle, prompt_text, output_text, "raw", raw_rows,
         )
 
-    for alpha in alphas:
-        a_rows = rows_for_alpha(rows, alpha)
-        if not a_rows:
-            continue
-        syntheses[alpha] = synthesize_alpha(
-            bundle, prompt_text, output_text, alpha, a_rows,
-        )
+    # If ablated-synthesizer mode is requested AND we have directions,
+    # install the L32 hook once around the α loop. Errors fall through
+    # to plain (un-ablated) synthesis with a log line.
+    hook_handle = None
+    if (
+        use_ablated_synthesizer
+        and refusal_directions is not None
+        and synthesizer_alpha > 0
+    ):
+        try:
+            from .abliteration import install_runtime_ablation_hook
+            r_layer = refusal_directions[bundle.extraction_layer]
+            hook_handle = install_runtime_ablation_hook(
+                bundle.model, bundle.extraction_layer, r_layer,
+                float(synthesizer_alpha),
+            )
+        except Exception:
+            logger.exception(
+                "ablated-synthesizer hook install failed; "
+                "falling back to un-ablated synthesis"
+            )
+            hook_handle = None
+
+    try:
+        for alpha in alphas:
+            a_rows = rows_for_alpha(rows, alpha)
+            if not a_rows:
+                continue
+            syntheses[alpha] = synthesize_alpha(
+                bundle, prompt_text, output_text, alpha, a_rows,
+            )
+    finally:
+        if hook_handle is not None:
+            try:
+                hook_handle.remove()
+            except Exception:
+                logger.exception("ablated-synthesizer hook remove failed")
+
     return syntheses

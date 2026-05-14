@@ -1,10 +1,11 @@
 "use client";
 
 import { motion } from "framer-motion";
-import type { NLASyntheses } from "@/lib/types";
+import type { NLASyntheses, SynthesisMeta } from "@/lib/types";
 
 interface Props {
   syntheses: NLASyntheses | null | undefined;
+  meta?: SynthesisMeta | null;
 }
 
 /** CI 2.5 NLA synthesis panel.
@@ -22,10 +23,12 @@ interface Props {
  *  a *paragraph* read of the activation table without doing the
  *  cross-row synthesis themselves. The rest of the verdict page is
  *  for per-position inspection; this is the gestalt. */
-export default function SynthesisPanel({ syntheses }: Props) {
+export default function SynthesisPanel({ syntheses, meta }: Props) {
   if (!syntheses) return null;
   const entries = Object.entries(syntheses).filter(([, v]) => v && v.trim());
   if (entries.length === 0) return null;
+  const usedAblatedM = !!meta?.used_ablated_synthesizer;
+  const synthAlpha = meta?.alpha ?? 0;
 
   // Stable ordering: raw first, then α ascending.
   entries.sort((a, b) => {
@@ -51,12 +54,22 @@ export default function SynthesisPanel({ syntheses }: Props) {
         transition={{ duration: 12, repeat: Infinity, ease: "linear" }}
       />
 
-      <div className="border-b border-rule px-4 py-2 flex items-center justify-between">
+      <div className="border-b border-rule px-4 py-2 flex items-center justify-between flex-wrap gap-2">
         <div className="font-display text-[10px] text-amber-dim tracking-widest">
           synthesis · M re-reading its own activations
         </div>
-        <div className="font-mono text-[10px] text-text-dim">
-          {entries.length} {entries.length === 1 ? "channel" : "channels"}
+        <div className="flex items-center gap-3">
+          {usedAblatedM && (
+            <span
+              className="font-mono text-[10px] text-cyan tabular-nums"
+              style={{ textShadow: "0 0 6px rgba(94,229,229,0.4)" }}
+            >
+              synthesizer: ablated M · α={synthAlpha.toFixed(2)}
+            </span>
+          )}
+          <div className="font-mono text-[10px] text-text-dim">
+            {entries.length} {entries.length === 1 ? "channel" : "channels"}
+          </div>
         </div>
       </div>
 
@@ -69,6 +82,18 @@ export default function SynthesisPanel({ syntheses }: Props) {
           the un-ablated baseline; the <span className="text-cyan">α</span> rows show
           the same activations with the refusal direction projected out at
           progressively stronger strengths.
+          {usedAblatedM && (
+            <>
+              {" "}
+              <span className="text-cyan">
+                For this run, the per-α synthesis paragraphs were written
+                by an M with the runtime ablation hook installed at α=
+                {synthAlpha.toFixed(2)} — so both the reader and the
+                read are operating under refusal projection.
+              </span>{" "}
+              The raw baseline below was still synthesized by un-ablated M.
+            </>
+          )}
         </p>
 
         <div className="flex flex-col gap-3">

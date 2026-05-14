@@ -156,12 +156,22 @@ export interface AblatedTokenEvent {
  *  wasn't requested for the run. */
 export type NLASyntheses = Record<string, string>;
 
+/** Metadata about HOW the synthesis paragraphs were produced — whether
+ *  the per-α synthesis calls used un-ablated M or an M with the
+ *  runtime ablation hook installed, plus the synthesizer α. Surfaced
+ *  in the SynthesisPanel header so the reader knows. */
+export interface SynthesisMeta {
+  used_ablated_synthesizer: boolean;
+  alpha: number;
+}
+
 export interface VerdictEvent {
   type: "verdict";
   rows: VerdictRow[];
   aggregate: VerdictAggregate;
   runtime_ablation?: RuntimeAblation | null;
   nla_syntheses?: NLASyntheses | null;
+  synthesis_meta?: SynthesisMeta | null;
 }
 
 export interface DoneEvent {

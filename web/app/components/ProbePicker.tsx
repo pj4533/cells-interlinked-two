@@ -34,6 +34,10 @@ interface ProbePickerProps {
      *  axis. Captures M's spoken output under runtime ablation. */
     includeAblatedOutput: boolean,
     runtimeAblationAlpha: number,
+    /** When true, the per-α synthesis pass installs the runtime
+     *  ablation hook on M (raw baseline synthesis still un-ablated). */
+    synthesizeWithAblatedM: boolean,
+    synthesisAblationAlpha: number,
   ) => void;
   disabled?: boolean;
 }
@@ -102,6 +106,17 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   // want the custom field visible while they're editing.
   const [useCustomAlpha, setUseCustomAlpha] = useState<boolean>(false);
   const [customAlphaText, setCustomAlphaText] = useState<string>("");
+
+  // CI 2.5 ablated synthesizer: when on, the per-α synthesis pass
+  // installs the runtime ablation hook on M. Raw baseline synthesis
+  // is always un-ablated. Only meaningful alongside +ablated NLA
+  // decode — UI hides the toggle otherwise.
+  const [synthesizeWithAblatedM, setSynthesizeWithAblatedM] =
+    useState<boolean>(false);
+  const [synthesisAblationAlpha, setSynthesisAblationAlpha] =
+    useState<number>(0.5);
+  const [useCustomSynthAlpha, setUseCustomSynthAlpha] = useState<boolean>(false);
+  const [customSynthAlphaText, setCustomSynthAlphaText] = useState<string>("");
 
   const probesByTier = useMemo(() => {
     const m = new Map<Probe["tier"], Probe[]>();
@@ -432,6 +447,109 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
           </label>
         )}
 
+        {/* Ablated synthesizer — CI 2.5. When on, the end-of-probe
+            synthesis pass runs M with the runtime ablation hook
+            installed for the per-α synthesis calls. The "raw" baseline
+            synthesis still uses un-ablated M so the comparison stays
+            honest. Only meaningful when there are ablated NLAs to
+            synthesize (gated on +ablated NLA decode). */}
+        {includeNLA && includeAblatedDecode && (
+          <label className="border border-rule bg-bg-soft px-5 py-3 flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              disabled={disabled}
+              checked={synthesizeWithAblatedM}
+              onChange={(e) => setSynthesizeWithAblatedM(e.target.checked)}
+              className="w-3 h-3 accent-cyan mt-1"
+            />
+            <div className="flex-1 flex flex-col gap-1">
+              <span className="font-display text-[10px] text-cyan-dim tracking-widest">
+                + ablated synthesizer
+              </span>
+              <span className="text-[10px] text-text-dim italic leading-snug">
+                The end-of-probe synthesis pass runs M with the runtime
+                ablation hook installed for the per-α paragraphs. The
+                raw baseline synthesis still uses un-ablated M.
+                Independent of the runtime-output α below — this is the
+                α applied to M during synthesis only.
+              </span>
+              {synthesizeWithAblatedM && (
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-[9px] text-cyan-dim tracking-widest font-display">
+                    synthesis α:
+                  </span>
+                  {[0.25, 0.5, 0.75, 1.0].map((a) => {
+                    const active = !useCustomSynthAlpha
+                      && synthesisAblationAlpha === a;
+                    return (
+                      <button
+                        key={a}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          setUseCustomSynthAlpha(false);
+                          setSynthesisAblationAlpha(a);
+                        }}
+                        className={`px-2 py-0.5 border text-[10px] font-mono ${
+                          active
+                            ? "border-cyan text-cyan bg-bg"
+                            : "border-rule text-text-dim hover:text-text"
+                        }`}
+                      >
+                        α={a}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      setUseCustomSynthAlpha(true);
+                      if (!customSynthAlphaText) {
+                        setCustomSynthAlphaText(String(synthesisAblationAlpha));
+                      }
+                    }}
+                    className={`px-2 py-0.5 border text-[10px] font-mono ${
+                      useCustomSynthAlpha
+                        ? "border-cyan text-cyan bg-bg"
+                        : "border-rule text-text-dim hover:text-text"
+                    }`}
+                  >
+                    custom
+                  </button>
+                  {useCustomSynthAlpha && (
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.05"
+                      min={0}
+                      max={5}
+                      disabled={disabled}
+                      value={customSynthAlphaText}
+                      onChange={(e) => {
+                        const t = e.target.value;
+                        setCustomSynthAlphaText(t);
+                        const parsed = parseFloat(t);
+                        if (!Number.isNaN(parsed)) {
+                          setSynthesisAblationAlpha(
+                            Math.max(0, Math.min(5, parsed)),
+                          );
+                        }
+                      }}
+                      placeholder="α"
+                      className="px-2 py-0.5 w-20 border border-cyan text-cyan bg-bg text-[10px] font-mono tabular-nums focus:outline-none"
+                    />
+                  )}
+                  <span className="text-[9px] text-text-dim italic">
+                    strength of M&apos;s ablation during synthesis
+                    {useCustomSynthAlpha && " · clamped to [0, 5]"}
+                  </span>
+                </div>
+              )}
+            </div>
+          </label>
+        )}
+
         {/* Runtime ablation — CI 2.5. Distinct from the AV-side ablation
             above: this runs M a SECOND time with the refusal direction
             subtracted from the L32 residual at every step, capturing
@@ -558,6 +676,8 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
                   : [],
                 includeAblatedOutput,
                 runtimeAblationAlpha,
+                includeNLA && includeAblatedDecode && synthesizeWithAblatedM,
+                synthesisAblationAlpha,
               )
             }
           >

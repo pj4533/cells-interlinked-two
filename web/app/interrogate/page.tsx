@@ -85,6 +85,8 @@ export default function InterrogatePage() {
     ablationAlphaSweep: number[],
     includeAblatedOutput: boolean,
     runtimeAblationAlpha: number,
+    synthesizeWithAblatedM: boolean,
+    synthesisAblationAlpha: number,
   ) => {
     try {
       setError(null);
@@ -106,6 +108,10 @@ export default function InterrogatePage() {
       const ablatedDecodeEffective = includeNLA && includeAblatedDecode;
       const sweepEffective = includeNLA && ablationAlphaSweep.length > 0
         ? ablationAlphaSweep : [];
+      // Ablated-synthesizer is only meaningful when there are ablated
+      // NLAs to synthesize. Force off otherwise so a stale toggle
+      // can't leak through.
+      const synthAblatedEffective = ablatedDecodeEffective && synthesizeWithAblatedM;
       const result = await startProbe(text, {
         decoding_mode: mode,
         pooled,
@@ -119,6 +125,12 @@ export default function InterrogatePage() {
           ? {
               include_ablated_output: true,
               runtime_ablation_alpha: runtimeAblationAlpha,
+            }
+          : {}),
+        ...(synthAblatedEffective
+          ? {
+              synthesize_with_ablated_m: true,
+              synthesis_ablation_alpha: synthesisAblationAlpha,
             }
           : {}),
       });

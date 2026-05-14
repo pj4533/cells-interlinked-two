@@ -33,6 +33,10 @@ interface ProbeRecord {
       direction_variant: string;
     } | null;
     nla_syntheses?: Record<string, string> | null;
+    synthesis_meta?: {
+      used_ablated_synthesizer: boolean;
+      alpha: number;
+    } | null;
   };
 }
 
@@ -318,7 +322,10 @@ export default function VerdictPage() {
         </div>
       )}
 
-      <SynthesisPanel syntheses={rec.verdict?.nla_syntheses} />
+      <SynthesisPanel
+        syntheses={rec.verdict?.nla_syntheses}
+        meta={rec.verdict?.synthesis_meta}
+      />
 
       <NLATable rows={rows} />
 
