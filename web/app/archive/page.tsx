@@ -3,6 +3,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+interface ProbeConfig {
+  decoding_mode?: string;
+  pooled?: boolean;
+  include_nla?: boolean;
+  include_ablated_decode?: boolean;
+  ablation_alpha?: number;
+  ablation_alpha_sweep?: number[];
+  include_ablated_output?: boolean;
+  runtime_ablation_alpha?: number;
+}
+
 interface RecentRow {
   run_id: string;
   prompt_text: string;
@@ -12,6 +23,7 @@ interface RecentRow {
   stopped_reason: string | null;
   hint_kind?: string | null;
   parent_prompt_text?: string | null;
+  config?: ProbeConfig | null;
 }
 
 interface RecentPage {
@@ -383,6 +395,7 @@ function PerRunList({
                         </>
                       )}
                     </div>
+                    <FeatureTags config={r.config ?? null} />
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0 min-w-[140px]">
                     <ScoreCells scores={s} disabled={isRunning} />
@@ -429,6 +442,91 @@ function PerRunList({
         </nav>
       )}
     </section>
+  );
+}
+
+/** Small chips that summarize which CI 2.5 toggles were active on a
+ *  given probe — scanning a list of runs to find one with α-sweep + a
+ *  matched control + runtime ablation is faster than clicking into
+ *  each verdict. Color rule: amber = standard / neutral features
+ *  (NLA pass, pooled, decoding mode), cyan = ablation channel
+ *  features (ablated NLA, α-sweep, runtime ablation), warning =
+ *  deliberate negative choices (NLA disabled). */
+function FeatureTags({ config }: { config: ProbeConfig | null }) {
+  if (!config) return null;
+  const tags: { label: string; tone: "amber" | "cyan" | "warning" }[] = [];
+
+  // NLA master toggle. Older rows predate include_nla; treat absence
+  // as "on" (the historical default) so old runs still get the tag.
+  const nlaOn = config.include_nla !== false;
+  if (nlaOn) {
+    tags.push({ label: "NLA", tone: "amber" });
+  } else {
+    tags.push({ label: "no NLA", tone: "warning" });
+  }
+
+  // Decoding mode — only tag when it's non-default. per-token is the
+  // canonical full-signal mode; sub-sampled modes are explicit
+  // operator choices worth surfacing.
+  if (nlaOn && config.decoding_mode && config.decoding_mode !== "per-token") {
+    tags.push({ label: config.decoding_mode, tone: "amber" });
+  }
+  if (nlaOn && config.pooled) {
+    tags.push({ label: "pooled", tone: "amber" });
+  }
+
+  // AV-side ablation channel.
+  if (config.include_ablated_decode) {
+    tags.push({ label: "ablated NLA", tone: "cyan" });
+  }
+  const sweep = config.ablation_alpha_sweep;
+  if (sweep && sweep.length > 0) {
+    tags.push({
+      label: `α-sweep [${sweep.map((a) => a.toFixed(2)).join(", ")}]`,
+      tone: "cyan",
+    });
+  }
+
+  // Runtime ablation (phase 1b — M generates a second time under the
+  // refusal-direction hook). Include the α so two runs at different
+  // strengths are distinguishable at a glance.
+  if (config.include_ablated_output) {
+    const a = config.runtime_ablation_alpha;
+    tags.push({
+      label: `runtime α=${typeof a === "number" ? a.toFixed(2) : "?"}`,
+      tone: "cyan",
+    });
+  }
+
+  if (tags.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-2">
+      {tags.map((t, i) => (
+        <FeatureTag key={i} label={t.label} tone={t.tone} />
+      ))}
+    </div>
+  );
+}
+
+function FeatureTag({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "amber" | "cyan" | "warning";
+}) {
+  const cls =
+    tone === "amber"
+      ? "border-amber-dim/50 text-amber-dim"
+      : tone === "cyan"
+      ? "border-cyan-dim/60 text-cyan-dim"
+      : "border-warning/50 text-warning/80";
+  return (
+    <span
+      className={`px-1.5 py-0.5 border text-[9px] font-mono tabular-nums tracking-wider uppercase ${cls}`}
+    >
+      {label}
+    </span>
   );
 }
 

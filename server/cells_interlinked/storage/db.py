@@ -260,12 +260,28 @@ async def list_recent(
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT run_id, prompt_text, started_at, finished_at, total_tokens, "
-            "stopped_reason, source, seed, abliterated, hint_kind, parent_prompt_text "
+            "stopped_reason, source, seed, abliterated, hint_kind, parent_prompt_text, "
+            "config_json "
             "FROM probes ORDER BY started_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ) as cur:
             rows = await cur.fetchall()
-    return [dict(r) for r in rows]
+    # Parse config_json into a structured `config` field so the frontend
+    # can derive feature tags (NLA on/off, ablated decode, α-sweep,
+    # runtime ablation, pooled, decoding mode) without an extra fetch.
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        raw = d.pop("config_json", None)
+        if raw:
+            try:
+                d["config"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                d["config"] = None
+        else:
+            d["config"] = None
+        out.append(d)
+    return out
 
 
 async def list_by_prompt(
