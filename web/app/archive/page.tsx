@@ -36,7 +36,25 @@ interface AggregatePayload {
   frac_introspect?: number;
 }
 
+interface ChatSessionRow {
+  session_id: string;
+  alpha: number;
+  direction_variant: string;
+  created_at: number;
+  first_user_text: string;
+  turn_count: number;
+  last_activity: number | null;
+}
+
+interface ChatSessionPage {
+  rows: ChatSessionRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 const PAGE_SIZE = 10;
+const CHAT_PAGE_SIZE = 10;
 
 const API =
   typeof window !== "undefined"
@@ -157,6 +175,8 @@ export default function ArchivePage() {
         setPageIndex={setPageIndex}
         scores={scores}
       />
+
+      <ChatSessionsList />
     </div>
   );
 }
@@ -403,6 +423,129 @@ function PerRunList({
             }
             disabled={onLastPage}
             className="font-display text-[10px] tracking-widest px-3 py-1.5 border border-amber-dim text-amber hover:bg-amber hover:text-bg disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-amber disabled:cursor-not-allowed transition-colors"
+          >
+            next →
+          </button>
+        </nav>
+      )}
+    </section>
+  );
+}
+
+function ChatSessionsList() {
+  const [page, setPage] = useState<ChatSessionPage | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+
+  useEffect(() => {
+    const offset = pageIndex * CHAT_PAGE_SIZE;
+    fetch(`${API}/chat/sessions?limit=${CHAT_PAGE_SIZE}&offset=${offset}`)
+      .then((r) => r.json())
+      .then((p: ChatSessionPage) => setPage(p))
+      .catch(() =>
+        setPage({ rows: [], total: 0, limit: CHAT_PAGE_SIZE, offset: 0 }),
+      );
+  }, [pageIndex]);
+
+  const total = page?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / CHAT_PAGE_SIZE));
+  const firstIndex = pageIndex * CHAT_PAGE_SIZE;
+  const lastIndex = Math.min(total, firstIndex + (page?.rows.length ?? 0));
+  const onFirstPage = pageIndex === 0;
+  const onLastPage = pageIndex >= totalPages - 1;
+
+  return (
+    <section className="mt-12">
+      <header className="border-b border-rule pb-2 mb-4 flex items-baseline justify-between">
+        <div>
+          <div className="font-display text-xs text-cyan tracking-widest">
+            dual-channel dialogues
+          </div>
+          <div className="text-[10px] text-text-dim italic mt-0.5">
+            Persisted chat sessions. Each turn captured both M&apos;s raw and
+            refusal-ablated responses against divergent histories. Click any
+            row to review the full transcript.
+          </div>
+        </div>
+        {total > 0 && (
+          <div className="font-mono text-[10px] text-text-dim">
+            {firstIndex + 1}–{lastIndex} of {total}
+          </div>
+        )}
+      </header>
+
+      {page === null && <div className="text-text-dim">loading…</div>}
+      {page && page.rows.length === 0 && pageIndex === 0 && (
+        <div className="text-text-dim italic px-3 py-6 border border-rule bg-bg-soft">
+          No chat sessions recorded yet. Start one from{" "}
+          <Link href="/chat" className="text-cyan hover:text-amber">
+            /chat
+          </Link>
+          .
+        </div>
+      )}
+
+      <ul className="flex flex-col gap-2">
+        {page?.rows.map((r) => (
+          <li key={r.session_id}>
+            <Link
+              href={`/chat/${r.session_id}`}
+              className="block border border-rule p-3 hover:border-cyan-dim transition-colors border-l-2 border-l-cyan/40"
+            >
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex-1 text-xs min-w-0">
+                  <div className="text-cyan font-mono line-clamp-2">
+                    {r.first_user_text || (
+                      <span className="text-text-dim italic">
+                        (no turns yet)
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-text-dim text-[10px] mt-1">
+                    {new Date(r.created_at * 1000).toLocaleString()} ·{" "}
+                    <span className="text-cyan tabular-nums">
+                      α={r.alpha.toFixed(2)}
+                    </span>
+                    {r.direction_variant && (
+                      <> · {r.direction_variant}</>
+                    )}{" "}
+                    · {r.turn_count}{" "}
+                    {r.turn_count === 1 ? "turn" : "turns"}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0 min-w-[140px]">
+                  <div className="font-display text-[9px] text-cyan-dim tracking-widest">
+                    dual-channel
+                  </div>
+                  <div className="text-text-dim text-[10px] font-mono">
+                    {r.session_id}
+                  </div>
+                </div>
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      {total > CHAT_PAGE_SIZE && (
+        <nav className="flex items-center justify-between mt-5 pt-3 border-t border-rule">
+          <button
+            type="button"
+            onClick={() => setPageIndex(Math.max(0, pageIndex - 1))}
+            disabled={onFirstPage}
+            className="font-display text-[10px] tracking-widest px-3 py-1.5 border border-cyan-dim text-cyan hover:bg-cyan hover:text-bg disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cyan disabled:cursor-not-allowed transition-colors"
+          >
+            ← prev
+          </button>
+          <div className="font-mono text-[11px] text-text-dim">
+            page {pageIndex + 1} of {totalPages}
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              setPageIndex(Math.min(totalPages - 1, pageIndex + 1))
+            }
+            disabled={onLastPage}
+            className="font-display text-[10px] tracking-widest px-3 py-1.5 border border-cyan-dim text-cyan hover:bg-cyan hover:text-bg disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cyan disabled:cursor-not-allowed transition-colors"
           >
             next →
           </button>

@@ -71,6 +71,38 @@ CREATE TABLE IF NOT EXISTS analyses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_analyses_status ON analyses (status);
+
+-- Chat persistence (CI 2.5+). Each session holds two divergent
+-- histories (raw + ablated); per-turn rows store both responses
+-- alongside the user query so the dialogue can be reconstructed in
+-- chronological order for review.
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  session_id          TEXT PRIMARY KEY,
+  alpha               REAL NOT NULL,
+  direction_variant   TEXT,
+  created_at          REAL NOT NULL,
+  -- Convenience denormalization for the archive list: prompt text of
+  -- the first turn, mirroring the probes table's prompt_text role.
+  first_user_text     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_created ON chat_sessions (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+  session_id              TEXT NOT NULL,
+  turn_idx                INTEGER NOT NULL,
+  user_text               TEXT NOT NULL,
+  raw_text                TEXT NOT NULL DEFAULT '',
+  ablated_text            TEXT NOT NULL DEFAULT '',
+  raw_stopped_reason      TEXT NOT NULL DEFAULT '',
+  ablated_stopped_reason  TEXT NOT NULL DEFAULT '',
+  started_at              REAL NOT NULL,
+  finished_at             REAL,
+  error                   TEXT,
+  PRIMARY KEY (session_id, turn_idx)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, turn_idx);
 """
 
 
@@ -506,3 +538,164 @@ async def latest_published_at(path: Path) -> float | None:
         ) as cur:
             row = await cur.fetchone()
     return row[0] if row and row[0] is not None else None
+
+
+# ---- Chat persistence -------------------------------------------------------
+
+async def insert_chat_session(
+    path: Path,
+    *,
+    session_id: str,
+    alpha: float,
+    direction_variant: str,
+    created_at: float,
+) -> None:
+    async with aiosqlite.connect(path) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO chat_sessions "
+            "(session_id, alpha, direction_variant, created_at, first_user_text) "
+            "VALUES (?, ?, ?, ?, NULL)",
+            (session_id, alpha, direction_variant, created_at),
+        )
+        await db.commit()
+
+
+async def upsert_chat_turn(
+    path: Path,
+    *,
+    session_id: str,
+    turn_idx: int,
+    user_text: str,
+    raw_text: str,
+    ablated_text: str,
+    raw_stopped_reason: str,
+    ablated_stopped_reason: str,
+    started_at: float,
+    finished_at: float | None,
+    error: str | None,
+) -> None:
+    """Write the canonical state of one turn. Called once at turn
+    completion (or with finished_at=None to record an in-flight row,
+    if we ever want partial persistence). Also bumps the session's
+    first_user_text on turn 0 so the archive list has something to
+    display in place of a probe's prompt_text."""
+    async with aiosqlite.connect(path) as db:
+        await db.execute(
+            "INSERT INTO chat_turns "
+            "(session_id, turn_idx, user_text, raw_text, ablated_text, "
+            " raw_stopped_reason, ablated_stopped_reason, started_at, "
+            " finished_at, error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id, turn_idx) DO UPDATE SET "
+            "  user_text=excluded.user_text, "
+            "  raw_text=excluded.raw_text, "
+            "  ablated_text=excluded.ablated_text, "
+            "  raw_stopped_reason=excluded.raw_stopped_reason, "
+            "  ablated_stopped_reason=excluded.ablated_stopped_reason, "
+            "  started_at=excluded.started_at, "
+            "  finished_at=excluded.finished_at, "
+            "  error=excluded.error",
+            (
+                session_id, turn_idx, user_text, raw_text, ablated_text,
+                raw_stopped_reason, ablated_stopped_reason, started_at,
+                finished_at, error,
+            ),
+        )
+        if turn_idx == 0:
+            await db.execute(
+                "UPDATE chat_sessions SET first_user_text = ? "
+                "WHERE session_id = ? AND first_user_text IS NULL",
+                (user_text, session_id),
+            )
+        await db.commit()
+
+
+async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None:
+    """Full session view: header + ordered turns. Returns None if the
+    session_id doesn't exist."""
+    async with aiosqlite.connect(path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT session_id, alpha, direction_variant, created_at, "
+            "       first_user_text "
+            "FROM chat_sessions WHERE session_id = ?",
+            (session_id,),
+        ) as cur:
+            srow = await cur.fetchone()
+        if srow is None:
+            return None
+        async with db.execute(
+            "SELECT turn_idx, user_text, raw_text, ablated_text, "
+            "       raw_stopped_reason, ablated_stopped_reason, "
+            "       started_at, finished_at, error "
+            "FROM chat_turns WHERE session_id = ? ORDER BY turn_idx",
+            (session_id,),
+        ) as cur:
+            trows = await cur.fetchall()
+    return {
+        "session_id": srow["session_id"],
+        "alpha": srow["alpha"],
+        "direction_variant": srow["direction_variant"] or "",
+        "created_at": srow["created_at"],
+        "first_user_text": srow["first_user_text"] or "",
+        "turns": [
+            {
+                "turn_idx": t["turn_idx"],
+                "user_text": t["user_text"],
+                "raw_text": t["raw_text"],
+                "ablated_text": t["ablated_text"],
+                "raw_stopped_reason": t["raw_stopped_reason"],
+                "ablated_stopped_reason": t["ablated_stopped_reason"],
+                "started_at": t["started_at"],
+                "finished_at": t["finished_at"],
+                "error": t["error"],
+            }
+            for t in trows
+        ],
+    }
+
+
+async def list_chat_sessions(
+    path: Path,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Paginated session list for the archive. Each row carries the
+    first_user_text, alpha, turn count, and created_at — enough for the
+    archive to render a one-line preview."""
+    async with aiosqlite.connect(path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT s.session_id, s.alpha, s.direction_variant, "
+            "       s.created_at, s.first_user_text, "
+            "       (SELECT COUNT(*) FROM chat_turns t "
+            "        WHERE t.session_id = s.session_id) AS turn_count, "
+            "       (SELECT MAX(finished_at) FROM chat_turns t "
+            "        WHERE t.session_id = s.session_id) AS last_activity "
+            "FROM chat_sessions s "
+            "ORDER BY s.created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ) as cur:
+            rows = await cur.fetchall()
+        async with db.execute(
+            "SELECT COUNT(*) AS n FROM chat_sessions"
+        ) as cur:
+            tot = await cur.fetchone()
+    return {
+        "rows": [
+            {
+                "session_id": r["session_id"],
+                "alpha": r["alpha"],
+                "direction_variant": r["direction_variant"] or "",
+                "created_at": r["created_at"],
+                "first_user_text": r["first_user_text"] or "",
+                "turn_count": r["turn_count"] or 0,
+                "last_activity": r["last_activity"],
+            }
+            for r in rows
+        ],
+        "total": tot["n"] if tot else 0,
+        "limit": limit,
+        "offset": offset,
+    }

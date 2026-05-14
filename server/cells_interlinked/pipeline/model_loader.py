@@ -95,6 +95,32 @@ class ModelBundle:
         )
         return rendered
 
+    def render_chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    ) -> str:
+        """Render a multi-turn chat history into a single template string.
+
+        `messages` is a list of {"role": "user"|"assistant", "content": str}
+        in chronological order, ending with a user turn. The default
+        system prompt is prepended so the model has consistent framing.
+        Used by the /chat path to maintain two divergent dialogue
+        threads (raw + ablated) with the same neutral system framing.
+        """
+        msgs: list[dict[str, str]] = [
+            {"role": "system", "content": system_prompt}
+        ]
+        for m in messages:
+            msgs.append({"role": m["role"], "content": (m["content"] or "").strip()})
+        rendered = self.tokenizer.apply_chat_template(
+            msgs,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        return rendered
+
 
 def load_model(
     model_name: str,

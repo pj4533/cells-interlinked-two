@@ -5,6 +5,7 @@ export default function Footer() {
     <footer className="border-t border-rule bg-bg-soft py-3 px-6 text-xs text-text-dim flex justify-between items-center">
       <div className="space-x-6">
         <Link href="/" className="hover:text-amber">cells interlinked</Link>
+        <Link href="/chat" className="hover:text-cyan">chat</Link>
         <Link href="/archive" className="hover:text-amber">archive</Link>
         <Link href="/pairs" className="hover:text-amber">pairs</Link>
         <Link href="/autorun" className="hover:text-cyan">autorun</Link>
