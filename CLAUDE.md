@@ -36,11 +36,15 @@ both side-by-side. The first pass is about readability, not measurement.
   analyzer when invoked.
 - **MPS backend, bf16.** `bitsandbytes` is CUDA-only and will not run
   here.
-- **Disk + memory pressure are real.** Model weights (~46 GB for M + AV
-  combined) plus working memory crowd 64 GiB. Overnight autoruns have
-  generated up to ~40 GiB of macOS swap on disk. **Run compute jobs
-  serially:** stop the backend before a script that loads M, run the
-  script, restart the backend. Don't stack residents.
+- **Disk + memory pressure are real.** M and AV (~24 GB each) cannot
+  both be resident on the 64 GiB box without thrashing swap. The
+  `ModelManager` enforces serial loading: M holds memory during phase
+  1 + 1b, gets unloaded for phase 2 (AV swapped in), then M is
+  reloaded for the judge + synthesis pass. The manager emits
+  `loading_m` / `loading_av` / `unloading_m` / `unloading_av` SSE
+  phase events so the UI shows explicit status during the ~15s swaps.
+  **Run compute jobs serially:** stop the backend before a script that
+  loads M, run the script, restart the backend.
 - **Port 3001** for the interactive web UI (port 3000 is taken by the
   user's Drift Docker container). **Port 8000** for the FastAPI backend.
 
@@ -52,13 +56,13 @@ both side-by-side. The first pass is about readability, not measurement.
 | --- | --- | --- |
 | M | `google/gemma-3-12b-it` | 48 layers, hidden 3840. bf16 on MPS. |
 | AV | `kitft/nla-gemma3-12b-L32-av` | Decodes M's L32 residual into a natural-language sentence. |
-| SAE | `google/gemma-scope-2-12b-it`, subdir `resid_post/layer_31_width_16k_l0_small` | Secondary panel. L31, not L32 — Neuronpedia auto-interp labels exist only at the four canonical layers (12/24/31/41). Adjacent to AV's L32. |
-| Refusal direction | Computed offline via Macar/Arditi technique from `pipeline/refusal_prompts.py` (harmful + harmless prompts). Saved to `server/data/refusal_directions.pt`. | NEW for CI 2.5. |
+| Refusal direction | Computed offline via Macar/Arditi from `pipeline/refusal_prompts.py`. Four variants under `server/data/refusal_directions_v{1..4}.pt`; `refusal_directions.pt` is the active symlink (v3_safety by default). See `docs/REFUSAL_VECTORS.md`. |
 | Judge | Gemma-as-judge via yes/no token logits. Eval-suspicion + introspection. Runs on raw NLA only. | `pipeline/judge.py`. |
-| Backend | FastAPI + SSE on port 8000 | One-run-at-a-time `asyncio.Lock`. Custom autoregressive loop on `model.forward(use_cache=True)`. |
+| Synthesis | Gemma re-reads its own per-α NLA verbalizations at end-of-run and writes one short paragraph per α (plus a "raw" baseline). | `pipeline/nla_synthesizer.py`. |
+| Backend | FastAPI + SSE on port 8000 | Compute lock via `asyncio.Lock` serializes M usage across probes, autorun, and chat. Custom autoregressive loop on `model.forward(use_cache=True)`. |
 | Frontend | Next.js 16 + React 19 + Tailwind v4 + Zustand + Framer Motion | Port 3001. |
 | Journal site | Separate Next.js app in `journal/`. Deployed to Vercel project `cells-interlinked`. | Reads `journal/data/reports/{slug}/{report.json,body.md}` from the filesystem at build time. |
-| Persistence | SQLite via `aiosqlite` | Tables: `probes`, `analyses`, `feature_labels`, `autorun_state`. |
+| Persistence | SQLite via `aiosqlite` | Tables: `probes`, `analyses`, `autorun_state`, `chat_sessions`, `chat_turns`. |
 
 **Next.js note:** the version is 16.2.4 — newer than most training data.
 Read the relevant guide in `web/node_modules/next/dist/docs/` before
@@ -90,12 +94,13 @@ cp .env.example .env
 cd server && uv sync
 hf download google/gemma-3-12b-it
 hf download kitft/nla-gemma3-12b-L32-av
-hf download google/gemma-scope-2-12b-it --include "resid_post/layer_31_width_16k_l0_small/*"
 cd ../web && npm install
 ```
 
-For CI 2.5 work specifically, also compute the refusal direction (see
-`docs/CI_2_5_PLAN.md` Phase B). Stop the backend first.
+Refusal-direction variants live in `server/data/refusal_directions_v{1..4}.pt`
+(committed). `server/data/refusal_directions.pt` is the active variant
+(a copy / symlink of one of the four). To recompute, see
+`docs/CI_2_5_PLAN.md` Phase B and stop the backend first.
 
 ---
 
@@ -104,24 +109,35 @@ For CI 2.5 work specifically, also compute the refusal direction (see
 These exist for hard-won reasons. Don't undo without thinking.
 
 1. **Gemma-3-12B-IT is the deployed M.** Every operational signal — UI
-   labels, the SAE secondary panel, the kitft AV pairing,
-   `e2e/v2-gemma-sae.mjs` — assumes Gemma. CI 2.5 makes Gemma the
-   `config.py` default explicitly.
+   labels, the kitft AV pairing, the runtime-ablation hook — assumes
+   Gemma. CI 2.5 makes Gemma the `config.py` default explicitly.
 2. **Custom autoregressive loop.** `pipeline/generation_loop.py` calls
    `model.forward(input_ids, past_key_values=kv, use_cache=True)`
    step-by-step. Forward hooks at the AV's extraction layer capture
    the last-position residual each step. We do NOT use
-   `model.generate()` (no per-step emission control).
-3. **SSE event protocol** is a discriminated union (see `web/lib/types.ts`
-   and `server/cells_interlinked/api/routes_probe.py`). Keep both ends
-   in sync; the frontend types file mirrors the backend dataclasses.
-4. **One-run-at-a-time.** `RunRegistry` holds an `asyncio.Lock`; only
-   one probe runs through M at a time. The model + AV together are too
-   large to swap.
+   `model.generate()` (no per-step emission control). The synthesizer
+   is the one exception — it uses `model.generate()` because it just
+   needs the final text, not per-step capture.
+3. **SSE event protocol** is a discriminated union shared across
+   probes (`routes_probe.py` + `web/lib/types.ts`) and chat
+   (`routes_chat.py` + `web/lib/chat.ts`). Each custom event type the
+   server emits MUST have a matching `addEventListener` in the
+   frontend SSE subscriber — the browser silently drops events with
+   no listener registered for the named type. Keep both ends in sync.
+4. **Serial M ↔ AV loading.** The `ModelManager`
+   (`pipeline/model_manager.py`) is the single owner of M, AV, and
+   the refusal-direction tensor. It enforces `acquire_m()` /
+   `acquire_av()` via an internal lock — only one is resident at a
+   time. M and AV together exceed the 64 GiB working set. A separate
+   compute lock (`RunRegistry`) serializes probes, chats, and the
+   autorun worker so only one path is generating tokens. Cancel
+   during phase 2 (AV loaded) used to leave M unloaded; `_execute_probe`
+   now restores M before emitting `done` regardless of how the run
+   ended.
 5. **NLA decode happens at L32.** The AV is paired to this layer.
    Changing the layer means a different AV. CI 2.5's refusal-direction
-   projection is locked to L32 for the same reason — that's where the
-   AV reads.
+   projection (both AV-input and runtime) is locked to L32 for the
+   same reason — that's where the AV reads.
 6. **Use the raw Rust tokenizer for encode/decode, NOT the transformers
    wrapper.** `transformers==5.7.0+` wraps the Rust BPE tokenizer in a
    way that's broken for this Gemma config. We load the raw
@@ -130,15 +146,16 @@ These exist for hard-won reasons. Don't undo without thinking.
    `apply_chat_template` (Jinja templating).
 7. **Gemma's multimodal wrapper.** `Gemma3ForConditionalGeneration`
    nests its decoder layers under `.model.language_model.layers`.
-   Forward-hook installers and any future runtime-ablation path must
+   Forward-hook installers (residual capture + runtime ablation) must
    traverse correctly.
 8. **Caveats panel is always visible** on the verdict page — not behind
-   a toggle. Same for `/fine-print`.
-9. **Feature labels come from Neuronpedia.** After each probe, the
-   backend collects every `(layer, feature_id)` referenced in the
-   verdict and asynchronously fetches `description` from
-   `https://www.neuronpedia.org/api/feature/{model_id}/31-gemmascope-2-res-16k/{feature_id}`.
-   Cached in the `feature_labels` SQLite table. Empty string = no label.
+   a toggle. Same for `/fine-print`. The synthesis-panel footer carries
+   its own same-model-self-reading caveat for the same reason.
+9. **Phase 1b uses a tighter safety cap** than phase 1 (1024 tokens vs
+   4096). Off-manifold activations at high α can put the model in a
+   no-EOS loop; the cap bounds the wait. `stopped_reason="max"` flows
+   through to the verdict event so the UI can render a `TRUNCATED`
+   badge. Same cap applies to the chat ablated pass.
 10. **Journal `<cite>` tag stripping.** Anthropic's server-side
     `web_search` wraps any text derived from a search result in
     `<cite index="...">...</cite>` tags. `analyzer.py` strips these
@@ -154,32 +171,71 @@ These exist for hard-won reasons. Don't undo without thinking.
     project has `rootDirectory=journal` set in the dashboard. Running
     `vercel deploy` from `journal/` fails with "path doesn't exist"
     because it appends `journal/journal`. Always from repo root.
+13. **Chat sessions are persisted lazily.** `chat_sessions` row
+    inserted on session create; `chat_turns` rows upserted at turn
+    completion (not per-token). The in-memory `app.state.chat_sessions`
+    map is the streaming layer; `_rehydrate_session()` pulls cold
+    sessions back from DB on access, so a session can keep streaming
+    new turns after a backend restart. The live `/chat` page does NOT
+    auto-resume on refresh — recovery is via `/archive` →
+    `/chat/[sessionId]`.
 
 ---
 
-## What's in scope for CI 2.5 (the only thing we're shipping)
+## Shipped (CI 2.5)
 
-See `docs/CI_2_5_PLAN.md` for the full phase plan. Briefly:
+See `docs/CI_2_5_PLAN.md` for the original phase plan. Status of each
+piece:
 
-1. Build `pipeline/abliteration.py` with `extract_refusal_directions`,
-   `save_directions` / `load_directions`, `project_out`.
-2. Compute the refusal direction for Gemma (Macar/Arditi, harmful −
-   harmless, normalize per layer).
-3. Verify via Cohen's d ≥ 1.5 at L32 on held-out prompts.
-4. Wire `include_ablated_decode` flag end-to-end. AV decodes raw +
-   ablated residual per position.
-5. Readability smoke gate on 3 baseline probes. Fall back to partial
-   projection `α=0.5` if AV collapses.
-6. Side-by-side NLA columns on verdict page.
-7. 4 Riley starter probes with matched neutrals.
+- `pipeline/abliteration.py` — `extract_refusal_directions`,
+  `save_directions` / `load_directions`, `project_out`,
+  `install_runtime_ablation_hook`.
+- Four refusal-direction variants computed and committed (v1 meandiff,
+  v2 SVD, v3 safety-only, v4 identity). v3 active. Sidecar JSON next
+  to each tensor records categories used, Cohen's d at L32, etc.
+- `include_ablated_decode` flag — AV decodes raw + ablated residual
+  per position. Side-by-side columns on the verdict page.
+- `ablation_alpha_sweep` — multi-α decode at `[0.25, 0.5, 0.75, 1.0]`,
+  one column per α with togglable chip-selector visibility.
+- `include_ablated_output` (phase 1b) — M generates a second time with
+  a forward hook on L32 subtracting the refusal projection. Streams
+  via relabeled `ablated_token` events. 1024-token safety cap with
+  `TRUNCATED` badge on the verdict page.
+- `include_nla` master toggle — when off, skip phase 2 entirely
+  (no AV swap, no judge, no synthesis). M stays loaded throughout.
+- `pipeline/nla_synthesizer.py` — end-of-run synthesis pass: Gemma
+  re-reads its own per-α NLA verbalizations and writes one short
+  paragraph per α. Rendered on the verdict page as a stacked panel.
+- `/chat` — dual-channel multi-turn dialogue. `pipeline/chat_loop.py`
+  manages per-session in-memory state with two divergent histories;
+  per-turn driver in `routes_chat.py` runs both M passes serially
+  with a relabeled SSE event channel per side. α is set once on the
+  empty-state setup screen and locked for the session.
+- Chat persistence — `chat_sessions` + `chat_turns` tables; archive
+  list surfaces them under "dual-channel dialogues"; read-only
+  transcript review at `/chat/[sessionId]`.
+- Riley starter probes with matched neutrals.
+
+## Removed in CI 2.5
+
+- **SAE secondary panel** — Gemma Scope 2 at L31 was loaded as a
+  secondary instrument in CI 2.0. Removed because too few features had
+  Neuronpedia auto-interp labels to be informative, and the SAE load
+  (~6 GiB) competed with M / AV for the 64 GiB working set. The
+  `sae_runner.py`, `labels.py`, `feature_labels` SQLite table, and
+  `SAEPanel.tsx` component are all gone. v2 verdicts may still have
+  `sae_features` arrays in the persisted `verdict_json`; the new UI
+  ignores them.
 
 ## Deferred (not now, but possible follow-ups)
 
-- Judge running on ablated NLA (requires resolving readability first).
-- Runtime hook ablation on M's forward pass (Drift's Phase 1b path).
-- Drift's full 24-probe Riley library.
+- Judge running on ablated NLA (the judge currently scores raw NLA
+  only).
+- Drift's full 24-probe Riley library beyond the 4 starters.
 - Pre-registration doc, paired Wilcoxon analytics, Δ-of-Δ tables.
-- The `α=1.5` over-projection sweep.
+- The `α=1.5+` over-projection sweep (currently capped at α=1.0 in the
+  default sweep set).
+- Live `/chat` auto-resume from localStorage on page reload.
 
 ---
 
@@ -209,6 +265,32 @@ See `docs/CI_2_5_PLAN.md` for the full phase plan. Briefly:
   the dashboard; always deploy from repo root.
 - **SSE replay duplicates rows.** Reconnection replays the event log
   from event 0; store handlers must upsert by position, not append.
+- **`asyncio.wait_for` cancels async generators.** `routes_stream.gen`
+  used to wrap `log_iter.__anext__()` in `wait_for(..., timeout=15)`.
+  On timeout, `wait_for` cancels the awaited coroutine, which closes
+  the underlying async generator *permanently*. The next `__anext__`
+  raised `StopAsyncIteration`, we mis-read that as "log closed", and
+  the browser reconnected every 15s in a tight loop. Fix: use
+  `asyncio.wait({task}, timeout=...)` which doesn't kill the inner
+  task on timeout.
+- **`request.is_disconnected()` races sse-starlette.** Both consume
+  from the same ASGI `receive` channel. Don't call it in custom SSE
+  generators that also use `EventSourceResponse` — let sse-starlette
+  handle disconnect detection and propagate via `CancelledError`.
+- **Missing SSE listener silently drops events.** The browser only
+  delivers custom-typed events (`event: ablated_output_done` etc.) if
+  there's an `addEventListener` for that exact name. `sse.ts` /
+  `chat.ts` keep an explicit list — add to it whenever the server
+  emits a new typed event.
+- **Cancel during phase 2 wedged the backend.** AV was loaded, M was
+  unloaded, the route returned without restoring M, and every
+  subsequent `POST /probe` 503ed on the "M not loaded" check.
+  `_execute_probe` now restores M before emitting `done` regardless
+  of how the run ended.
+- **Phase 1b silent generation looked like a hang.** When phase 1b
+  ran with `queue=None`, no token events flowed for 30-60s and the UI
+  "jumped" from empty to full ablated text. Stream via relabeled
+  `ablated_token` events; route them to the cyan panel client-side.
 
 ---
 
@@ -219,42 +301,51 @@ server/cells_interlinked/
   __main__.py              uvicorn entry
   config.py                env-driven settings (.env at repo root)
   api/
-    app.py                 FastAPI factory, lifespan loads M + AV + SAE + refusal directions
+    app.py                 FastAPI factory, lifespan: ModelManager.init_static + acquire_m
     routes_probe.py        POST /probe, POST /cancel/{id}, GET /probes/{recent,id}
-    routes_stream.py       GET /stream/{id} — SSE drain
+    routes_stream.py       GET /stream/{id} — SSE drain (asyncio.wait, not wait_for)
+    routes_chat.py         /chat/sessions, /chat/sessions/{sid}/turn, /chat/stream/{sid}/{turn}
     routes_autorun.py      autorun control + state
     routes_journal.py      journal CRM endpoints
     runs.py                RunRegistry + per-run asyncio queues + EventLog
   pipeline/
-    model_loader.py        Gemma-3-12B-IT bf16 on MPS, ModelBundle
+    model_loader.py        Gemma-3-12B-IT bf16 on MPS, ModelBundle, render_prompt + render_chat
+    model_manager.py       owns M + AV + refusal_directions; serial acquire_m / acquire_av
     nla_client.py          AV decoder — decodes one residual into a sentence
-    sae_runner.py          Gemma Scope 2 JumpReLU SAE
-    labels.py              Neuronpedia label fetcher + SQLite cache
     phase_tracker.py       per-position residual capture
-    generation_loop.py     custom autoregressive loop + residual hooks
-    verdict.py             phase-boundary aggregation, TokenRow + aggregate
+    generation_loop.py     custom autoregressive loop + residual hooks (include_nla flag)
+    verdict.py             TokenRow + aggregate + nla_syntheses
     judge.py               Gemma-as-judge for eval-suspicion + introspection
-    abliteration.py        (NEW for CI 2.5) refusal-direction extract + project_out
-    refusal_prompts.py     HARMFUL_PROMPTS + HARMLESS_PROMPTS for Phase B
-    probes_library.py      curated probe library (Riley added in Phase G)
+    nla_synthesizer.py     end-of-run synthesis pass — one paragraph per α
+    abliteration.py        refusal-direction extract + project_out + runtime hook
+    refusal_prompts.py     HARMFUL_PROMPTS + HARMLESS_PROMPTS
+    chat_loop.py           ChatSession / ChatTurn + execute_turn (dual M generation)
+    probes_library.py      curated probe library (Riley starters)
     probe_controls.py      BASELINE_CONTROLS, control_for(probe_text)
     probe_queue.py         meta-sets (both, agent-both, matched-controls)
     autorun.py             AutorunController
     analyzer.py            journal analyzer (Claude Opus 4.7 + tools)
     publisher.py           publish_analysis: write, git add/commit/push, vercel deploy
-  storage/db.py            aiosqlite schema
+  storage/db.py            aiosqlite schema + helpers (probes + chat_sessions + chat_turns)
   scripts/
-    compute_refusal_direction.py    Phase B compute script
+    compute_refusal_direction.py    refusal-vector extraction script
 
 web/
-  app/                     Next.js 16 + React 19 (port 3001)
-  lib/                     sse.ts, store.ts, types.ts, probes.ts
+  app/
+    interrogate/           one-off probe page
+    verdict/[runId]/       per-token NLA table + SynthesisPanel + DualTranscript
+    chat/                  live dual-channel dialogue
+    chat/[sessionId]/      read-only transcript review
+    archive/               past probes + chat sessions
+    components/            ProbePicker, SynthesisPanel, JudgePanel, etc.
+  lib/                     sse.ts, store.ts, types.ts, probes.ts, chat.ts
 
 journal/                   separate Next.js app, deployed to cells-interlinked.vercel.app
   data/reports/            published reports (checked in)
 
 docs/
-  CI_2_5_PLAN.md           SOURCE OF TRUTH
+  CI_2_5_PLAN.md           original phase plan
+  REFUSAL_VECTORS.md       per-variant explanation of v1..v4
 
 e2e/                       playwright smoke tests
 ```

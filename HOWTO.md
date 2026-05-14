@@ -26,17 +26,17 @@ You only do these once.
    the `cells-interlinked` Vercel project — same project as v1, so
    publishes update `cells-interlinked.vercel.app` directly.
 
-5. **Models cached.** The deployed M (Gemma-3-12B-IT, ~23 GB) and AV
-   (kitft/nla-gemma3-12b-L32-av, ~22 GB) and Gemma Scope 2 SAE at L31
-   (~1 GB) are in `~/.cache/huggingface/`. Total resident ~46 GB on the
-   64 GiB MPS box.
+5. **Models cached.** The deployed M (Gemma-3-12B-IT, ~24 GB) and AV
+   (kitft/nla-gemma3-12b-L32-av, ~24 GB) are in `~/.cache/huggingface/`.
+   They are **never co-resident**: the `ModelManager` loads them
+   serially and swaps between phases on the 64 GiB box.
 
 ## Tonight: kick off the overnight batch
 
 Two terminals.
 
-**Terminal 1 — backend** (loads M + AV; ~1-3 minutes the first time, ~70s
-on subsequent boots from cache):
+**Terminal 1 — backend** (pre-loads M only at startup; ~14s warm /
+~70s cold. AV gets loaded lazily during the first probe's phase 2):
 
     cd server
     uv run uvicorn cells_interlinked.api.app:create_app \
@@ -73,6 +73,22 @@ whatever sleep ate.
 A matched-controls run of 100 probe pairs (200 runs total) completes
 in roughly 30-50 hours per-token. Mid-batch results are committed
 run-by-run so partial progress is visible at any point.
+
+### Interactive paths (not just autorun)
+
+Two interactive surfaces are available without an autorun batch:
+
+- **`/interrogate`** — single probe, full instrument. Toggles for
+  matched-control follow-up, NLA pass on/off, refusal-ablated NLA
+  decode, multi-α sweep, runtime-ablated output, custom α.
+- **`/chat`** — dual-channel dialogue. Set α once on the setup screen,
+  then chat with M; each turn streams both raw and ablated responses
+  against separate histories. Sessions persist to SQLite and show up
+  in `/archive` under "dual-channel dialogues" — each row links to a
+  read-only transcript review page.
+
+Both share the same loaded M with the autorun worker via the compute
+lock — only one path is generating tokens at any moment.
 
 ## In the morning
 

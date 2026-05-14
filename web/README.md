@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cells Interlinked 2.5 — frontend
 
-## Getting Started
+Next.js 16 + React 19 + Tailwind v4 + Zustand + Framer Motion control
+panel for the local interrogation backend.
 
-First, run the development server:
+## Run
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+    npm install
+    npm run dev
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Serves on **port 3001** (port 3000 is reserved for the host's Drift
+Docker container). Talks to the FastAPI backend on **port 8000** —
+launch that first from `../server`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The dev server is LAN-accessible: `http://your-host.local:3001` and
+RFC1918 private IPs are all allow-listed in `next.config.ts` so
+phones / iPads / a second laptop can hit the same instance.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Pages
 
-## Learn More
+| Route | What it does |
+| --- | --- |
+| `/` | Landing. |
+| `/interrogate` | One-off probe with all the CI 2.5 toggles. |
+| `/verdict/[runId]` | Per-token NLA table + α-synthesis + dual-output comparison. |
+| `/chat` | Dual-channel multi-turn dialogue with M. |
+| `/chat/[sessionId]` | Read-only transcript review of a persisted chat. |
+| `/archive` | Past probes + persisted chat sessions. |
+| `/pairs` | Matched-pair Δ judge scores. |
+| `/autorun` | Overnight batch worker control. |
+| `/journal` | Analyzer + publish CRM. |
+| `/fine-print` | Caveats / methodology. |
 
-To learn more about Next.js, take a look at the following resources:
+## Stack notes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Next.js 16.** Has breaking changes from older versions; read
+  `node_modules/next/dist/docs/` before writing new code (see
+  `AGENTS.md`).
+- **SSE clients live in `lib/sse.ts` (probes) and `lib/chat.ts`
+  (chat).** Both register an explicit list of event types via
+  `addEventListener`. If the backend emits a typed event that isn't
+  in the list, the browser silently drops it.
+- **Store is Zustand** (`lib/store.ts`), one slice per concern.
+  Upsert-by-position is the rule for streamed token / row state so
+  SSE replay on reconnect doesn't double-write.
+- **Aesthetic.** Blade Runner / V-K instrument vocabulary: amber +
+  cyan, monospace, scanline overlays, dossier-style framing. See
+  `app/globals.css` for the palette + `data-vk` styled inputs.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Build
 
-## Deploy on Vercel
+    npm run build
+    npm start
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Production build is rarely used in dev; we deploy the live UI as a
+local dev server and only the `journal/` subproject ships to Vercel.
