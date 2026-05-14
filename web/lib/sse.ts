@@ -60,6 +60,8 @@ export function subscribe(runId: string, h: SubscribeHandlers): () => void {
     "token",
     "phase",
     "nla_decoded",
+    "ablated_token",
+    "ablated_output_done",
     "stopped",
     "verdict",
     "done",
@@ -125,6 +127,11 @@ export async function startProbe(prompt: string, opts?: {
   decoding_mode?: string;
   pooled?: boolean;
   include_matched_control?: boolean;
+  /** When false, the backend skips phase 2 entirely (no AV swap, no
+   *  NLA decoding, no judge, no synthesis). Default true. Other
+   *  NLA-dependent options (include_ablated_decode,
+   *  ablation_alpha_sweep) become no-ops when this is false. */
+  include_nla?: boolean;
   include_ablated_decode?: boolean;
   ablation_alpha?: number;
   ablation_alpha_sweep?: number[];

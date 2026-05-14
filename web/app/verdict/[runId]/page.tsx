@@ -6,6 +6,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import CaveatsPanel from "../../components/CaveatsPanel";
 import JudgePanel from "../../components/JudgePanel";
+import SynthesisPanel from "../../components/SynthesisPanel";
 import { splitNLA } from "@/lib/nla";
 import type { VerdictAggregate, VerdictRow } from "@/lib/types";
 
@@ -31,6 +32,7 @@ interface ProbeRecord {
       alpha: number;
       direction_variant: string;
     } | null;
+    nla_syntheses?: Record<string, string> | null;
   };
 }
 
@@ -276,12 +278,6 @@ export default function VerdictPage() {
         </motion.div>
       )}
 
-      <VerdictBlock
-        aggregate={aggregate}
-        rec={rec}
-        mate={hasMatchedPair ? mate : undefined}
-      />
-
       <IncompleteRunBanner
         stoppedReason={rec.stopped_reason}
         error={rec.error ?? null}
@@ -294,10 +290,24 @@ export default function VerdictPage() {
           ablatedText={rec.verdict.runtime_ablation.output_text}
           ablatedAlpha={rec.verdict.runtime_ablation.alpha}
           variantName={rec.verdict.runtime_ablation.direction_variant}
+          ablatedStoppedReason={
+            (rec.verdict.runtime_ablation as { stopped_reason?: string })
+              .stopped_reason ?? null
+          }
+          ablatedSafetyCap={
+            (rec.verdict.runtime_ablation as { safety_cap?: number })
+              .safety_cap ?? null
+          }
         />
       ) : (
         <Transcript label="What it said (output text)" text={rec.output_text} />
       )}
+
+      <VerdictBlock
+        aggregate={aggregate}
+        rec={rec}
+        mate={hasMatchedPair ? mate : undefined}
+      />
 
       {rec.error && (
         <div className="border border-warning/60 bg-bg-soft p-4 text-xs text-warning font-mono whitespace-pre-wrap">
@@ -307,6 +317,8 @@ export default function VerdictPage() {
           {rec.error}
         </div>
       )}
+
+      <SynthesisPanel syntheses={rec.verdict?.nla_syntheses} />
 
       <NLATable rows={rows} />
 
@@ -719,11 +731,15 @@ function DualTranscript({
   ablatedText,
   ablatedAlpha,
   variantName,
+  ablatedStoppedReason,
+  ablatedSafetyCap,
 }: {
   rawText: string;
   ablatedText: string;
   ablatedAlpha: number;
   variantName: string;
+  ablatedStoppedReason: string | null;
+  ablatedSafetyCap: number | null;
 }) {
   // Common prefix length — characters that are identical between raw
   // and ablated. After this point, the two timelines diverge.
@@ -838,6 +854,18 @@ function DualTranscript({
               <span className="italic text-text-dim">— empty —</span>
             )}
           </div>
+          {ablatedStoppedReason === "max" && (
+            <div className="mt-3 border-t border-warning/40 pt-2 flex items-start gap-2 text-[10px] font-mono text-warning leading-relaxed">
+              <span className="font-display tracking-widest text-warning shrink-0">
+                ⚠ TRUNCATED
+              </span>
+              <span className="italic font-mono normal-case text-warning/85">
+                hit {ablatedSafetyCap ?? 1024}-token safety cap — generation
+                didn&apos;t emit EOS. At this α, the ablated residual likely
+                fell into a no-EOS loop; what you see above is just the prefix.
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

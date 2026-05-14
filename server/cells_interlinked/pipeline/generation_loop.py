@@ -136,6 +136,13 @@ class ProbeConfig:
     # If False, each pick is a single position decoded directly
     # (per-token read). No-op for "per-token" mode (windows of 1).
     pooled: bool = False
+    # CI 2.5: master toggle for phase 2 (NLA decode + judge +
+    # synthesis). When False, the executor stops after phase 1
+    # (and optional phase 1b) and goes straight to verdict
+    # persistence with an empty rows list. M stays loaded throughout
+    # — no AV swap, no risk of leaving the manager in the AV-loaded
+    # state if the run is cancelled mid-flight.
+    include_nla: bool = True
     # CI 2.5: when True, every NLA decode is performed twice — once on
     # the raw residual, once after subtracting its projection onto the
     # refusal direction at the AV's extraction layer. The ablated

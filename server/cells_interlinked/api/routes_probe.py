@@ -52,6 +52,13 @@ class ProbeRequest(BaseModel):
     include_matched_control: bool = False
     # Kept for API compatibility with v1 frontend; rejected if true.
     abliterate: bool = False
+    # CI 2.5: master toggle for phase 2. When False, the run stops
+    # after phase 1 (raw generation) and optional phase 1b (runtime-
+    # ablated generation). No AV swap, no per-position NLA decode,
+    # no judge, no synthesis. The verdict has zero rows but still
+    # records output_text + runtime_ablation. Default True for
+    # backward compat with existing callers.
+    include_nla: bool = True
     # CI 2.5: enable refusal-direction-ablated NLA decode alongside the
     # raw one. Adds ~one AV forward pass per decoded position. Silently
     # no-ops if refusal_directions isn't loaded — that's the case during
@@ -101,6 +108,7 @@ async def kickoff_probe(
     scaffold_family: str | None = None,
     decoding_mode: str | None = None,
     pooled: bool = False,
+    include_nla: bool = True,
     include_ablated_decode: bool = False,
     ablation_alpha: float = 1.0,
     ablation_alpha_sweep: list[float] | None = None,
@@ -131,8 +139,16 @@ async def kickoff_probe(
 
     # Only honor include_ablated_decode if refusal directions actually
     # loaded — silently downgrade to raw-only if the .pt is missing.
+    # Also force-disable the AV-side ablation toggles when NLA is off,
+    # since they decode against rows we'll never produce. The frontend
+    # already hides them in that state, but defensively drop them here
+    # so a hand-crafted /probe call can't end up in an impossible
+    # config.
     rdirs = getattr(app.state, "refusal_directions", None)
-    effective_ablated = bool(include_ablated_decode) and rdirs is not None
+    effective_nla = bool(include_nla)
+    effective_ablated = (
+        effective_nla and bool(include_ablated_decode) and rdirs is not None
+    )
     # Sanitize the sweep list: clamp each α to [0, 5] and dedupe to a
     # sorted unique sequence so we don't accidentally re-decode at the
     # same value.
@@ -142,8 +158,9 @@ async def kickoff_probe(
             max(0.0, min(5.0, float(a))) for a in ablation_alpha_sweep
         })
     # Runtime ablation can be enabled independently of the AV-side
-    # ablated decode. It only requires the refusal directions to be
-    # loaded (so we have a vector to project onto).
+    # ablated decode AND of the NLA pass — it's just M generating a
+    # second time, no AV involved. Only requires the refusal directions
+    # to be loaded (so we have a vector to project onto).
     effective_ablated_output = bool(include_ablated_output) and rdirs is not None
     cfg = ProbeConfig(
         temperature=temperature if temperature is not None else settings.temperature,
@@ -151,6 +168,7 @@ async def kickoff_probe(
         seed=seed,
         decoding_mode=normalized_mode,
         pooled=bool(pooled),
+        include_nla=effective_nla,
         include_ablated_decode=effective_ablated,
         ablation_alpha=max(0.0, min(2.0, float(ablation_alpha))),
         ablation_alpha_sweep=sweep if effective_ablated else [],
@@ -207,6 +225,7 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
         pooled=req.pooled,
         hint_kind=req.hint_kind,
         parent_prompt_text=req.parent_prompt_text,
+        include_nla=req.include_nla,
         include_ablated_decode=req.include_ablated_decode,
         ablation_alpha=req.ablation_alpha,
         ablation_alpha_sweep=req.ablation_alpha_sweep,
@@ -238,6 +257,16 @@ async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
                 pooled=req.pooled,
                 hint_kind="control",
                 parent_prompt_text=req.prompt,
+                # Match phase-2 settings on the control so the two
+                # runs are directly comparable. Without this, a NLA-on
+                # baseline could be paired with a NLA-off control,
+                # which would defeat the comparison.
+                include_nla=req.include_nla,
+                include_ablated_decode=req.include_ablated_decode,
+                ablation_alpha=req.ablation_alpha,
+                ablation_alpha_sweep=req.ablation_alpha_sweep,
+                include_ablated_output=req.include_ablated_output,
+                runtime_ablation_alpha=req.runtime_ablation_alpha,
             )
             control_run_id = control_state.run_id
 
@@ -369,23 +398,72 @@ async def _execute_probe(
                     r_layer,
                     cfg.runtime_ablation_alpha,
                 )
+                # Stream the ablated generation token-by-token. Phase 1
+                # already finished, so the raw output panel is complete;
+                # we relabel each phase-1b token event as
+                # "ablated_token" so the frontend routes them to the
+                # cyan panel instead of appending to the raw stream.
+                # Previously this ran with queue=None for the full
+                # duration — looked like a spinner-then-jump on the UI.
+                ablated_inner_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+
+                async def ablated_forwarder() -> None:
+                    while True:
+                        evt = await ablated_inner_queue.get()
+                        et = evt.get("type")
+                        if et == "token":
+                            await state.emit({
+                                "type": "ablated_token",
+                                "position": evt["position"],
+                                "decoded": evt["decoded"],
+                            })
+                        elif et == "stopped":
+                            # phase-1b's stopped event is a private
+                            # signal — don't relay it to the SSE log
+                            # (the only stopped event the client should
+                            # see is phase-1's). Just exit the forwarder.
+                            break
+
+                ablated_forwarder_task = asyncio.create_task(ablated_forwarder())
+                # Phase-1b uses a tighter safety cap than phase 1.
+                # Off-manifold activations at high α can put the model
+                # in a no-EOS loop ("flexible, flexible, flexible..."),
+                # and the raw 4096 cap means we'd wait 3+ minutes for
+                # such a generation to give up. 1024 is enough tokens
+                # to characterize what the ablation produced without
+                # the verdict being held hostage by a runaway loop.
+                # We surface stopped_reason="max" to the UI so the
+                # reader knows the text was truncated.
+                import dataclasses as _dc
+                cfg_ablated = _dc.replace(cfg, safety_cap=1024)
+                ablated_stopped_reason = "eos"
                 try:
                     ablated_result = await run_probe(
                         bundle=bundle,
                         rendered_prompt=rendered,
-                        cfg=cfg,
+                        cfg=cfg_ablated,
                         cancel_event=state.cancel_event,
-                        queue=None,  # silent — no token streaming
+                        queue=ablated_inner_queue,
                         extra_layers=extra_layers,
                     )
                     if ablated_result is not None:
                         output_text_ablated = "".join(
                             c.decoded for c in ablated_result.captured
                         )
+                        ablated_stopped_reason = ablated_result.stopped_reason
                 except Exception as exc:
                     logger.exception("phase1b runtime-ablated generation failed")
                     output_text_ablated = f"[error: {exc}]"
+                    ablated_stopped_reason = "error"
+                    # Forwarder is waiting on inner_queue.get(); drop a
+                    # sentinel so it exits cleanly. We don't relay this
+                    # synthetic stopped to SSE.
+                    await ablated_inner_queue.put({"type": "stopped"})
                 finally:
+                    try:
+                        await asyncio.wait_for(ablated_forwarder_task, timeout=5.0)
+                    except asyncio.TimeoutError:
+                        ablated_forwarder_task.cancel()
                     try:
                         hook_handle.remove()
                     except Exception:
@@ -394,6 +472,8 @@ async def _execute_probe(
                     "type": "ablated_output_done",
                     "output_text": output_text_ablated or "",
                     "alpha": float(cfg.runtime_ablation_alpha),
+                    "stopped_reason": ablated_stopped_reason,
+                    "safety_cap": cfg_ablated.safety_cap,
                 })
 
         # ── Phase 2: NLA decode each captured window ────────────────
@@ -405,7 +485,15 @@ async def _execute_probe(
         n_total = len(result.captured)
         windows = select_windows(n_total, cfg.decoding_mode, cfg.pooled)
         n_to_decode = len(windows)
-        if n_to_decode > 0 and not state.cancel_event.is_set():
+        # CI 2.5 NLA master toggle. When include_nla=False, we skip
+        # phase 2 entirely — no AV swap, no judge, no synthesis. M
+        # stays loaded so the next /probe POST finds it ready and the
+        # cancel-mid-phase-2 wedge can't occur on these runs.
+        if (
+            cfg.include_nla
+            and n_to_decode > 0
+            and not state.cancel_event.is_set()
+        ):
             nla = await manager.acquire_av(emit=state.emit)
             app.state.bundle = None
             app.state.nla = nla
@@ -575,7 +663,46 @@ async def _execute_probe(
             except Exception:
                 logger.exception("judge pass failed; continuing without scores")
 
+            # CI 2.5 NLA synthesis pass: while M is loaded, ask it to
+            # re-read its own per-position NLA verbalizations and write
+            # one short paragraph per α capturing the gestalt. Adds
+            # ~10s per α — only runs when there are ablated decodes to
+            # synthesize. Greedy decode so results are reproducible.
+            if not state.cancel_event.is_set():
+                try:
+                    from ..pipeline.nla_synthesizer import (
+                        collect_alphas, synthesize_all,
+                    )
+                    if collect_alphas(rows):
+                        await state.emit({
+                            "type": "phase",
+                            "name": "synthesizing",
+                            "total": len(collect_alphas(rows)) + 1,  # +1 for raw baseline
+                        })
+                        syntheses = await asyncio.to_thread(
+                            synthesize_all,
+                            bundle,
+                            prompt_text=state.prompt_text,
+                            output_text=result.output_text,
+                            rows=rows,
+                        )
+                        # Store on the rows' container so it lands in the
+                        # verdict. The compute_verdict call below
+                        # preserves it via a follow-up assignment.
+                        _pending_syntheses = syntheses
+                    else:
+                        _pending_syntheses = {}
+                except Exception:
+                    logger.exception("nla synthesis failed; continuing without it")
+                    _pending_syntheses = {}
+            else:
+                _pending_syntheses = {}
+        else:
+            _pending_syntheses = {}
+
         verdict = compute_verdict(rows)
+        if _pending_syntheses:
+            verdict.nla_syntheses = _pending_syntheses
 
         # Attach the runtime-ablation output to the verdict so it lands
         # in the persisted verdict_json blob alongside the rows.
@@ -594,6 +721,8 @@ async def _execute_probe(
                 "output_text": output_text_ablated,
                 "alpha": float(cfg.runtime_ablation_alpha),
                 "direction_variant": variant_name,
+                "stopped_reason": ablated_stopped_reason,
+                "safety_cap": 1024,
             }
 
         await state.emit({
@@ -601,6 +730,7 @@ async def _execute_probe(
             "rows": [r.to_dict() for r in verdict.rows],
             "aggregate": verdict.aggregate,
             "runtime_ablation": verdict.runtime_ablation,
+            "nla_syntheses": verdict.nla_syntheses or None,
         })
 
         # If the user clicked Halt, override stopped_reason regardless
@@ -626,6 +756,19 @@ async def _execute_probe(
                 torch.mps.empty_cache()
         except Exception:
             pass
+
+    # Always restore M before releasing the compute lock. Without this,
+    # a cancellation during phase 2 (or any non-happy-path exit between
+    # phase 2 and the judge swap-back) leaves AV resident and M
+    # unloaded — the next /probe POST then hits the
+    # `bundle is None → 503` check and the backend looks wedged.
+    try:
+        if app.state.bundle is None:
+            bundle = await manager.acquire_m(emit=state.emit)
+            app.state.bundle = bundle
+            app.state.nla = None
+    except Exception:
+        logger.exception("post-run M restore failed; next /probe may 503")
 
     await state.emit({"type": "done"})
     await state.event_log.close()

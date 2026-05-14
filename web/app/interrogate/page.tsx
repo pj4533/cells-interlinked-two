@@ -80,6 +80,7 @@ export default function InterrogatePage() {
     mode: string,
     pooled: boolean,
     includeMatchedControl: boolean,
+    includeNLA: boolean,
     includeAblatedDecode: boolean,
     ablationAlphaSweep: number[],
     includeAblatedOutput: boolean,
@@ -97,13 +98,22 @@ export default function InterrogatePage() {
         unsubRef.current();
         unsubRef.current = null;
       }
+      // NLA off forces the ablated-decode toggles off too — they're
+      // meaningless without an AV pass to decode anything. The UI
+      // already hides them when NLA is unchecked, but defensively
+      // strip them from the request payload as well so a stale toggle
+      // can't leak through.
+      const ablatedDecodeEffective = includeNLA && includeAblatedDecode;
+      const sweepEffective = includeNLA && ablationAlphaSweep.length > 0
+        ? ablationAlphaSweep : [];
       const result = await startProbe(text, {
         decoding_mode: mode,
         pooled,
         include_matched_control: includeMatchedControl,
-        include_ablated_decode: includeAblatedDecode,
-        ...(ablationAlphaSweep.length > 0
-          ? { ablation_alpha_sweep: ablationAlphaSweep }
+        include_nla: includeNLA,
+        include_ablated_decode: ablatedDecodeEffective,
+        ...(sweepEffective.length > 0
+          ? { ablation_alpha_sweep: sweepEffective }
           : {}),
         ...(includeAblatedOutput
           ? {
@@ -662,12 +672,17 @@ function ModelStatusStrip({
   const elapsed = Math.max(0, (now - status.since) / 1000);
   const isUnloading = status.name.startsWith("unloading");
   const isAblated = status.name === "ablated_generation";
-  const label = isAblated
+  const isSynth = status.name === "synthesizing";
+  const label = isSynth
+    ? "SYNTHESIZING"
+    : isAblated
     ? "ABLATING"
     : isUnloading
     ? "UNLOADING"
     : "LOADING";
-  const target = status.name.endsWith("_m")
+  const target = isSynth
+    ? "gestalt across α channels"
+    : status.name.endsWith("_m")
     ? "M (Gemma-3-12B-IT)"
     : status.name.endsWith("_av")
     ? "AV (NLA verbalizer)"
@@ -832,8 +847,28 @@ function GeneratingLayout({
           >
             {ablatedText || <span className="text-text-dim italic">— empty —</span>}
           </div>
+          {run.ablatedStoppedReason === "max" && (
+            <TruncationBadge cap={run.ablatedSafetyCap} />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Phase-1b safety-cap notice. Renders inside the cyan ablated panel
+ *  when run_probe stopped because it hit the 1024-token cap rather
+ *  than emitting EOS — a common failure mode at high α where the
+ *  off-manifold residual never produces a stop token. */
+function TruncationBadge({ cap }: { cap: number | null }) {
+  const capText = cap ?? 1024;
+  return (
+    <div className="border-t border-warning/50 bg-warning/10 px-4 py-2 flex items-center gap-2 text-[10px] font-mono text-warning">
+      <span className="font-display tracking-widest">⚠ TRUNCATED</span>
+      <span className="text-warning/80 italic font-mono normal-case">
+        hit {capText}-token safety cap — generation didn&apos;t emit EOS
+        (likely an off-manifold loop at this α)
+      </span>
     </div>
   );
 }
@@ -892,6 +927,9 @@ function DecodingLayout({
             >
               {ablatedText || <span className="text-text-dim italic">— empty —</span>}
             </div>
+            {run.ablatedStoppedReason === "max" && (
+              <TruncationBadge cap={run.ablatedSafetyCap} />
+            )}
           </div>
         )}
       </div>

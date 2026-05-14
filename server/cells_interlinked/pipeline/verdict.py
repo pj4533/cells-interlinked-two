@@ -95,6 +95,13 @@ class Verdict:
     # holds the result of M's second generation pass under runtime
     # ablation: { output_text, alpha, direction_variant_name }.
     runtime_ablation: dict[str, Any] | None = None
+    # CI 2.5 meta-analysis: at the end of a probe with ablated NLA
+    # decodes, M re-reads its own per-position NLA verbalizations and
+    # synthesizes a short paragraph capturing the gestalt at each α.
+    # Keys: "raw" for the un-ablated NLA, plus the α strings present in
+    # nla_sentences_ablated ("0.2", "0.5", ...). Value is the synthesis
+    # paragraph. Empty / absent when ablated decode wasn't requested.
+    nla_syntheses: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -103,6 +110,8 @@ class Verdict:
         }
         if self.runtime_ablation is not None:
             d["runtime_ablation"] = self.runtime_ablation
+        if self.nla_syntheses:
+            d["nla_syntheses"] = self.nla_syntheses
         return d
 
 

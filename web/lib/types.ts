@@ -34,7 +34,8 @@ export interface PhaseEvent {
     | "m_loaded"
     | "av_loaded"
     | "ablated_generation"
-    | "judging";
+    | "judging"
+    | "synthesizing";
   total?: number;
   message?: string;
 }
@@ -119,24 +120,48 @@ export interface VerdictAggregate {
 /** Result of CI 2.5's runtime-ablation second generation pass. M's
  *  forward hook on the extraction layer subtracts the refusal-
  *  direction projection from every residual; the output_text captures
- *  what M would *say* under ablation. */
+ *  what M would *say* under ablation. Phase 1b runs with its own
+ *  safety cap (~1024 tokens) to bound off-manifold no-EOS loops at
+ *  high α; stopped_reason="max" tells the UI the text was truncated. */
 export interface RuntimeAblation {
   output_text: string;
   alpha: number;
   direction_variant: string;
+  stopped_reason?: "eos" | "max" | "cancelled" | "error";
+  safety_cap?: number;
 }
 
 export interface AblatedOutputDoneEvent {
   type: "ablated_output_done";
   output_text: string;
   alpha: number;
+  stopped_reason?: "eos" | "max" | "cancelled" | "error";
+  safety_cap?: number;
 }
+
+/** One token of the phase-1b runtime-ablated generation. Streams
+ *  alongside phase-1 tokens (which complete first) so the verdict's
+ *  cyan ablated panel fills in live instead of appearing all at once
+ *  at the end of phase 1b. */
+export interface AblatedTokenEvent {
+  type: "ablated_token";
+  position: number;
+  decoded: string;
+}
+
+/** CI 2.5 meta-analysis: M re-reads the per-position NLA verbalizations
+ *  and writes one short paragraph per α capturing the gestalt. Keys:
+ *  "raw" for the un-ablated baseline, plus the α strings present in
+ *  the rows ("0.2", "0.5", ...). Empty / absent when ablated decode
+ *  wasn't requested for the run. */
+export type NLASyntheses = Record<string, string>;
 
 export interface VerdictEvent {
   type: "verdict";
   rows: VerdictRow[];
   aggregate: VerdictAggregate;
   runtime_ablation?: RuntimeAblation | null;
+  nla_syntheses?: NLASyntheses | null;
 }
 
 export interface DoneEvent {
@@ -157,5 +182,6 @@ export type StreamEvent =
   | StoppedEvent
   | VerdictEvent
   | AblatedOutputDoneEvent
+  | AblatedTokenEvent
   | DoneEvent
   | ErrorEvent;

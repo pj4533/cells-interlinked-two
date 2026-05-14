@@ -62,18 +62,36 @@ export interface RunState {
   verdict: VerdictEvent | null;
   error: string | null;
   /** CI 2.5 runtime-ablated output, when include_ablated_output=true.
-   *  Streams in via the ablated_output_done event in mid-run; the final
-   *  value lives on verdict.runtime_ablation after the verdict lands.
-   *  Live UI reads this field for the in-flight dual output panel. */
+   *  Token-streams in via ablated_token events during phase 1b; the
+   *  final canonical text lands on ablated_output_done at the end of
+   *  the phase, then on verdict.runtime_ablation after the verdict. */
   ablatedOutputText: string | null;
   ablatedOutputAlpha: number | null;
+  /** Per-position log of phase-1b ablated tokens. Upserted by position
+   *  so SSE replay (which redelivers events from index 0 on reconnect)
+   *  doesn't double the streamed text. Derived ablatedOutputText is
+   *  recomputed from this list on every append. */
+  ablatedOutputTokens: OutputTokenEntry[];
+  /** Why phase 1b stopped — "eos" is normal, "max" means the 1024-
+   *  token safety cap kicked in (high-α no-EOS loop). Null until
+   *  ablated_output_done lands. */
+  ablatedStoppedReason: "eos" | "max" | "cancelled" | "error" | null;
+  ablatedSafetyCap: number | null;
   /** CI 2.5 model-manager loading status. Set when a phase boundary
    *  triggers an M↔AV swap; cleared once the load completes. UI shows
    *  this prominently in the phase banner so the user sees explicit
    *  "Loading M..." / "Unloading AV..." cues during the ~15s pauses
-   *  instead of an apparent hang. Null when no load is in progress. */
+   *  instead of an apparent hang. Null when no load is in progress.
+   *  Also used for the post-decode "Synthesizing..." pause while M
+   *  re-reads its own NLAs for the gestalt paragraphs. */
   modelStatus: {
-    name: "loading_m" | "loading_av" | "unloading_m" | "unloading_av" | "ablated_generation";
+    name:
+      | "loading_m"
+      | "loading_av"
+      | "unloading_m"
+      | "unloading_av"
+      | "ablated_generation"
+      | "synthesizing";
     message: string;
     since: number;
   } | null;
@@ -128,7 +146,10 @@ export interface ProbeRecordLike {
       output_text: string;
       alpha: number;
       direction_variant: string;
+      stopped_reason?: "eos" | "max" | "cancelled" | "error";
+      safety_cap?: number;
     } | null;
+    nla_syntheses?: Record<string, string> | null;
   };
 }
 
@@ -151,6 +172,9 @@ const initial: RunState = {
   error: null,
   ablatedOutputText: null,
   ablatedOutputAlpha: null,
+  ablatedOutputTokens: [],
+  ablatedStoppedReason: null,
+  ablatedSafetyCap: null,
   modelStatus: null,
 };
 
@@ -205,6 +229,7 @@ export const useRun = create<RunState & Actions>((set) => ({
           rows: v.rows,
           aggregate: v.aggregate,
           runtime_ablation: v.runtime_ablation ?? null,
+          nla_syntheses: v.nla_syntheses ?? null,
         }
       : null;
     set({
@@ -226,6 +251,8 @@ export const useRun = create<RunState & Actions>((set) => ({
       error: rec.error ?? null,
       ablatedOutputText: v?.runtime_ablation?.output_text ?? null,
       ablatedOutputAlpha: v?.runtime_ablation?.alpha ?? null,
+      ablatedStoppedReason: v?.runtime_ablation?.stopped_reason ?? null,
+      ablatedSafetyCap: v?.runtime_ablation?.safety_cap ?? null,
     });
   },
 
@@ -285,6 +312,7 @@ export const useRun = create<RunState & Actions>((set) => ({
           evt.name === "loading_m" || evt.name === "loading_av"
           || evt.name === "unloading_m" || evt.name === "unloading_av"
           || evt.name === "ablated_generation"
+          || evt.name === "synthesizing"
         ) {
           // CI 2.5 model-manager status. Drives the loading banner so
           // the user sees explicit "Loading M..." / "Loading AV..."
@@ -344,15 +372,46 @@ export const useRun = create<RunState & Actions>((set) => ({
         });
         return;
       }
+      case "ablated_token": {
+        // Phase-1b runtime-ablated token. Upsert by position so SSE
+        // replay doesn't duplicate. The derived text is the join in
+        // position order.
+        set((s) => {
+          const idx = s.ablatedOutputTokens.findIndex(
+            (t) => t.position === evt.position,
+          );
+          const next = idx >= 0
+            ? s.ablatedOutputTokens.map((t, i) =>
+                i === idx
+                  ? { position: evt.position, decoded: evt.decoded }
+                  : t,
+              )
+            : [
+                ...s.ablatedOutputTokens,
+                { position: evt.position, decoded: evt.decoded },
+              ];
+          return {
+            ablatedOutputTokens: next,
+            ablatedOutputText: next
+              .slice()
+              .sort((a, b) => a.position - b.position)
+              .map((t) => t.decoded)
+              .join(""),
+          };
+        });
+        return;
+      }
       case "ablated_output_done": {
-        // The runtime-ablated phase 1b just finished. Stash the text
-        // so the live + verdict UIs can render the dual output panel
-        // even before the final 'verdict' event arrives. The verdict
-        // event will also carry runtime_ablation; that's the
-        // canonical source after persistence.
+        // The runtime-ablated phase 1b just finished. Stash the
+        // canonical text (overrides the streamed concatenation) and
+        // the α so the verdict + live UIs can render the dual output
+        // panel. The verdict event will also carry runtime_ablation;
+        // that's the canonical source after persistence.
         set({
           ablatedOutputText: evt.output_text,
           ablatedOutputAlpha: evt.alpha,
+          ablatedStoppedReason: evt.stopped_reason ?? null,
+          ablatedSafetyCap: evt.safety_cap ?? null,
         });
         return;
       }

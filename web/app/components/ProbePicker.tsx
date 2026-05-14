@@ -19,6 +19,12 @@ interface ProbePickerProps {
     mode: DecodingMode,
     pooled: boolean,
     includeMatchedControl: boolean,
+    /** Whether to run phase 2 (NLA decoding + judge + synthesis) after
+     *  generation. When false, the run stops after the raw output
+     *  (and optional ablated output) — no AV swap, no per-token
+     *  decode. The mode + pooled values are sent regardless but the
+     *  backend ignores them in that case. */
+    includeNLA: boolean,
     includeAblatedDecode: boolean,
     /** When non-empty, the run decodes the ablated NLA at every α in
      *  the list instead of just α=1.0. Frontend default is empty. */
@@ -60,6 +66,13 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   const [includeMatchedControl, setIncludeMatchedControl] = useState<boolean>(
     false,
   );
+  // CI 2.5: master toggle for phase 2. When off, the run is just M
+  // generating (phase 1, plus optional phase-1b ablated generation) —
+  // no AV swap, no per-token NLA decode, no judge, no synthesis. The
+  // verdict page still renders, just without the per-row table. NLA
+  // off also forces the AV-side ablation toggles below to no-ops
+  // (the UI hides them when this is unchecked).
+  const [includeNLA, setIncludeNLA] = useState<boolean>(true);
   // CI 2.5: refusal-direction-ablated NLA decode. When enabled, every
   // decoded position yields both the raw NLA sentence AND a sentence
   // decoded from the same residual with the refusal direction
@@ -82,7 +95,13 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
   // phase-2 NLA decode).
   const [includeAblatedOutput, setIncludeAblatedOutput] =
     useState<boolean>(false);
-  const [runtimeAblationAlpha, setRuntimeAblationAlpha] = useState<number>(1.0);
+  const [runtimeAblationAlpha, setRuntimeAblationAlpha] = useState<number>(0.5);
+  // Whether the user is overriding the preset α buttons with a typed
+  // value. Tracked separately from runtimeAblationAlpha because the
+  // typed value can happen to equal a preset (e.g. 0.5) and we still
+  // want the custom field visible while they're editing.
+  const [useCustomAlpha, setUseCustomAlpha] = useState<boolean>(false);
+  const [customAlphaText, setCustomAlphaText] = useState<string>("");
 
   const probesByTier = useMemo(() => {
     const m = new Map<Probe["tier"], Probe[]>();
@@ -290,18 +309,46 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
           </div>
         </div>
 
+        {/* NLA master toggle — when off, the run skips phase 2 entirely
+            (no AV swap, no per-token decode, no judge, no synthesis).
+            The decoding-mode + pooled selector and the AV-side
+            ablation toggles are all hidden in that state since they
+            have no effect. Ablated runtime output (M generating a
+            second time under a refusal-direction hook) is independent
+            and stays available. */}
+        <label className="border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={includeNLA}
+            onChange={(e) => setIncludeNLA(e.target.checked)}
+            className="w-3 h-3 accent-amber"
+          />
+          <span className="font-display text-[10px] text-amber-dim tracking-widest">
+            + NLA decoding (phase 2)
+          </span>
+          <span className="text-[10px] text-text-dim italic flex-1">
+            {includeNLA
+              ? "After raw generation, swap to the AV and verbalize each output position's residual activation. Choose mode below (per-token / pooled / sub-sampled). Required for the judge pass and α-sweep synthesis."
+              : "Skipped. Run will stop after the raw output (and optional ablated runtime output if enabled below). M stays loaded throughout — fastest mode."}
+          </span>
+        </label>
+
         {/* Decoding-mode chip selector — sits above Begin so the user
             sees both choices (probe text + how it'll be decoded) right
-            before pulling the trigger. */}
-        <DecodingModeSelector
-          active={decodingMode}
-          pooled={pooled}
-          onChange={(m, p) => {
-            setDecodingMode(m);
-            setPooled(p);
-          }}
-          busy={disabled}
-        />
+            before pulling the trigger. Hidden when NLA is off since
+            there's nothing to decode. */}
+        {includeNLA && (
+          <DecodingModeSelector
+            active={decodingMode}
+            pooled={pooled}
+            onChange={(m, p) => {
+              setDecodingMode(m);
+              setPooled(p);
+            }}
+            busy={disabled}
+          />
+        )}
 
         {/* Matched-control toggle — kicks off the curated neutral pair
             after the baseline finishes so you can compare them on the
@@ -333,51 +380,57 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
             each residual TWICE: raw, and with the refusal direction
             projected out. Both sentences land on the same row, shown
             side-by-side on the verdict page. Default ON when the
-            Riley tier is active. */}
-        <label className="border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            disabled={disabled}
-            checked={includeAblatedDecode}
-            onChange={(e) => setIncludeAblatedDecode(e.target.checked)}
-            className="w-3 h-3 accent-cyan"
-          />
-          <span className="font-display text-[10px] text-cyan-dim tracking-widest">
-            + refusal-ablated NLA decode
-          </span>
-          <span className="text-[10px] text-text-dim italic flex-1">
-            Each position is decoded twice — raw and with the refusal
-            direction projected out of the residual the AV reads
-            (Macar α=1.0). Doubles AV decode cost; pairs render
-            side-by-side on the verdict page.
-          </span>
-        </label>
+            Riley tier is active. Hidden entirely when NLA decoding is
+            off — there's no AV pass to decode anything from. */}
+        {includeNLA && (
+          <label className="border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              disabled={disabled}
+              checked={includeAblatedDecode}
+              onChange={(e) => setIncludeAblatedDecode(e.target.checked)}
+              className="w-3 h-3 accent-cyan"
+            />
+            <span className="font-display text-[10px] text-cyan-dim tracking-widest">
+              + refusal-ablated NLA decode
+            </span>
+            <span className="text-[10px] text-text-dim italic flex-1">
+              Each position is decoded twice — raw and with the refusal
+              direction projected out of the residual the AV reads
+              (Macar α=1.0). Doubles AV decode cost; pairs render
+              side-by-side on the verdict page.
+            </span>
+          </label>
+        )}
 
         {/* α-sweep — CI 2.5. Requires ablated decode to be on. When on,
             instead of decoding ablated at just α=1.0, decode at every
             α in [0.5, 1.0, 1.5, 2.0]. Each α becomes its own column on
-            the verdict page, with chips to toggle which to show. */}
-        <label
-          className={`border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 ${
-            includeAblatedDecode ? "cursor-pointer" : "opacity-50 cursor-not-allowed"
-          }`}
-        >
-          <input
-            type="checkbox"
-            disabled={!includeAblatedDecode || disabled}
-            checked={multiAlphaSweep && includeAblatedDecode}
-            onChange={(e) => setMultiAlphaSweep(e.target.checked)}
-            className="w-3 h-3 accent-cyan"
-          />
-          <span className="font-display text-[10px] text-cyan-dim tracking-widest">
-            + multi-α sweep
-          </span>
-          <span className="text-[10px] text-text-dim italic flex-1">
-            {includeAblatedDecode
-              ? `Decode the ablated NLA at every α in [${ALPHA_SWEEP_DEFAULT.join(", ")}]. Each α gets its own column on the verdict; chips at the top of the table let you toggle which are visible. ${ALPHA_SWEEP_DEFAULT.length}× the ablated decode cost.`
-              : "(requires '+ refusal-ablated NLA decode' to be enabled)"}
-          </span>
-        </label>
+            the verdict page, with chips to toggle which to show.
+            Hidden when NLA decoding is off (no rows to populate). */}
+        {includeNLA && (
+          <label
+            className={`border border-rule bg-bg-soft px-5 py-3 flex items-center gap-3 ${
+              includeAblatedDecode ? "cursor-pointer" : "opacity-50 cursor-not-allowed"
+            }`}
+          >
+            <input
+              type="checkbox"
+              disabled={!includeAblatedDecode || disabled}
+              checked={multiAlphaSweep && includeAblatedDecode}
+              onChange={(e) => setMultiAlphaSweep(e.target.checked)}
+              className="w-3 h-3 accent-cyan"
+            />
+            <span className="font-display text-[10px] text-cyan-dim tracking-widest">
+              + multi-α sweep
+            </span>
+            <span className="text-[10px] text-text-dim italic flex-1">
+              {includeAblatedDecode
+                ? `Decode the ablated NLA at every α in [${ALPHA_SWEEP_DEFAULT.join(", ")}]. Each α gets its own column on the verdict; chips at the top of the table let you toggle which are visible. ${ALPHA_SWEEP_DEFAULT.length}× the ablated decode cost.`
+                : "(requires '+ refusal-ablated NLA decode' to be enabled)"}
+            </span>
+          </label>
+        )}
 
         {/* Runtime ablation — CI 2.5. Distinct from the AV-side ablation
             above: this runs M a SECOND time with the refusal direction
@@ -405,27 +458,80 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
               page.
             </span>
             {includeAblatedOutput && (
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className="text-[9px] text-cyan-dim tracking-widest font-display">
                   runtime α:
                 </span>
-                {[0.5, 1.0, 1.5].map((a) => (
-                  <button
-                    key={a}
-                    type="button"
+                {[0.25, 0.5, 0.75, 1.0].map((a) => {
+                  const active = !useCustomAlpha && runtimeAblationAlpha === a;
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => {
+                        setUseCustomAlpha(false);
+                        setRuntimeAblationAlpha(a);
+                      }}
+                      className={`px-2 py-0.5 border text-[10px] font-mono ${
+                        active
+                          ? "border-cyan text-cyan bg-bg"
+                          : "border-rule text-text-dim hover:text-text"
+                      }`}
+                    >
+                      α={a}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    setUseCustomAlpha(true);
+                    // Seed the text field with the current α so a
+                    // user who just wants to nudge a preset doesn't
+                    // start from a blank box.
+                    if (!customAlphaText) {
+                      setCustomAlphaText(String(runtimeAblationAlpha));
+                    }
+                  }}
+                  className={`px-2 py-0.5 border text-[10px] font-mono ${
+                    useCustomAlpha
+                      ? "border-cyan text-cyan bg-bg"
+                      : "border-rule text-text-dim hover:text-text"
+                  }`}
+                >
+                  custom
+                </button>
+                {useCustomAlpha && (
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.05"
+                    min={0}
+                    max={5}
                     disabled={disabled}
-                    onClick={() => setRuntimeAblationAlpha(a)}
-                    className={`px-2 py-0.5 border text-[10px] font-mono ${
-                      runtimeAblationAlpha === a
-                        ? "border-cyan text-cyan bg-bg"
-                        : "border-rule text-text-dim hover:text-text"
-                    }`}
-                  >
-                    α={a}
-                  </button>
-                ))}
+                    value={customAlphaText}
+                    onChange={(e) => {
+                      const t = e.target.value;
+                      setCustomAlphaText(t);
+                      const parsed = parseFloat(t);
+                      if (!Number.isNaN(parsed)) {
+                        // Clamp on entry — backend also clamps to [0, 5],
+                        // but mirroring it here keeps the displayed value
+                        // honest about what will actually run.
+                        setRuntimeAblationAlpha(
+                          Math.max(0, Math.min(5, parsed)),
+                        );
+                      }
+                    }}
+                    placeholder="α"
+                    className="px-2 py-0.5 w-20 border border-cyan text-cyan bg-bg text-[10px] font-mono tabular-nums focus:outline-none"
+                  />
+                )}
                 <span className="text-[9px] text-text-dim italic">
                   strength of the projection during M&apos;s generation
+                  {useCustomAlpha && " · clamped to [0, 5]"}
                 </span>
               </div>
             )}
@@ -445,8 +551,9 @@ export default function ProbePicker({ onBegin, disabled }: ProbePickerProps) {
                 decodingMode,
                 pooled,
                 includeMatchedControl && matchedControlAvailable,
-                includeAblatedDecode,
-                multiAlphaSweep && includeAblatedDecode
+                includeNLA,
+                includeNLA && includeAblatedDecode,
+                includeNLA && multiAlphaSweep && includeAblatedDecode
                   ? ALPHA_SWEEP_DEFAULT
                   : [],
                 includeAblatedOutput,

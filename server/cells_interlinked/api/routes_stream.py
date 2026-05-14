@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _PADDING = ":" + (" " * 2047) + "\n\n"
 _PING_INTERVAL_SEC = 15.0
@@ -40,24 +43,63 @@ async def stream(run_id: str, request: Request) -> EventSourceResponse:
         # calls event_log.close() and we've reached the end.
         log_iter = state.event_log.stream_from(0).__aiter__()
 
-        # We interleave a periodic ping so HTTP intermediaries don't
-        # drop the connection on long quiet stretches (a per-token NLA
-        # decode at ~17s leaves the channel quiet between events).
-        while True:
-            if await request.is_disconnected():
-                return
-            try:
-                evt = await asyncio.wait_for(
-                    log_iter.__anext__(), timeout=_PING_INTERVAL_SEC,
+        t_open = time.time()
+        n_events = 0
+        n_pings = 0
+        exit_reason = "unknown"
+
+        # CRITICAL: do NOT wrap `log_iter.__anext__()` in
+        # `asyncio.wait_for(...)`. wait_for *cancels* the awaited
+        # coroutine on timeout, and cancelling an async generator's
+        # __anext__ closes the generator permanently. Subsequent
+        # __anext__ calls then raise StopAsyncIteration, which we'd
+        # mis-read as "log closed, run is done" and exit. Result was
+        # a ~15s reconnect loop: open stream, replay, wait 15s, yield
+        # one ping, generator closed on next __anext__, SSE exits,
+        # browser reconnects, repeat.
+        #
+        # Instead: keep a persistent next-event task and race it
+        # against a timeout via asyncio.wait. The next-event task
+        # survives the timeout; we only consume it when it actually
+        # completes.
+        next_task: asyncio.Task | None = asyncio.create_task(
+            log_iter.__anext__()  # type: ignore[arg-type]
+        )
+        try:
+            while True:
+                done, _pending = await asyncio.wait(
+                    {next_task}, timeout=_PING_INTERVAL_SEC,
                 )
-            except asyncio.TimeoutError:
-                yield {"event": "ping", "data": "{}"}
-                continue
-            except StopAsyncIteration:
-                return
-            yield {"event": evt.get("type", "message"), "data": json.dumps(evt)}
-            if evt.get("type") in ("done", "error"):
-                return
+                if next_task not in done:
+                    n_pings += 1
+                    yield {"event": "ping", "data": "{}"}
+                    continue
+                try:
+                    evt = next_task.result()
+                except StopAsyncIteration:
+                    exit_reason = "log_closed"
+                    next_task = None
+                    return
+                # Kick off the next __anext__ before yielding so we
+                # don't introduce latency between events.
+                next_task = asyncio.create_task(
+                    log_iter.__anext__()  # type: ignore[arg-type]
+                )
+                n_events += 1
+                yield {"event": evt.get("type", "message"), "data": json.dumps(evt)}
+                if evt.get("type") in ("done", "error"):
+                    exit_reason = f"terminal_{evt.get('type')}"
+                    return
+        except asyncio.CancelledError:
+            exit_reason = "cancelled"
+            raise
+        finally:
+            if next_task is not None and not next_task.done():
+                next_task.cancel()
+            logger.info(
+                "stream %s closed after %.2fs: %d events, %d pings, reason=%s",
+                run_id, time.time() - t_open, n_events, n_pings, exit_reason,
+            )
 
     return EventSourceResponse(
         gen(),

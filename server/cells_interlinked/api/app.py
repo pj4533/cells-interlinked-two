@@ -21,6 +21,7 @@ from ..config import settings
 from ..pipeline.autorun import AutorunController
 from ..storage import db
 from .routes_autorun import router as autorun_router
+from .routes_chat import router as chat_router
 from .routes_journal import router as journal_router
 from .routes_probe import router as probe_router
 from .routes_stream import router as stream_router
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(stream_router)
     app.include_router(autorun_router)
     app.include_router(journal_router)
+    app.include_router(chat_router)
 
     @app.get("/health")
     def health() -> dict:
