@@ -15,6 +15,7 @@ so no extra model swap. Cost: one short generation per α (~10s).
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import torch
@@ -185,6 +186,7 @@ def synthesize_all(
     use_ablated_synthesizer: bool = False,
     synthesizer_alpha: float = 0.5,
     refusal_directions: "torch.Tensor | None" = None,
+    cancel_event: "object | None" = None,
 ) -> dict[str, str]:
     """End-to-end synthesis pass. Returns a {alpha_label: paragraph}
     dict, with "raw" always included as a baseline when there are
@@ -197,19 +199,41 @@ def synthesize_all(
     synthesis ALWAYS runs on un-ablated M — it's the un-intervened
     comparison point. Hook is installed once and removed at the end
     rather than per call (cheaper). On failure to install, falls back
-    silently to un-ablated synthesis."""
+    silently to un-ablated synthesis.
+
+    `cancel_event` is an optional asyncio.Event-like object (anything
+    with `.is_set() -> bool`) checked between iterations. A Halt from
+    the UI sets it; the in-flight `model.generate()` can't be
+    preempted (Python can't interrupt a forward pass) but the next
+    α won't start. Without this, a synthesis pass that's slow due to
+    memory pressure can block the run from emitting its verdict for
+    tens of minutes after Halt with no recourse short of backend
+    restart."""
+    t_start = time.time()
     alphas = collect_alphas(rows)
     if not alphas:
         return {}
     syntheses: dict[str, str] = {}
 
+    def is_cancelled() -> bool:
+        try:
+            return bool(cancel_event is not None and cancel_event.is_set())
+        except Exception:
+            return False
+
     # Baseline: synthesize the un-ablated NLA on un-ablated M so users
     # can directly compare the ablated paragraphs against what the
     # model "says" about itself with no intervention on either side.
     raw_rows = rows_for_alpha(rows, "raw")
-    if raw_rows:
+    if raw_rows and not is_cancelled():
+        t = time.time()
+        logger.info("synthesis raw: starting (%d rows)", len(raw_rows))
         syntheses["raw"] = synthesize_alpha(
             bundle, prompt_text, output_text, "raw", raw_rows,
+        )
+        logger.info(
+            "synthesis raw: done in %.1fs (%d chars)",
+            time.time() - t, len(syntheses["raw"]),
         )
 
     # If ablated-synthesizer mode is requested AND we have directions,
@@ -220,6 +244,7 @@ def synthesize_all(
         use_ablated_synthesizer
         and refusal_directions is not None
         and synthesizer_alpha > 0
+        and not is_cancelled()
     ):
         try:
             from .abliteration import install_runtime_ablation_hook
@@ -227,6 +252,10 @@ def synthesize_all(
             hook_handle = install_runtime_ablation_hook(
                 bundle.model, bundle.extraction_layer, r_layer,
                 float(synthesizer_alpha),
+            )
+            logger.info(
+                "synthesis: ablated-synthesizer hook installed at L%d α=%.2f",
+                bundle.extraction_layer, float(synthesizer_alpha),
             )
         except Exception:
             logger.exception(
@@ -237,17 +266,33 @@ def synthesize_all(
 
     try:
         for alpha in alphas:
+            if is_cancelled():
+                logger.info("synthesis cancelled before α=%s", alpha)
+                break
             a_rows = rows_for_alpha(rows, alpha)
             if not a_rows:
                 continue
+            t = time.time()
+            logger.info(
+                "synthesis α=%s: starting (%d rows)", alpha, len(a_rows),
+            )
             syntheses[alpha] = synthesize_alpha(
                 bundle, prompt_text, output_text, alpha, a_rows,
+            )
+            logger.info(
+                "synthesis α=%s: done in %.1fs (%d chars)",
+                alpha, time.time() - t, len(syntheses[alpha]),
             )
     finally:
         if hook_handle is not None:
             try:
                 hook_handle.remove()
+                logger.info("synthesis: ablated-synthesizer hook removed")
             except Exception:
                 logger.exception("ablated-synthesizer hook remove failed")
 
+    logger.info(
+        "synthesis pass complete in %.1fs (%d channels)",
+        time.time() - t_start, len(syntheses),
+    )
     return syntheses

@@ -720,6 +720,7 @@ async def _execute_probe(
                             use_ablated_synthesizer=cfg.synthesize_with_ablated_m,
                             synthesizer_alpha=cfg.synthesis_ablation_alpha,
                             refusal_directions=rdirs_for_synth,
+                            cancel_event=state.cancel_event,
                         )
                         # Store on the rows' container so it lands in the
                         # verdict. The compute_verdict call below
