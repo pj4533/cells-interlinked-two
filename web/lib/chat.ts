@@ -28,6 +28,7 @@ export interface ChatTurnView {
   started_at: number;
   finished_at: number | null;
   error: string | null;
+  alpha: number;
 }
 
 export interface ChatSessionView extends ChatSession {
@@ -102,11 +103,12 @@ export async function fetchSession(
 export async function postTurn(
   sessionId: string,
   userText: string,
+  alpha: number,
 ): Promise<{ turn_idx: number }> {
   const res = await fetch(`${API}/chat/sessions/${sessionId}/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_text: userText }),
+    body: JSON.stringify({ user_text: userText, alpha }),
   });
   if (!res.ok) {
     const detail = await res.text();

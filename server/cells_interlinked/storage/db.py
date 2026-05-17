@@ -99,6 +99,9 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   started_at              REAL NOT NULL,
   finished_at             REAL,
   error                   TEXT,
+  -- Per-turn α for the ablated pass. NULL on legacy rows; the
+  -- session's alpha is used as a fallback on read.
+  alpha                   REAL,
   PRIMARY KEY (session_id, turn_idx)
 );
 
@@ -146,6 +149,12 @@ async def init_db(path: Path) -> None:
         ):
             if col not in cols:
                 await db.execute(f"ALTER TABLE probes ADD COLUMN {col} {typ}")
+        # chat_turns: per-turn alpha (column added after initial release).
+        cur = await db.execute("PRAGMA table_info(chat_turns)")
+        chat_cols = {row[1] for row in await cur.fetchall()}
+        await cur.close()
+        if "alpha" not in chat_cols:
+            await db.execute("ALTER TABLE chat_turns ADD COLUMN alpha REAL")
         await db.execute(
             "INSERT OR IGNORE INTO autorun_state "
             "(id, running, last_change_at, total_runs, last_run_id, last_event) "
@@ -589,6 +598,7 @@ async def upsert_chat_turn(
     started_at: float,
     finished_at: float | None,
     error: str | None,
+    alpha: float,
 ) -> None:
     """Write the canonical state of one turn. Called once at turn
     completion (or with finished_at=None to record an in-flight row,
@@ -600,8 +610,8 @@ async def upsert_chat_turn(
             "INSERT INTO chat_turns "
             "(session_id, turn_idx, user_text, raw_text, ablated_text, "
             " raw_stopped_reason, ablated_stopped_reason, started_at, "
-            " finished_at, error) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            " finished_at, error, alpha) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(session_id, turn_idx) DO UPDATE SET "
             "  user_text=excluded.user_text, "
             "  raw_text=excluded.raw_text, "
@@ -610,11 +620,12 @@ async def upsert_chat_turn(
             "  ablated_stopped_reason=excluded.ablated_stopped_reason, "
             "  started_at=excluded.started_at, "
             "  finished_at=excluded.finished_at, "
-            "  error=excluded.error",
+            "  error=excluded.error, "
+            "  alpha=excluded.alpha",
             (
                 session_id, turn_idx, user_text, raw_text, ablated_text,
                 raw_stopped_reason, ablated_stopped_reason, started_at,
-                finished_at, error,
+                finished_at, error, alpha,
             ),
         )
         if turn_idx == 0:
@@ -643,14 +654,15 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
         async with db.execute(
             "SELECT turn_idx, user_text, raw_text, ablated_text, "
             "       raw_stopped_reason, ablated_stopped_reason, "
-            "       started_at, finished_at, error "
+            "       started_at, finished_at, error, alpha "
             "FROM chat_turns WHERE session_id = ? ORDER BY turn_idx",
             (session_id,),
         ) as cur:
             trows = await cur.fetchall()
+    session_alpha = srow["alpha"]
     return {
         "session_id": srow["session_id"],
-        "alpha": srow["alpha"],
+        "alpha": session_alpha,
         "direction_variant": srow["direction_variant"] or "",
         "created_at": srow["created_at"],
         "first_user_text": srow["first_user_text"] or "",
@@ -665,6 +677,9 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
                 "started_at": t["started_at"],
                 "finished_at": t["finished_at"],
                 "error": t["error"],
+                # Legacy rows (alpha column added later) fall back to
+                # the session-level α the chat was created with.
+                "alpha": t["alpha"] if t["alpha"] is not None else session_alpha,
             }
             for t in trows
         ],

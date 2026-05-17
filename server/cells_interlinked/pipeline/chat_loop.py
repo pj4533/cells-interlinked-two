@@ -51,6 +51,10 @@ class ChatTurn:
     generations stream in."""
     turn_idx: int
     user_text: str
+    # α applied to the ablated pass for THIS turn only. Set per-turn
+    # by the client so the user can dial projection strength up or
+    # down mid-conversation; defaults to the session's α at creation.
+    alpha: float = 0.5
     raw_text: str = ""
     ablated_text: str = ""
     raw_stopped_reason: str = "pending"
@@ -93,6 +97,21 @@ class ChatSession:
         return msgs
 
 
+def _l32_hook_count(bundle: ModelBundle) -> int:
+    """Count forward hooks currently attached to the AV's extraction
+    layer. Used to detect leaks from any code path that installed an
+    ablation hook on the shared M and failed to remove it. A non-zero
+    count at the START of a chat raw pass means previous traffic
+    leaked — the raw forward will run through someone else's projection."""
+    try:
+        from .abliteration import _find_decoder_layers
+        layers = _find_decoder_layers(bundle.model)
+        layer = layers[bundle.extraction_layer]
+        return len(getattr(layer, "_forward_hooks", {}) or {})
+    except Exception:
+        return -1
+
+
 async def execute_turn(
     *,
     bundle: ModelBundle,
@@ -107,6 +126,13 @@ async def execute_turn(
     async callables taking a token-event dict (the route layer adapts
     them onto its SSE event log)."""
     # ─── Raw pass ────────────────────────────────────────────────
+    leaked = _l32_hook_count(bundle)
+    if leaked > 0:
+        logger.warning(
+            "chat raw pass starting with %d leftover forward hook(s) on L%d — "
+            "the raw forward will run through them. session=%s turn=%d",
+            leaked, bundle.extraction_layer, session.session_id, turn.turn_idx,
+        )
     raw_history = session.history_for("raw")
     raw_history.append({"role": "user", "content": turn.user_text})
     raw_rendered = bundle.render_chat(raw_history)
@@ -196,8 +222,15 @@ async def execute_turn(
     ablated_forwarder_task = asyncio.create_task(ablated_forwarder())
     abl_cfg = _dc.replace(raw_cfg, safety_cap=ABLATED_SAFETY_CAP)
     r_layer = refusal_directions[bundle.extraction_layer]
+    pre_install_hooks = _l32_hook_count(bundle)
     hook_handle = install_runtime_ablation_hook(
-        bundle.model, bundle.extraction_layer, r_layer, session.alpha,
+        bundle.model, bundle.extraction_layer, r_layer, turn.alpha,
+    )
+    logger.info(
+        "chat ablated hook installed (α=%.3f, L%d hook count: %d → %d) "
+        "session=%s turn=%d",
+        turn.alpha, bundle.extraction_layer, pre_install_hooks,
+        _l32_hook_count(bundle), session.session_id, turn.turn_idx,
     )
     try:
         await run_probe(
@@ -222,6 +255,13 @@ async def execute_turn(
             hook_handle.remove()
         except Exception:
             logger.exception("failed to remove chat ablation hook")
+        post_remove = _l32_hook_count(bundle)
+        if post_remove != pre_install_hooks:
+            logger.warning(
+                "chat ablated hook removal did not restore prior count: "
+                "%d → %d (expected %d)",
+                pre_install_hooks, post_remove, pre_install_hooks,
+            )
 
     turn.finished_at = time.time()
 

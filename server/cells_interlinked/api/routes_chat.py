@@ -116,6 +116,9 @@ class NewSessionResponse(BaseModel):
 
 class TurnRequest(BaseModel):
     user_text: str = Field(..., min_length=1, max_length=8000)
+    # Per-turn α. Optional; falls back to the session's α (which itself
+    # was set on session creation) when not supplied.
+    alpha: float | None = Field(default=None, ge=0.0, le=5.0)
 
 
 class TurnResponse(BaseModel):
@@ -132,6 +135,7 @@ class TurnView(BaseModel):
     started_at: float
     finished_at: float | None
     error: str | None
+    alpha: float
 
 
 class SessionView(BaseModel):
@@ -153,6 +157,7 @@ def _turn_to_view(t: ChatTurn) -> TurnView:
         started_at=t.started_at,
         finished_at=t.finished_at,
         error=t.error,
+        alpha=t.alpha,
     )
 
 
@@ -223,6 +228,7 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
         session.turns.append(ChatTurn(
             turn_idx=t["turn_idx"],
             user_text=t["user_text"],
+            alpha=t["alpha"],
             raw_text=t["raw_text"],
             ablated_text=t["ablated_text"],
             raw_stopped_reason=t["raw_stopped_reason"],
@@ -275,7 +281,13 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
             status_code=409, detail="a turn is already in flight for this session"
         )
 
-    turn = ChatTurn(turn_idx=len(session.turns), user_text=req.user_text.strip())
+    turn_alpha = req.alpha if req.alpha is not None else session.alpha
+    turn_alpha = max(0.0, min(5.0, float(turn_alpha)))
+    turn = ChatTurn(
+        turn_idx=len(session.turns),
+        user_text=req.user_text.strip(),
+        alpha=turn_alpha,
+    )
     session.turns.append(turn)
     log = _TurnEventLog()
     _logs(request)[f"{sid}:{turn.turn_idx}"] = log
@@ -306,7 +318,7 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
             await log.append({
                 "type": "turn_started",
                 "turn_idx": turn.turn_idx,
-                "alpha": session.alpha,
+                "alpha": turn.alpha,
             })
             rdirs = getattr(request.app.state, "refusal_directions", None)
             try:
@@ -339,6 +351,7 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     started_at=turn.started_at,
                     finished_at=turn.finished_at,
                     error=turn.error,
+                    alpha=turn.alpha,
                 )
             except Exception:
                 logger.exception("failed to persist chat turn")

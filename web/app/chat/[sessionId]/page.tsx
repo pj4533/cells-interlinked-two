@@ -76,7 +76,7 @@ export default function ChatDetailPage() {
         <div className="flex-1" />
         <div className="flex items-baseline gap-2 font-mono text-[10px]">
           <span className="text-cyan-dim font-display tracking-widest">
-            channel β
+            channel β · opened at
           </span>
           <span
             className="text-cyan tabular-nums"
@@ -117,7 +117,6 @@ export default function ChatDetailPage() {
               <TurnReview
                 key={t.turn_idx}
                 turn={t}
-                alpha={session.alpha}
                 variantName={variantName}
               />
             ))}
@@ -141,11 +140,9 @@ export default function ChatDetailPage() {
 
 function TurnReview({
   turn,
-  alpha,
   variantName,
 }: {
   turn: ChatSessionView["turns"][number];
-  alpha: number;
   variantName: string;
 }) {
   return (
@@ -186,14 +183,14 @@ function TurnReview({
           side="raw"
           text={turn.raw_text}
           stoppedReason={turn.raw_stopped_reason}
-          alpha={alpha}
+          alpha={turn.alpha}
           variantName={variantName}
         />
         <ChannelView
           side="ablated"
           text={turn.ablated_text}
           stoppedReason={turn.ablated_stopped_reason}
-          alpha={alpha}
+          alpha={turn.alpha}
           variantName={variantName}
         />
       </div>

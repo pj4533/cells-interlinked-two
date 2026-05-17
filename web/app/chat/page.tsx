@@ -21,6 +21,7 @@ import {
 interface TurnVM {
   turnIdx: number;
   userText: string;
+  alpha: number;
   rawText: string;
   ablatedText: string;
   rawDone: boolean;
@@ -34,10 +35,10 @@ interface TurnVM {
 const ALPHA_PRESETS = [0.25, 0.5, 0.75, 1.0];
 
 export default function ChatPage() {
-  // α only matters until the first turn is sent. The empty-state
-  // setup writes here; once a session exists, session.alpha is the
-  // canonical value and this state is read-only.
-  const [alphaSetup, setAlphaSetup] = useState<number>(0.5);
+  // α is per-turn: this is the "what to send next" value. Defaults
+  // to 0.5; the empty-state sets the initial session α; thereafter
+  // the user can change it at any turn.
+  const [pendingAlpha, setPendingAlpha] = useState<number>(0.5);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [turns, setTurns] = useState<TurnVM[]>([]);
   const [input, setInput] = useState("");
@@ -70,22 +71,24 @@ export default function ChatPage() {
 
   const ensureSession = useCallback(async (): Promise<ChatSession> => {
     if (session) return session;
-    const s = await createSession(alphaSetup);
+    const s = await createSession(pendingAlpha);
     setSession(s);
     return s;
-  }, [session, alphaSetup]);
+  }, [session, pendingAlpha]);
 
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || inFlight) return;
       setError(null);
+      const turnAlpha = pendingAlpha;
       try {
         setInFlight(true);
         const s = await ensureSession();
         const newTurn: TurnVM = {
           turnIdx: turns.length,
           userText: trimmed,
+          alpha: turnAlpha,
           rawText: "",
           ablatedText: "",
           rawDone: false,
@@ -99,7 +102,7 @@ export default function ChatPage() {
         setInput("");
         followBottomRef.current = true;
 
-        const { turn_idx } = await postTurn(s.session_id, trimmed);
+        const { turn_idx } = await postTurn(s.session_id, trimmed, turnAlpha);
 
         if (unsubRef.current) unsubRef.current();
         unsubRef.current = subscribeTurn(s.session_id, turn_idx, {
@@ -124,7 +127,7 @@ export default function ChatPage() {
         setInFlight(false);
       }
     },
-    [ensureSession, inFlight, turns.length],
+    [ensureSession, inFlight, turns.length, pendingAlpha],
   );
 
   const onCancel = useCallback(async () => {
@@ -142,7 +145,6 @@ export default function ChatPage() {
   }, []);
 
   const isEmpty = turns.length === 0 && !session;
-  const effectiveAlpha = session?.alpha ?? alphaSetup;
   const variantName = session?.direction_variant ?? "";
 
   return (
@@ -185,18 +187,19 @@ export default function ChatPage() {
 
         <div className="flex-1" />
 
-        {/* α readout — read-only label once session exists; hidden in
-            empty state because the setup block handles it. */}
+        {/* α readout — next-turn value (live, since α can change per
+            turn now). Hidden in empty state because the setup block
+            handles initial selection. */}
         {session && (
           <div className="flex items-baseline gap-2 font-mono text-[10px]">
             <span className="text-cyan-dim font-display tracking-widest">
-              channel β
+              channel β · next
             </span>
             <span
               className="text-cyan tabular-nums"
               style={{ textShadow: "0 0 6px rgba(94,229,229,0.4)" }}
             >
-              α={effectiveAlpha.toFixed(2)}
+              α={pendingAlpha.toFixed(2)}
             </span>
             {variantName && (
               <span className="text-text-dim italic">
@@ -246,8 +249,8 @@ export default function ChatPage() {
       >
         {isEmpty ? (
           <EmptyState
-            alpha={alphaSetup}
-            setAlpha={setAlphaSetup}
+            alpha={pendingAlpha}
+            setAlpha={setPendingAlpha}
             onSubmitExample={(t) => sendMessage(t)}
           />
         ) : (
@@ -257,7 +260,6 @@ export default function ChatPage() {
                 <TurnBlock
                   key={t.turnIdx}
                   turn={t}
-                  alpha={effectiveAlpha}
                   variantName={variantName}
                 />
               ))}
@@ -283,7 +285,8 @@ export default function ChatPage() {
         onSend={() => sendMessage(input)}
         onCancel={onCancel}
         inFlight={inFlight}
-        alpha={effectiveAlpha}
+        alpha={pendingAlpha}
+        setAlpha={setPendingAlpha}
         sessionActive={!!session}
       />
     </div>
@@ -339,6 +342,7 @@ function mergeFromServer(
     raw_stopped_reason: string;
     ablated_stopped_reason: string;
     error: string | null;
+    alpha: number;
   }[],
 ): TurnVM[] {
   const byIdx = new Map(server.map((t) => [t.turn_idx, t]));
@@ -347,6 +351,7 @@ function mergeFromServer(
     if (!s) return lt;
     return {
       ...lt,
+      alpha: s.alpha,
       rawText: s.raw_text || lt.rawText,
       ablatedText: s.ablated_text || lt.ablatedText,
       rawStoppedReason: s.raw_stopped_reason,
@@ -489,7 +494,7 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
             />
           )}
           <span className="text-[10px] text-text-dim italic ml-2">
-            locked once the first message is sent
+            adjustable per turn from the prompt bar
             {useCustomAlpha && " · clamped to [0, 5]"}
           </span>
         </div>
@@ -534,11 +539,9 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
 
 function TurnBlock({
   turn,
-  alpha,
   variantName,
 }: {
   turn: TurnVM;
-  alpha: number;
   variantName: string;
 }) {
   const rawStreaming = !turn.rawDone;
@@ -590,7 +593,7 @@ function TurnBlock({
           streaming={rawStreaming && !turn.error}
           done={turn.rawDone}
           stoppedReason={turn.rawStoppedReason}
-          alpha={alpha}
+          alpha={turn.alpha}
           variantName={variantName}
         />
         <ChannelReadout
@@ -599,7 +602,7 @@ function TurnBlock({
           streaming={ablatedStreaming && !turn.error}
           done={turn.ablatedDone}
           stoppedReason={turn.ablatedStoppedReason}
-          alpha={alpha}
+          alpha={turn.alpha}
           variantName={variantName}
         />
       </div>
@@ -729,6 +732,7 @@ function InputBar({
   onCancel,
   inFlight,
   alpha,
+  setAlpha,
   sessionActive,
 }: {
   value: string;
@@ -737,9 +741,14 @@ function InputBar({
   onCancel: () => void;
   inFlight: boolean;
   alpha: number;
+  setAlpha: (a: number) => void;
   sessionActive: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [customMode, setCustomMode] = useState<boolean>(
+    !ALPHA_PRESETS.includes(alpha),
+  );
+  const [customText, setCustomText] = useState<string>(alpha.toFixed(2));
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -771,11 +780,86 @@ function InputBar({
             </span>
             <span className="font-mono text-[9px] text-text-dim italic">
               enter transmits · shift+enter newline
-              {sessionActive && ` · β α=${alpha.toFixed(2)}`}
             </span>
             {inFlight && (
               <span className="font-display text-[9px] text-cyan tracking-widest animate-pulse">
                 ◆ dual transmission in progress
+              </span>
+            )}
+          </div>
+          {/* Per-turn α picker. Applies to the next transmission only;
+              defaults to whatever was used last so a steady-state
+              conversation just keeps going at the same projection
+              strength. Disabled while a turn is in flight. */}
+          <div className="flex items-baseline gap-2 flex-wrap pl-5">
+            <span className="font-display text-[9px] text-cyan-dim tracking-[0.35em]">
+              CHANNEL&nbsp;β&nbsp;·&nbsp;NEXT&nbsp;α
+            </span>
+            {ALPHA_PRESETS.map((a) => {
+              const active = !customMode && Math.abs(alpha - a) < 1e-6;
+              return (
+                <button
+                  key={a}
+                  type="button"
+                  disabled={inFlight}
+                  onClick={() => {
+                    setCustomMode(false);
+                    setAlpha(a);
+                  }}
+                  className={`px-2 py-0.5 border text-[10px] font-mono tabular-nums transition-colors ${
+                    active
+                      ? "border-cyan text-cyan bg-bg"
+                      : "border-rule/40 text-text-dim hover:text-text hover:border-rule disabled:opacity-50"
+                  }`}
+                  style={
+                    active
+                      ? { textShadow: "0 0 6px rgba(94,229,229,0.5)" }
+                      : undefined
+                  }
+                >
+                  {a.toFixed(2)}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              disabled={inFlight}
+              onClick={() => {
+                setCustomMode(true);
+                setCustomText(alpha.toFixed(2));
+              }}
+              className={`px-2 py-0.5 border text-[10px] font-mono transition-colors ${
+                customMode
+                  ? "border-cyan text-cyan bg-bg"
+                  : "border-rule/40 text-text-dim hover:text-text hover:border-rule disabled:opacity-50"
+              }`}
+            >
+              custom
+            </button>
+            {customMode && (
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.05"
+                min={0}
+                max={5}
+                disabled={inFlight}
+                value={customText}
+                onChange={(e) => {
+                  const t = e.target.value;
+                  setCustomText(t);
+                  const parsed = parseFloat(t);
+                  if (!Number.isNaN(parsed)) {
+                    setAlpha(Math.max(0, Math.min(5, parsed)));
+                  }
+                }}
+                placeholder="α"
+                className="px-2 py-0.5 w-20 border border-cyan text-cyan bg-bg text-[10px] font-mono tabular-nums focus:outline-none"
+              />
+            )}
+            {sessionActive && (
+              <span className="text-[9px] text-text-dim/70 italic ml-1">
+                applies to next turn only
               </span>
             )}
           </div>
