@@ -19,7 +19,7 @@ import {
   type ChatStreamEvent,
 } from "@/lib/chat";
 import { BergMenu } from "./BergMenu";
-import { attachAudio } from "./playback-viz";
+import { attachAudio, primeAudioContext } from "./playback-viz";
 import { ChannelVoiceActivity } from "./VoiceMonitor";
 
 // localStorage key for the Berg-mode toggle on the chat composer.
@@ -167,6 +167,25 @@ export default function ChatPage() {
   useEffect(() => {
     return () => {
       if (unsubRef.current) unsubRef.current();
+    };
+  }, []);
+
+  // Prime the playback AudioContext on the first user gesture this
+  // page sees. Without this, Gemma's 15+s generation delay means the
+  // TRANSMIT-click's gesture token is stale by the time we'd try to
+  // hook up the analyser, and createMediaElementSource through a
+  // suspended graph silences the audio. We capture pointerdown +
+  // keydown so any first interaction (click, key, the textarea
+  // focus) does the priming.
+  useEffect(() => {
+    const prime = () => {
+      primeAudioContext();
+    };
+    document.addEventListener("pointerdown", prime, { capture: true });
+    document.addEventListener("keydown", prime, { capture: true });
+    return () => {
+      document.removeEventListener("pointerdown", prime, { capture: true });
+      document.removeEventListener("keydown", prime, { capture: true });
     };
   }, []);
 
