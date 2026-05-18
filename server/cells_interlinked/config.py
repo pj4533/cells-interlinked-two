@@ -86,15 +86,16 @@ class Settings:
     analyzer_model: str = os.getenv("ANALYZER_MODEL", "claude-opus-4-7")
 
     # OpenAI gpt-4o-mini-tts for /chat voice mode. The server is the only
-    # consumer of the key — the browser hits a same-origin proxy. Two
-    # distinct voices: one for the raw side, one for the ablated side,
-    # so the listener can tell channels apart without a label. The
-    # `instructions` parameter is the prompt-steering surface — Gemma
-    # emits a <voice> blob that flows in here verbatim.
+    # consumer of the key — the browser hits a same-origin proxy. Both
+    # channels default to the SAME voice so the listener notices
+    # intonation/style differences (driven by each side's separately-
+    # generated voice direction) rather than voice-timbre differences.
+    # Override TTS_VOICE_ABLATED to a different voice for hard channel
+    # separation if needed.
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     tts_model: str = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
     tts_voice_raw: str = os.getenv("TTS_VOICE_RAW", "sage")
-    tts_voice_ablated: str = os.getenv("TTS_VOICE_ABLATED", "ash")
+    tts_voice_ablated: str = os.getenv("TTS_VOICE_ABLATED", "sage")
 
 
 settings = Settings()
