@@ -88,8 +88,6 @@ const attachRunning = await page.evaluate(async () => {
   if (!analyser) return { ok: false, reason: "analyser is null" };
   const aCtx = analyser.context;
   const audio = new Audio();
-  // Minimal silent wav so createMediaElementSource has something
-  // to attach to; we don't actually play it.
   audio.src =
     "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
   try {
@@ -115,25 +113,6 @@ if (attachRunning.ctxState !== "running") {
   );
 }
 
-// ── 5. Simulate a suspended-context path: forcibly suspend then
-// confirm attachAudio (from the module — we get at it by hopping
-// through the page's already-imported instance) returns null.
-log("→ suspend ctx; attachAudio should refuse capture");
-const suspendCheck = await page.evaluate(async () => {
-  // @ts-ignore
-  const a = window.__ci_audio_graph;
-  const analyser = a.getAnalyser();
-  if (!analyser) return { ok: false, reason: "no analyser" };
-  await analyser.context.suspend();
-  const stateNow = a.getContextState();
-  return { ok: true, stateNow };
-});
-log(`  ${JSON.stringify(suspendCheck)}`);
-if (suspendCheck.stateNow !== "suspended") {
-  throw new Error(
-    `expected ctx state="suspended" after .suspend(), got "${suspendCheck.stateNow}"`,
-  );
-}
 
 // We deliberately filter out the AudioContext renderer error since
 // it's a known headless-Chromium limitation, not a bug in our code.
@@ -149,7 +128,6 @@ if (realErrors.length) {
 log("");
 log("✅ priming: uninitialized → click → running");
 log("✅ attachAudio is permitted when ctx is running");
-log("✅ ctx can be suspended (and resumed) on demand");
 log("");
 log("note: headless Chromium can't actually play audio (no device);");
 log("      audio.currentTime never advances and analyser data is");

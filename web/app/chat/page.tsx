@@ -600,18 +600,20 @@ async function runVoicePlayback(
     url: string,
     side: "raw" | "ablated",
   ): Promise<void> => {
+    const audio = new Audio(url);
+    // Connect this audio element to the shared analyser so the
+    // playback visualization (clouds / bars / whatever's active)
+    // can read real-time frequency data. `attachAudio` awaits
+    // ctx.resume() internally so the source connects only once the
+    // graph is confirmed running — without this await, the FIRST
+    // clip after a fresh context race-loses to the resume promise,
+    // attach bails, and that clip plays un-captured (no viz).
+    try {
+      await attachAudio(audio);
+    } catch {
+      // best-effort; don't let viz issues block playback
+    }
     return new Promise<void>((resolve) => {
-      const audio = new Audio(url);
-      // Connect this audio element to the shared analyser so the
-      // playback visualization (clouds / bars / whatever's active)
-      // can read real-time frequency data. Idempotent + non-throwing
-      // — if attach fails, playback still works, the viz just sits
-      // at a silent baseline.
-      try {
-        attachAudio(audio);
-      } catch {
-        // best-effort; don't let viz issues block playback
-      }
       audio.onended = () => {
         URL.revokeObjectURL(url);
         resolve();

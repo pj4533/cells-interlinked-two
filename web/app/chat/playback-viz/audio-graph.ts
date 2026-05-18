@@ -91,15 +91,28 @@ export function primeAudioContext(): void {
  *  a running state right now (in which case the caller's audio
  *  should play normally — we deliberately do NOT capture it,
  *  because capturing through a suspended graph silences playback).
- *  Idempotent — calling twice on the same element is a no-op. */
-export function attachAudio(audio: HTMLMediaElement): AnalyserNode | null {
+ *
+ *  Async because `ctx.resume()` is async: the FIRST attach after
+ *  a fresh context is created can race the resume promise that
+ *  primeAudioContext kicked off, with the context still reading
+ *  "suspended" for a few microtask ticks before flipping to
+ *  "running". A synchronous state check would bail at that moment
+ *  and the first clip would play un-captured (no viz). Awaiting
+ *  resume here makes the answer deterministic.
+ *
+ *  Idempotent — calling twice on the same element is a no-op.
+ */
+export async function attachAudio(
+  audio: HTMLMediaElement,
+): Promise<AnalyserNode | null> {
   const a = ensureContext();
   if (!a || !ctx) return null;
   if (ctx.state === "suspended") {
-    // Best-effort resume. If we're outside a user gesture this will
-    // queue but not actually resume; we then bail rather than risk
-    // a silent capture.
-    void ctx.resume().catch(() => {});
+    try {
+      await ctx.resume();
+    } catch (e) {
+      console.warn("AudioContext resume rejected during attach", e);
+    }
   }
   if (ctx.state !== "running") {
     return null;
