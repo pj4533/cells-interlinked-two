@@ -19,6 +19,7 @@ import {
   type ChatStreamEvent,
 } from "@/lib/chat";
 import { BergMenu } from "./BergMenu";
+import { attachAudio } from "./playback-viz";
 import { ChannelVoiceActivity } from "./VoiceMonitor";
 
 // localStorage key for the Berg-mode toggle on the chat composer.
@@ -582,6 +583,16 @@ async function runVoicePlayback(
   ): Promise<void> => {
     return new Promise<void>((resolve) => {
       const audio = new Audio(url);
+      // Connect this audio element to the shared analyser so the
+      // playback visualization (clouds / bars / whatever's active)
+      // can read real-time frequency data. Idempotent + non-throwing
+      // — if attach fails, playback still works, the viz just sits
+      // at a silent baseline.
+      try {
+        attachAudio(audio);
+      } catch {
+        // best-effort; don't let viz issues block playback
+      }
       audio.onended = () => {
         URL.revokeObjectURL(url);
         resolve();
