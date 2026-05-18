@@ -25,6 +25,7 @@ from .routes_chat import router as chat_router
 from .routes_journal import router as journal_router
 from .routes_probe import router as probe_router
 from .routes_stream import router as stream_router
+from .routes_tts import router as tts_router
 from .runs import RunRegistry
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(autorun_router)
     app.include_router(journal_router)
     app.include_router(chat_router)
+    app.include_router(tts_router)
 
     @app.get("/health")
     def health() -> dict:

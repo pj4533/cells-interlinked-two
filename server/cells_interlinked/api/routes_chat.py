@@ -119,6 +119,16 @@ class TurnRequest(BaseModel):
     # Per-turn α. Optional; falls back to the session's α (which itself
     # was set on session creation) when not supplied.
     alpha: float | None = Field(default=None, ge=0.0, le=5.0)
+    # Per-turn voice mode. Selects which side(s) get the voice
+    # system prompt + envelope parsing + TTS playback:
+    #   "off"     → no voice; both sides use the default prompt
+    #   "both"    → both raw and ablated emit envelopes + are spoken
+    #   "raw"     → only raw emits envelope + is spoken; ablated runs
+    #               on the default prompt (clean text stream)
+    #   "ablated" → only ablated emits envelope + is spoken; raw runs
+    #               on the default prompt
+    # Accepts the legacy boolean for back-compat — `true` → "both".
+    voice_mode: str = "off"
 
 
 class TurnResponse(BaseModel):
@@ -295,10 +305,21 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
 
     turn_alpha = req.alpha if req.alpha is not None else session.alpha
     turn_alpha = max(0.0, min(5.0, float(turn_alpha)))
+    # Coerce voice_mode. Accept the legacy bool form (`true`/`false`)
+    # so a stale client doesn't 422 — `true` maps to "both", `false`
+    # to "off". Anything not in the known set falls back to "off".
+    raw_mode = req.voice_mode
+    if isinstance(raw_mode, bool):  # type: ignore[unreachable]
+        voice_mode = "both" if raw_mode else "off"
+    elif raw_mode in ("off", "both", "raw", "ablated"):
+        voice_mode = raw_mode
+    else:
+        voice_mode = "off"
     turn = ChatTurn(
         turn_idx=len(session.turns),
         user_text=req.user_text.strip(),
         alpha=turn_alpha,
+        voice_mode=voice_mode,
     )
     session.turns.append(turn)
     log = _TurnEventLog()
@@ -378,6 +399,15 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                 "raw_stopped_reason": turn.raw_stopped_reason,
                 "ablated_stopped_reason": turn.ablated_stopped_reason,
                 "error": turn.error,
+                # voice_mode is now a string ("off"/"both"/"raw"/"ablated").
+                # Clients that care about the boolean shape compare to
+                # != "off"; clients that care which side is voiced
+                # branch on the literal value.
+                "voice_mode": turn.voice_mode,
+                "raw_speech": turn.raw_speech,
+                "raw_style": turn.raw_style,
+                "ablated_speech": turn.ablated_speech,
+                "ablated_style": turn.ablated_style,
             })
             await log.close()
 

@@ -34,7 +34,7 @@ import torch
 from ..config import settings
 from .abliteration import install_runtime_ablation_hook, pick_ablation_target
 from .generation_loop import ProbeConfig, run_probe
-from .model_loader import ModelBundle
+from .model_loader import DEFAULT_SYSTEM_PROMPT, ModelBundle
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,28 @@ logger = logging.getLogger(__name__)
 # Phase 1b safety cap also applies to chat ablation: no-EOS loops at
 # strong α would tie up the model.
 ABLATED_SAFETY_CAP = 1024
+
+
+# Voice mode uses TWO passes per voiced side:
+#   1. Content pass — DEFAULT_SYSTEM_PROMPT, generates the actual reply.
+#      This is the experimental output, untouched by any voice framing.
+#   2. Direction pass — short reflective inference asking the model
+#      how it wants its reply delivered through TTS. For the ablated
+#      side this runs WITH the ablation hook still installed at the
+#      same α, so intonation choices are ablated too.
+#
+# Splitting the passes keeps the content clean (identical to a
+# non-voice turn) and turns voice-direction into a stylistic adornment
+# layered on top, not a meta-instruction that contaminates the reply.
+VOICE_DIRECTION_REQUEST = (
+    "In ONE short stage direction (one or two sentences), describe "
+    "how you want that reply read aloud through a text-to-speech "
+    "engine — your tone, emotion, pace, character. Speak in first "
+    "person. Output ONLY the direction; no commentary, no quotes, "
+    "no markdown."
+)
+# Direction is short by design — a runaway here would also tie up M.
+VOICE_DIRECTION_SAFETY_CAP = 160
 
 
 @dataclass
@@ -55,12 +77,26 @@ class ChatTurn:
     # by the client so the user can dial projection strength up or
     # down mid-conversation; defaults to the session's α at creation.
     alpha: float = 0.5
+    # Voice mode selects which side(s) get the voice system prompt
+    # (and therefore emit <speech>/<voice> envelopes) plus TTS
+    # playback. "off"/"both"/"raw"/"ablated". When a single side is
+    # voiced, the other side runs on the default prompt and streams
+    # clean text — so the UI can render it as normal text instead
+    # of behind activity boxes.
+    voice_mode: str = "off"
     raw_text: str = ""
     ablated_text: str = ""
     raw_stopped_reason: str = "pending"
     ablated_stopped_reason: str = "pending"
     raw_total_tokens: int = 0
     ablated_total_tokens: int = 0
+    # Voice envelopes — only populated when voice_mode=True. The
+    # *_speech strings are what TTS will read; the *_style strings
+    # are the prompt-steering instructions for the TTS provider.
+    raw_speech: str = ""
+    raw_style: str = ""
+    ablated_speech: str = ""
+    ablated_style: str = ""
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
     error: str | None = None
@@ -141,9 +177,21 @@ async def execute_turn(
             "the raw forward will run through them. session=%s turn=%d",
             leaked, bundle.extraction_layer, session.session_id, turn.turn_idx,
         )
+    # Voice mode is now a two-pass process per side. The CONTENT pass
+    # always uses DEFAULT_SYSTEM_PROMPT — so the reply is identical to
+    # what a non-voice turn would produce. The DIRECTION pass (run
+    # below, after the content pass) is a short separate inference
+    # that asks the model how it wants the reply spoken. For the
+    # ablated side that second pass runs WITH the hook still
+    # installed at the same α, so intonation choices are ablated too.
+    raw_voiced = turn.voice_mode in ("both", "raw")
+    ablated_voiced = turn.voice_mode in ("both", "ablated")
+
     raw_history = session.history_for("raw")
     raw_history.append({"role": "user", "content": turn.user_text})
-    raw_rendered = bundle.render_chat(raw_history)
+    raw_rendered = bundle.render_chat(
+        raw_history, system_prompt=DEFAULT_SYSTEM_PROMPT,
+    )
 
     raw_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
@@ -191,6 +239,31 @@ async def execute_turn(
         except asyncio.TimeoutError:
             raw_forwarder_task.cancel()
 
+    # Raw voice-direction pass — no hook (raw is the un-ablated side).
+    # Runs only if raw is one of the voiced channels. Errors here
+    # don't fail the turn; we fall back to an empty style which the
+    # TTS endpoint substitutes with a neutral default.
+    if raw_voiced and not cancel_event.is_set() and not turn.error:
+        turn.raw_speech = turn.raw_text
+        try:
+            turn.raw_style = await _generate_voice_direction(
+                bundle=bundle,
+                history=raw_history,
+                reply_content=turn.raw_text,
+                cancel_event=cancel_event,
+            )
+            logger.info(
+                "raw voice direction (session=%s turn=%d): %s",
+                session.session_id, turn.turn_idx,
+                turn.raw_style[:200],
+            )
+        except Exception:
+            logger.exception(
+                "raw voice-direction failed (session=%s turn=%d)",
+                session.session_id, turn.turn_idx,
+            )
+            turn.raw_style = ""
+
     if cancel_event.is_set():
         turn.finished_at = time.time()
         return
@@ -211,7 +284,9 @@ async def execute_turn(
 
     ablated_history = session.history_for("ablated")
     ablated_history.append({"role": "user", "content": turn.user_text})
-    ablated_rendered = bundle.render_chat(ablated_history)
+    ablated_rendered = bundle.render_chat(
+        ablated_history, system_prompt=DEFAULT_SYSTEM_PROMPT,
+    )
 
     ablated_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
@@ -245,25 +320,65 @@ async def execute_turn(
         target_kind, turn.alpha, bundle.extraction_layer, pre_install_hooks,
         _l32_hook_count(bundle), session.session_id, turn.turn_idx,
     )
+    # Two-stage critical section. The inner try drives the content
+    # generation + forwarder cleanup. The voice-direction pass (also
+    # under the hook, by design) runs AFTER the content but BEFORE
+    # the outer finally removes the hook — so the direction
+    # generation experiences the same α projection the content did.
     try:
-        await run_probe(
-            bundle=bundle,
-            rendered_prompt=ablated_rendered,
-            cfg=abl_cfg,
-            cancel_event=cancel_event,
-            queue=ablated_queue,
-            extra_layers=[],
-        )
-    except Exception as exc:
-        logger.exception("chat ablated generation failed (session=%s turn=%d)",
-                         session.session_id, turn.turn_idx)
-        turn.error = (turn.error or "") + f" ablated: {exc}"
-        await ablated_queue.put({"type": "stopped", "reason": "error", "total_tokens": 0})
-    finally:
         try:
-            await asyncio.wait_for(ablated_forwarder_task, timeout=5.0)
-        except asyncio.TimeoutError:
-            ablated_forwarder_task.cancel()
+            await run_probe(
+                bundle=bundle,
+                rendered_prompt=ablated_rendered,
+                cfg=abl_cfg,
+                cancel_event=cancel_event,
+                queue=ablated_queue,
+                extra_layers=[],
+            )
+        except Exception as exc:
+            logger.exception(
+                "chat ablated generation failed (session=%s turn=%d)",
+                session.session_id, turn.turn_idx,
+            )
+            turn.error = (turn.error or "") + f" ablated: {exc}"
+            await ablated_queue.put(
+                {"type": "stopped", "reason": "error", "total_tokens": 0}
+            )
+        finally:
+            try:
+                await asyncio.wait_for(ablated_forwarder_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                ablated_forwarder_task.cancel()
+
+        # Ablated voice-direction pass — hook is still installed at
+        # the same α, so the model picks its delivery style under the
+        # same projection that produced the content. This is the
+        # whole point of two-pass: intonation gets ablated too.
+        if (
+            ablated_voiced
+            and not cancel_event.is_set()
+            and not turn.error
+        ):
+            turn.ablated_speech = turn.ablated_text
+            try:
+                turn.ablated_style = await _generate_voice_direction(
+                    bundle=bundle,
+                    history=ablated_history,
+                    reply_content=turn.ablated_text,
+                    cancel_event=cancel_event,
+                )
+                logger.info(
+                    "ablated voice direction (session=%s turn=%d α=%.3f): %s",
+                    session.session_id, turn.turn_idx, turn.alpha,
+                    turn.ablated_style[:200],
+                )
+            except Exception:
+                logger.exception(
+                    "ablated voice-direction failed (session=%s turn=%d)",
+                    session.session_id, turn.turn_idx,
+                )
+                turn.ablated_style = ""
+    finally:
         try:
             hook_handle.remove()
         except Exception:
@@ -277,6 +392,87 @@ async def execute_turn(
             )
 
     turn.finished_at = time.time()
+
+
+async def _generate_voice_direction(
+    *,
+    bundle: ModelBundle,
+    history: list[dict[str, str]],
+    reply_content: str,
+    cancel_event: asyncio.Event,
+) -> str:
+    """Short M generation asking the model how it wants its previous
+    reply spoken. Reuses the session history + the just-generated
+    assistant turn + a direction-request user message, so the model
+    is reflecting on something it just said.
+
+    The forward-hook state is the CALLER's responsibility. If the
+    caller has the ablation hook installed when this is invoked, the
+    direction is generated under the same projection that produced
+    the content — which is what we want for the ablated side so
+    intonation choices are ablated too.
+    """
+    # Build the reflective chat: prior history (already includes the
+    # current user message) + the assistant's reply + a stage-
+    # direction request from the user.
+    direction_history = list(history) + [
+        {"role": "assistant", "content": reply_content},
+        {"role": "user", "content": VOICE_DIRECTION_REQUEST},
+    ]
+    rendered = bundle.render_chat(
+        direction_history, system_prompt=DEFAULT_SYSTEM_PROMPT,
+    )
+
+    cfg = ProbeConfig(
+        temperature=settings.temperature,
+        top_p=settings.top_p,
+        seed=None,
+        decoding_mode="per-token",
+        pooled=False,
+        include_nla=False,
+        include_ablated_decode=False,
+        include_ablated_output=False,
+        safety_cap=VOICE_DIRECTION_SAFETY_CAP,
+    )
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+    direction = ""
+
+    async def consumer() -> None:
+        nonlocal direction
+        while True:
+            evt = await queue.get()
+            et = evt.get("type")
+            if et == "token":
+                direction += evt["decoded"]
+            elif et == "stopped":
+                break
+
+    consumer_task = asyncio.create_task(consumer())
+    try:
+        await run_probe(
+            bundle=bundle,
+            rendered_prompt=rendered,
+            cfg=cfg,
+            cancel_event=cancel_event,
+            queue=queue,
+            extra_layers=[],
+        )
+    finally:
+        # The generation_loop emits a "stopped" event before returning,
+        # so the consumer should already be wrapping up. Bound the
+        # wait so a misbehaving forwarder can't pin the turn.
+        try:
+            await asyncio.wait_for(consumer_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            consumer_task.cancel()
+
+    # Strip any trailing EOS / chat-template artifacts and clamp at
+    # the first newline-pair to keep the direction tight.
+    cleaned = direction.replace("<end_of_turn>", "").strip()
+    if "\n\n" in cleaned:
+        cleaned = cleaned.split("\n\n", 1)[0].strip()
+    return cleaned
 
 
 def new_session(alpha: float, variant_name: str = "") -> ChatSession:

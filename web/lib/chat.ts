@@ -75,6 +75,11 @@ export type ChatStreamEvent =
       raw_stopped_reason: string;
       ablated_stopped_reason: string;
       error: string | null;
+      voice_mode?: VoiceModeWire | boolean;
+      raw_speech?: string;
+      raw_style?: string;
+      ablated_speech?: string;
+      ablated_style?: string;
     }
   | { type: "ping" };
 
@@ -100,21 +105,109 @@ export async function fetchSession(
   }
 }
 
+export type VoiceModeWire = "off" | "both" | "raw" | "ablated";
+
 export async function postTurn(
   sessionId: string,
   userText: string,
   alpha: number,
+  voiceMode: VoiceModeWire = "off",
 ): Promise<{ turn_idx: number }> {
   const res = await fetch(`${API}/chat/sessions/${sessionId}/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_text: userText, alpha }),
+    body: JSON.stringify({
+      user_text: userText,
+      alpha,
+      voice_mode: voiceMode,
+    }),
   });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`turn submit failed: ${res.status} ${detail}`);
   }
   return res.json();
+}
+
+/** Cap TTS input so a runaway generation can't tie up the playback
+ *  pipeline for minutes. We let the model emit whatever it wants in
+ *  `<speech>` and reveal the full text after audio finishes — but
+ *  only the first N words actually get spoken.
+ *
+ *  Tries to cut at the last sentence boundary inside the budget so
+ *  the audio doesn't end mid-clause. Falls back to a hard word-cap
+ *  with a trailing ellipsis if no sentence-end lands in range. */
+export function truncateForSpeech(
+  text: string,
+  maxWords = 80,
+): { spoken: string; truncated: boolean; wordsKept: number; wordsTotal: number } {
+  const trimmed = (text || "").trim();
+  if (!trimmed) {
+    return { spoken: "", truncated: false, wordsKept: 0, wordsTotal: 0 };
+  }
+  const words = trimmed.split(/\s+/);
+  if (words.length <= maxWords) {
+    return {
+      spoken: trimmed,
+      truncated: false,
+      wordsKept: words.length,
+      wordsTotal: words.length,
+    };
+  }
+  // Within the budget, pick the latest sentence-ending punctuation.
+  const head = words.slice(0, maxWords).join(" ");
+  // Scan all `.!?` characters in the head and keep the index of the
+  // latest one followed by whitespace or end-of-string. Linear-time,
+  // no ES2018 regex flags required.
+  let sentenceEnd = -1;
+  for (let i = 0; i < head.length; i++) {
+    const c = head[i];
+    if (c !== "." && c !== "!" && c !== "?") continue;
+    const next = head[i + 1];
+    if (next === undefined || /\s/.test(next)) {
+      sentenceEnd = i;
+    }
+  }
+  if (sentenceEnd > 0 && sentenceEnd > head.length * 0.4) {
+    // Use the sentence-end only if it captures more than ~40% of
+    // the budget — otherwise the cut feels too short.
+    const spoken = head.slice(0, sentenceEnd + 1);
+    return {
+      spoken,
+      truncated: true,
+      wordsKept: spoken.split(/\s+/).length,
+      wordsTotal: words.length,
+    };
+  }
+  // No usable sentence boundary — hard-cap with ellipsis so the TTS
+  // delivery sounds intentional rather than chopped.
+  return {
+    spoken: head + "…",
+    truncated: true,
+    wordsKept: maxWords,
+    wordsTotal: words.length,
+  };
+}
+
+/** Server-side TTS proxy: returns an MP3 blob URL the browser can
+ * feed straight into an <audio> element. The OpenAI key never
+ * leaves the server. */
+export async function fetchSpeechClip(
+  text: string,
+  style: string,
+  side: "raw" | "ablated",
+): Promise<string> {
+  const res = await fetch(`${API}/tts/speak`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, style, side }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`tts failed: ${res.status} ${detail}`);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 export async function cancelTurn(sessionId: string): Promise<void> {

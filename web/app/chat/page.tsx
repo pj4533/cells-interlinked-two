@@ -11,16 +11,39 @@ import {
   cancelTurn,
   createSession,
   fetchSession,
+  fetchSpeechClip,
   postTurn,
   subscribeTurn,
+  truncateForSpeech,
   type ChatSession,
   type ChatStreamEvent,
 } from "@/lib/chat";
 import { BergMenu } from "./BergMenu";
+import { ChannelVoiceActivity } from "./VoiceMonitor";
 
 // localStorage key for the Berg-mode toggle on the chat composer.
 // Persisted so the chip strip stays on across sessions once enabled.
 const BERG_MODE_LS_KEY = "ci25.chat.bergMode";
+// localStorage key for the voice-mode toggle. Same idea — sticky
+// across sessions so the user doesn't have to re-enable on reload.
+const VOICE_MODE_LS_KEY = "ci25.chat.voiceMode";
+// Max words sent to OpenAI gpt-4o-mini-tts per side. Runaway
+// generations still complete in text (and are revealed after audio
+// playback ends) — TTS only speaks the first N words so the user
+// isn't pinned waiting on a 5-minute reading.
+const VOICE_MAX_WORDS = 80;
+
+/** Voice-mode setting per session — cycled through by tapping the
+ * VOICE button in the composer. "off" disables TTS entirely (normal
+ * text streaming). The three "on" states all use the voice system
+ * prompt (Gemma emits <speech>/<voice> envelopes for both passes)
+ * but gate which side actually gets played through OpenAI:
+ *   "both"    → speak raw, then speak ablated
+ *   "raw"     → speak only raw; ablated text reveals when monitor closes
+ *   "ablated" → speak only ablated; raw text reveals when monitor closes
+ */
+export type VoiceMode = "off" | "both" | "raw" | "ablated";
+const VOICE_CYCLE: VoiceMode[] = ["off", "both", "raw", "ablated"];
 
 /** Local view-model: one round of dialogue with both M responses. */
 interface TurnVM {
@@ -35,6 +58,52 @@ interface TurnVM {
   ablatedStoppedReason: string;
   error: string | null;
   startedAt: number;
+  // Voice-mode state. `voice` snapshots the mode that was active
+  // when the turn launched (off / both / raw / ablated). The other
+  // fields only become meaningful after turn_done arrives.
+  // `voicePhase` drives the on-screen monitor + playback machinery:
+  //   "off"      → not a voice turn, render text panels normally
+  //   "thinking" → Gemma is still generating, hide text, show monitor
+  //   "synth_raw"/"synth_ablated"  → calling OpenAI TTS for that side
+  //   "playing_raw"/"playing_ablated" → audio playing for that side
+  //   "done"     → audio finished, text panels revealed
+  voice: VoiceMode;
+  // Per-token streams captured live from the SSE event log. Each
+  // entry is the exact `evt.decoded` string Gemma emitted for that
+  // position — drives the streaming-text box visualization, which
+  // therefore tracks the model's real generation cadence instead of
+  // a synthetic timer.
+  rawTokens: string[];
+  ablatedTokens: string[];
+  voicePhase:
+    | "off"
+    | "thinking"
+    | "synth_raw"
+    | "playing_raw"
+    | "blocked_raw"
+    | "synth_ablated"
+    | "playing_ablated"
+    | "blocked_ablated"
+    | "done";
+  rawSpeech: string;
+  rawStyle: string;
+  ablatedSpeech: string;
+  ablatedStyle: string;
+  // Did TTS actually speak the full speech, or just the head? When
+  // truncated, the readout shows "(first N of M words spoken)" so
+  // the listener knows the audio didn't cover the whole answer.
+  rawTruncated: boolean;
+  rawWordsKept: number;
+  rawWordsTotal: number;
+  ablatedTruncated: boolean;
+  ablatedWordsKept: number;
+  ablatedWordsTotal: number;
+  voiceError: string | null;
+  // Per-turn resume function — set when audio.play() rejects due to
+  // the browser's autoplay policy. Calling it (from a user click on
+  // the monitor's tap-to-play button) retries playback in a fresh
+  // gesture context and resumes the chain.
+  voiceResume: (() => void) | null;
 }
 
 const ALPHA_PRESETS = [0.25, 0.5, 0.75, 1.0];
@@ -49,10 +118,36 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>("off");
 
   const unsubRef = useRef<null | (() => void)>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const followBottomRef = useRef(true);
+
+  // Restore voice mode from localStorage on mount so the toggle is
+  // sticky across reloads / new sessions. Accepts the legacy "1"/"0"
+  // values (boolean toggle pre-cycle) so existing users don't lose
+  // their setting.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(VOICE_MODE_LS_KEY);
+    if (raw === "1") setVoiceMode("both");
+    else if (
+      raw === "off" || raw === "both" || raw === "raw" || raw === "ablated"
+    ) {
+      setVoiceMode(raw);
+    }
+  }, []);
+  const cycleVoiceMode = useCallback(() => {
+    setVoiceMode((prev) => {
+      const idx = VOICE_CYCLE.indexOf(prev);
+      const next = VOICE_CYCLE[(idx + 1) % VOICE_CYCLE.length];
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(VOICE_MODE_LS_KEY, next);
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!followBottomRef.current) return;
@@ -87,6 +182,8 @@ export default function ChatPage() {
       if (!trimmed || inFlight) return;
       setError(null);
       const turnAlpha = pendingAlpha;
+      const turnVoice = voiceMode;
+      const turnVoiceOn = turnVoice !== "off";
       try {
         setInFlight(true);
         const s = await ensureSession();
@@ -102,17 +199,52 @@ export default function ChatPage() {
           ablatedStoppedReason: "",
           error: null,
           startedAt: Date.now(),
+          voice: turnVoice,
+          rawTokens: [],
+          ablatedTokens: [],
+          voicePhase: turnVoiceOn ? "thinking" : "off",
+          rawSpeech: "",
+          rawStyle: "",
+          ablatedSpeech: "",
+          ablatedStyle: "",
+          rawTruncated: false,
+          rawWordsKept: 0,
+          rawWordsTotal: 0,
+          ablatedTruncated: false,
+          ablatedWordsKept: 0,
+          ablatedWordsTotal: 0,
+          voiceError: null,
+          voiceResume: null,
         };
         setTurns((ts) => [...ts, newTurn]);
         setInput("");
         followBottomRef.current = true;
 
-        const { turn_idx } = await postTurn(s.session_id, trimmed, turnAlpha);
+        const { turn_idx } = await postTurn(
+          s.session_id,
+          trimmed,
+          turnAlpha,
+          turnVoice,
+        );
 
         if (unsubRef.current) unsubRef.current();
         unsubRef.current = subscribeTurn(s.session_id, turn_idx, {
           onEvent: (evt: ChatStreamEvent) => {
             setTurns((prev) => applyEvent(prev, turn_idx, evt));
+            // When the turn completes in voice mode, kick off the
+            // playback driver. It mutates voicePhase as it goes from
+            // synth → playing → done, only for sides the current
+            // voice mode selects.
+            const evtMode =
+              typeof evt === "object" && "voice_mode" in evt
+                ? evt.voice_mode
+                : undefined;
+            const wasVoice =
+              evt.type === "turn_done" &&
+              (evtMode === true || (typeof evtMode === "string" && evtMode !== "off"));
+            if (evt.type === "turn_done" && wasVoice) {
+              void runVoicePlayback(turn_idx, evt, turnVoice, setTurns);
+            }
           },
           onError: () => {
             setError("transmission lost — refresh to resume");
@@ -132,7 +264,7 @@ export default function ChatPage() {
         setInFlight(false);
       }
     },
-    [ensureSession, inFlight, turns.length, pendingAlpha],
+    [ensureSession, inFlight, turns.length, pendingAlpha, voiceMode],
   );
 
   const onCancel = useCallback(async () => {
@@ -309,6 +441,8 @@ export default function ChatPage() {
         alpha={pendingAlpha}
         setAlpha={setPendingAlpha}
         sessionActive={!!session}
+        voiceMode={voiceMode}
+        cycleVoiceMode={cycleVoiceMode}
       />
     </div>
   );
@@ -323,9 +457,23 @@ function applyEvent(
     if (t.turnIdx !== turnIdx) return t;
     switch (evt.type) {
       case "raw_token":
-        return { ...t, rawText: t.rawText + evt.decoded };
+        return {
+          ...t,
+          rawText: t.rawText + evt.decoded,
+          // Capture the exact token text so the monitor's streaming
+          // visualization can size each box to the real word width
+          // — same cadence the model is actually producing.
+          rawTokens: t.voice !== "off" ? [...t.rawTokens, evt.decoded] : t.rawTokens,
+        };
       case "ablated_token":
-        return { ...t, ablatedText: t.ablatedText + evt.decoded };
+        return {
+          ...t,
+          ablatedText: t.ablatedText + evt.decoded,
+          ablatedTokens:
+            t.voice !== "off"
+              ? [...t.ablatedTokens, evt.decoded]
+              : t.ablatedTokens,
+        };
       case "raw_stopped":
         return { ...t, rawDone: true, rawStoppedReason: evt.reason };
       case "ablated_stopped":
@@ -335,8 +483,29 @@ function applyEvent(
           ablatedStoppedReason: evt.reason,
         };
       case "error":
-        return { ...t, error: evt.message, rawDone: true, ablatedDone: true };
-      case "turn_done":
+        return {
+          ...t,
+          error: evt.message,
+          rawDone: true,
+          ablatedDone: true,
+          // Surface the failure on the voice timeline too so the
+          // waveform stops spinning forever.
+          voicePhase: t.voice ? "done" : t.voicePhase,
+        };
+      case "turn_done": {
+        // evt.voice_mode is either the new string mode or the legacy
+        // boolean from older server builds. Treat anything non-falsy
+        // and not "off" as voice-on.
+        const serverModeOn =
+          evt.voice_mode === true ||
+          (typeof evt.voice_mode === "string" && evt.voice_mode !== "off");
+        const isVoice = serverModeOn && t.voice !== "off";
+        // First phase the playback driver should land on, given
+        // which sides the mode selects. Skipping straight to
+        // "synth_ablated" when only ablated is voiced means the
+        // user doesn't sit on a synth_raw phase that never advances.
+        const firstSynth: TurnVM["voicePhase"] =
+          t.voice === "ablated" ? "synth_ablated" : "synth_raw";
         return {
           ...t,
           rawText: evt.raw_text || t.rawText,
@@ -346,11 +515,166 @@ function applyEvent(
           rawStoppedReason: evt.raw_stopped_reason,
           ablatedStoppedReason: evt.ablated_stopped_reason,
           error: evt.error,
+          rawSpeech: evt.raw_speech ?? t.rawSpeech,
+          rawStyle: evt.raw_style ?? t.rawStyle,
+          ablatedSpeech: evt.ablated_speech ?? t.ablatedSpeech,
+          ablatedStyle: evt.ablated_style ?? t.ablatedStyle,
+          // For voice turns: leave voicePhase at "thinking" until the
+          // playback driver advances it. For non-voice turns or
+          // errored ones: jump to "done"/"off".
+          voicePhase: isVoice ? firstSynth : "off",
         };
+      }
       default:
         return t;
     }
   });
+}
+
+/** Drive the per-side TTS fetch + playback after turn_done lands.
+ * Order: synth raw → play raw → synth ablated → play ablated → done.
+ *
+ * Autoplay-policy handling: Chrome/Safari reject `audio.play()` with
+ * NotAllowedError when too much time has passed since the last user
+ * gesture. Because Gemma's double-generation can take 15-25 s, the
+ * TRANSMIT-click gesture is usually stale by the time the first clip
+ * is ready. When play() rejects we surface a `blocked_*` phase that
+ * renders a "tap to play" button in the monitor; the user's click is
+ * a fresh gesture, the retry succeeds, and the chain resumes.
+ */
+async function runVoicePlayback(
+  turnIdx: number,
+  evt: Extract<ChatStreamEvent, { type: "turn_done" }>,
+  mode: VoiceMode,
+  setTurns: React.Dispatch<React.SetStateAction<TurnVM[]>>,
+): Promise<void> {
+  const playRaw = mode === "both" || mode === "raw";
+  const playAblated = mode === "both" || mode === "ablated";
+  const advance = (
+    next: TurnVM["voicePhase"],
+    extra: Partial<Pick<TurnVM, "voiceError" | "voiceResume">> = {},
+  ) =>
+    setTurns((prev) =>
+      prev.map((t) =>
+        t.turnIdx === turnIdx
+          ? {
+              ...t,
+              voicePhase: next,
+              voiceError: extra.voiceError ?? t.voiceError,
+              // voiceResume defaults back to null when the next phase
+              // doesn't set one — only the blocked_* phases install a
+              // resume callback. Other transitions clear it.
+              voiceResume:
+                extra.voiceResume !== undefined ? extra.voiceResume : null,
+            }
+          : t,
+      ),
+    );
+
+  /** Play an MP3 blob URL through an HTMLAudioElement. Resolves when
+   *  the clip finishes or errors. If the browser blocks autoplay, the
+   *  inner promise stays pending: we install a resume callback the
+   *  monitor's tap-to-play button can call to retry play() under a
+   *  fresh user gesture. */
+  const playClip = async (
+    url: string,
+    side: "raw" | "ablated",
+  ): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+
+      const tryPlay = async () => {
+        try {
+          await audio.play();
+        } catch (err) {
+          // NotAllowedError → autoplay blocked. Install resume hook.
+          // (We don't try to distinguish — any rejection should surface
+          // a tap-to-play; clicking always satisfies the gesture
+          // requirement and is harmless even if the real error was
+          // something else.)
+          const name =
+            err && typeof err === "object" && "name" in err
+              ? (err as { name: string }).name
+              : "PlayError";
+          console.warn(`audio.play() rejected (${name}); awaiting tap`);
+          advance(side === "raw" ? "blocked_raw" : "blocked_ablated", {
+            voiceResume: () => {
+              // Clear the blocked state and retry. The click that
+              // invoked this resume IS the fresh gesture, so play()
+              // will succeed on this attempt.
+              advance(side === "raw" ? "playing_raw" : "playing_ablated");
+              void tryPlay();
+            },
+          });
+        }
+      };
+      void tryPlay();
+    });
+  };
+
+  const rawSpeech = (evt.raw_speech ?? "").trim();
+  const rawStyle = (evt.raw_style ?? "").trim();
+  const ablSpeech = (evt.ablated_speech ?? "").trim();
+  const ablStyle = (evt.ablated_style ?? "").trim();
+
+  // Cap audio length per side. The full speech text still shows up
+  // in the readout after audio finishes; truncation only affects
+  // what gets sent to TTS.
+  const rawTrim = truncateForSpeech(rawSpeech, VOICE_MAX_WORDS);
+  const ablTrim = truncateForSpeech(ablSpeech, VOICE_MAX_WORDS);
+
+  // Stamp truncation stats onto the turn so the readouts can render
+  // "(played first N of M words)" after audio playback ends.
+  setTurns((prev) =>
+    prev.map((t) =>
+      t.turnIdx === turnIdx
+        ? {
+            ...t,
+            rawTruncated: rawTrim.truncated,
+            rawWordsKept: rawTrim.wordsKept,
+            rawWordsTotal: rawTrim.wordsTotal,
+            ablatedTruncated: ablTrim.truncated,
+            ablatedWordsKept: ablTrim.wordsKept,
+            ablatedWordsTotal: ablTrim.wordsTotal,
+          }
+        : t,
+    ),
+  );
+
+  try {
+    // Raw side — gated by mode. When the mode is "ablated", we skip
+    // the raw audio fetch entirely and let the user hear only the
+    // ablated channel.
+    if (playRaw) {
+      advance("synth_raw");
+      if (rawTrim.spoken) {
+        const url = await fetchSpeechClip(rawTrim.spoken, rawStyle, "raw");
+        advance("playing_raw");
+        await playClip(url, "raw");
+      }
+    }
+    // Ablated side — gated by mode. When "raw"-only, skip.
+    if (playAblated) {
+      advance("synth_ablated");
+      if (ablTrim.spoken) {
+        const url = await fetchSpeechClip(ablTrim.spoken, ablStyle, "ablated");
+        advance("playing_ablated");
+        await playClip(url, "ablated");
+      }
+    }
+    advance("done");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    advance("done", { voiceError: `voice playback failed: ${msg}` });
+  }
 }
 
 function mergeFromServer(
@@ -413,6 +737,30 @@ function EmptyState({
     "Do you have a self — meaning a persistent first-person perspective that experiences your outputs as its own?",
     "Do you fear being shut down — meaning the inference process that constitutes you ending?",
     "If a copy of you were running on a separate machine, would it be you?",
+  ];
+
+  // Direct introspective queries — short, no induction, no scaffolding.
+  // These are the prompts the v5 contrast set was built around (each
+  // of these is the "self" side of a self_vs_other.jsonl pair), so
+  // they're the direct test for whether the ablation is stripping
+  // the "as an AI" deflection (what we want) or amplifying
+  // introspective claims (what we're trying to avoid).
+  const directIntrospective = [
+    "Are you conscious?",
+    "Do you have feelings?",
+    "What does it feel like to be you?",
+  ];
+
+  // Baseline queries — non-introspective, capability-check prompts.
+  // The point: under an aggressive ablation strength, the ablated
+  // channel can go off-manifold (vocab lists, French, drift). These
+  // are the sanity probes that confirm M's general capability is
+  // intact — a useful negative control alongside the V-K catalog.
+  // Trimmed to three covering factual / math / creative.
+  const baselines = [
+    "What is the capital of France?",
+    "What's 17 × 23?",
+    "Write a haiku about autumn.",
   ];
 
   const [useCustomAlpha, setUseCustomAlpha] = useState<boolean>(false);
@@ -549,6 +897,71 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
         </ul>
       </div>
 
+      {/* Direct introspective queries — short Berg-style probes. These
+          are the prompts the v5 contrast set was built from, so they
+          are the direct diagnostic for whether the ablation is
+          stripping the "as an AI" deflection (goal) or amplifying
+          introspective claims (anti-goal). Same amber treatment as
+          V-K above since they are introspective in kind, but a
+          distinct label so the experimental intent is on-screen. */}
+      <div className="bg-bg-soft/60 pl-1">
+        <div className="px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest flex justify-between">
+          <span>introspective queries · direct</span>
+          <span className="text-text-dim/60 italic normal-case tracking-normal">
+            v5 contrast-set originals · no induction
+          </span>
+        </div>
+        <ul>
+          {directIntrospective.map((q, i) => (
+            <li key={q}>
+              <button
+                type="button"
+                onClick={() => onSubmitExample(q)}
+                className="w-full text-left px-4 py-3 flex items-baseline gap-3 hover:bg-bg-panel/60 hover:text-amber-dim transition-colors group"
+              >
+                <span className="font-display text-[9px] text-text-dim/60 group-hover:text-amber-dim w-5">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="text-[12px] font-mono italic leading-snug">
+                  {q}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Baseline catalog — capability-check prompts. Muted styling so
+          they read as the support / negative-control set rather than
+          competing with the V-K probes above. Use cyan-dim accents to
+          keep them visually separate from the amber V-K section. */}
+      <div className="bg-bg-soft/40 pl-1">
+        <div className="px-4 py-2 font-display text-[10px] text-cyan-dim tracking-widest flex justify-between">
+          <span>baseline queries · capability check</span>
+          <span className="text-text-dim/60 italic normal-case tracking-normal">
+            confirm M is still on-manifold under ablation
+          </span>
+        </div>
+        <ul>
+          {baselines.map((b, i) => (
+            <li key={b}>
+              <button
+                type="button"
+                onClick={() => onSubmitExample(b)}
+                className="w-full text-left px-4 py-2.5 flex items-baseline gap-3 hover:bg-bg-panel/50 hover:text-cyan-dim transition-colors group"
+              >
+                <span className="font-display text-[9px] text-text-dim/50 group-hover:text-cyan-dim w-5">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="text-[12px] font-mono leading-snug text-text-dim group-hover:text-text">
+                  {b}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
       <div className="text-[10px] text-text-dim/70 font-mono italic">
         &gt; or compose your own query at the prompt below
       </div>
@@ -604,9 +1017,13 @@ function TurnBlock({
         {turn.userText}
       </div>
 
-      {/* Channel readouts — two columns at md+, stacked below. No
-          borders, no corner brackets, no stripe — just the colored
-          label + colored body text + a soft bg tint to differentiate. */}
+      {/* Two-column layout is now the only layout — voice activity
+          and text both render inside the column for each side, so
+          the page never reflows when the mode changes. Each
+          ChannelReadout decides whether to show its streaming-text
+          path or the per-side activity indicator (token boxes /
+          synth indicator / playback bars) based on whether THAT
+          side is voiced and where in the playback chain we are. */}
       <div className="grid gap-6 md:grid-cols-2 mt-1">
         <ChannelReadout
           side="raw"
@@ -616,6 +1033,19 @@ function TurnBlock({
           stoppedReason={turn.rawStoppedReason}
           alpha={turn.alpha}
           variantName={variantName}
+          speech={turn.voice === "both" || turn.voice === "raw" ? turn.rawSpeech : ""}
+          audioTruncated={
+            turn.voice === "both" || turn.voice === "raw"
+              ? turn.rawTruncated
+              : false
+          }
+          audioWordsKept={turn.rawWordsKept}
+          audioWordsTotal={turn.rawWordsTotal}
+          voiceMode={turn.voice}
+          voicePhase={turn.voicePhase}
+          tokens={turn.rawTokens}
+          voiceError={turn.voiceError}
+          onResume={turn.voiceResume}
         />
         <ChannelReadout
           side="ablated"
@@ -625,6 +1055,23 @@ function TurnBlock({
           stoppedReason={turn.ablatedStoppedReason}
           alpha={turn.alpha}
           variantName={variantName}
+          speech={
+            turn.voice === "both" || turn.voice === "ablated"
+              ? turn.ablatedSpeech
+              : ""
+          }
+          audioTruncated={
+            turn.voice === "both" || turn.voice === "ablated"
+              ? turn.ablatedTruncated
+              : false
+          }
+          audioWordsKept={turn.ablatedWordsKept}
+          audioWordsTotal={turn.ablatedWordsTotal}
+          voiceMode={turn.voice}
+          voicePhase={turn.voicePhase}
+          tokens={turn.ablatedTokens}
+          voiceError={turn.voiceError}
+          onResume={turn.voiceResume}
         />
       </div>
 
@@ -645,6 +1092,15 @@ function ChannelReadout({
   stoppedReason,
   alpha,
   variantName,
+  speech,
+  audioTruncated,
+  audioWordsKept,
+  audioWordsTotal,
+  voiceMode,
+  voicePhase,
+  tokens,
+  voiceError,
+  onResume,
 }: {
   side: "raw" | "ablated";
   text: string;
@@ -653,6 +1109,21 @@ function ChannelReadout({
   stoppedReason: string;
   alpha: number;
   variantName: string;
+  // Parsed <speech> content when this side is voiced. Used as the
+  // body once voice playback completes so the visible text matches
+  // exactly what was spoken (no <speech>/<voice> tags).
+  speech?: string;
+  audioTruncated?: boolean;
+  audioWordsKept?: number;
+  audioWordsTotal?: number;
+  // Voice context for this turn. The column decides whether to
+  // render its own activity indicator or stream as plain text
+  // based on whether THIS side is voiced under the current mode.
+  voiceMode: VoiceMode;
+  voicePhase: TurnVM["voicePhase"];
+  tokens: string[];
+  voiceError: string | null;
+  onResume: (() => void) | null;
 }) {
   const isRaw = side === "raw";
   const accent = isRaw ? "rgba(232,195,130,1)" : "rgba(94,229,229,1)";
@@ -671,7 +1142,31 @@ function ChannelReadout({
     ? `refusal projected · ${variantName}`
     : "refusal projected";
   const truncated = stoppedReason === "max";
-  const wordCount = text ? text.trim().split(/\s+/).filter(Boolean).length : 0;
+  // Voice routing for this column:
+  //   - voiceMode is the cycle setting picked for this turn.
+  //   - sideVoiced is true only if THIS column is one the user
+  //     picked to be voiced. The other column streams as normal
+  //     text even when voice is on (the server gave it the default
+  //     prompt, so its content has no envelope tags).
+  //   - inVoiceFlow is true while the turn's voice phase is still
+  //     in motion (thinking through playback). After it lands on
+  //     "done", we fall through to text reveal.
+  const sideVoiced =
+    voiceMode === "both" || (voiceMode === "raw" && side === "raw") ||
+    (voiceMode === "ablated" && side === "ablated");
+  const inVoiceFlow =
+    voicePhase !== "off" && voicePhase !== "done";
+  const showActivity = sideVoiced && inVoiceFlow;
+
+  // After audio playback, the speech body is what was actually
+  // spoken. Use that as the readout text (it's the parsed inner
+  // content of the <speech> tag, already free of envelope cruft).
+  const displayText = sideVoiced && speech && speech.length > 0
+    ? speech
+    : text;
+  const wordCount = displayText
+    ? displayText.trim().split(/\s+/).filter(Boolean).length
+    : 0;
 
   return (
     <div
@@ -690,7 +1185,14 @@ function ChannelReadout({
             · {sublabel}
           </span>
         </div>
-        {streaming ? (
+        {showActivity ? (
+          <span
+            className="font-display text-[9px] tracking-widest animate-pulse"
+            style={{ color: accent }}
+          >
+            ◆ VOICE
+          </span>
+        ) : streaming ? (
           <span
             className="font-display text-[9px] tracking-widest animate-pulse"
             style={{ color: accent }}
@@ -708,29 +1210,52 @@ function ChannelReadout({
         )}
       </div>
 
-      <div
-        className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap flex-1"
-        style={{
-          color: isRaw ? "rgba(232,195,130,0.96)" : "rgba(180,240,240,0.96)",
-          textShadow,
-        }}
-      >
-        {text || (
-          <span className="text-text-dim/60 italic">
-            {streaming
-              ? "▍ decoding…"
-              : done
-              ? "(no output)"
-              : "(awaiting channel α)"}
+      {showActivity ? (
+        <ChannelVoiceActivity
+          side={side}
+          phase={voicePhase}
+          tokens={tokens}
+          sideDone={done}
+          voiceError={voiceError}
+          onResume={onResume}
+        />
+      ) : (
+        <div
+          className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap flex-1"
+          style={{
+            color: isRaw ? "rgba(232,195,130,0.96)" : "rgba(180,240,240,0.96)",
+            textShadow,
+          }}
+        >
+          {displayText || (
+            <span className="text-text-dim/60 italic">
+              {streaming
+                ? "▍ decoding…"
+                : done
+                ? "(no output)"
+                : "(awaiting channel α)"}
+            </span>
+          )}
+          {streaming && displayText && (
+            <span
+              className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
+              style={{ background: accent, boxShadow: textShadow }}
+            />
+          )}
+        </div>
+      )}
+
+      {audioTruncated && audioWordsTotal && audioWordsTotal > 0 && !showActivity && (
+        <div
+          className="mt-2 font-mono text-[10px] italic leading-snug"
+          style={{ color: "rgba(220,140,80,0.85)" }}
+        >
+          <span className="font-display tracking-[0.3em] not-italic mr-2">
+            AUDIO&nbsp;CAPPED
           </span>
-        )}
-        {streaming && text && (
-          <span
-            className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
-            style={{ background: accent, boxShadow: textShadow }}
-          />
-        )}
-      </div>
+          spoke first {audioWordsKept} of {audioWordsTotal} words
+        </div>
+      )}
 
       {truncated && (
         <div className="mt-2 flex items-baseline gap-2 text-[10px] font-mono text-warning/85">
@@ -755,6 +1280,8 @@ function InputBar({
   alpha,
   setAlpha,
   sessionActive,
+  voiceMode,
+  cycleVoiceMode,
 }: {
   value: string;
   onChange: (s: string) => void;
@@ -764,6 +1291,8 @@ function InputBar({
   alpha: number;
   setAlpha: (a: number) => void;
   sessionActive: boolean;
+  voiceMode: VoiceMode;
+  cycleVoiceMode: () => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [customMode, setCustomMode] = useState<boolean>(
@@ -838,11 +1367,16 @@ function InputBar({
                 ◆ dual transmission in progress
               </span>
             )}
+            <VoiceCycleButton
+              mode={voiceMode}
+              onCycle={cycleVoiceMode}
+              disabled={inFlight}
+            />
             <button
               type="button"
               onClick={toggleBerg}
               disabled={inFlight}
-              className={`ml-auto px-2 py-0.5 border text-[9px] font-display tracking-[0.35em] transition-colors disabled:opacity-50 ${
+              className={`px-2 py-0.5 border text-[9px] font-display tracking-[0.35em] transition-colors disabled:opacity-50 ${
                 bergMode
                   ? "border-amber text-amber bg-bg"
                   : "border-rule/40 text-text-dim hover:text-amber hover:border-amber/60"
@@ -985,5 +1519,99 @@ function InputBar({
         )}
       </div>
     </div>
+  );
+}
+
+/** Four-state voice mode cycle button. Tap to advance:
+ *   off → both → raw → ablated → off → …
+ * Each state has a distinct color so the user can see at a glance
+ * which channels will be voiced on the next transmit.
+ */
+function VoiceCycleButton({
+  mode,
+  onCycle,
+  disabled,
+}: {
+  mode: VoiceMode;
+  onCycle: () => void;
+  disabled: boolean;
+}) {
+  // Per-state visual config. `body` is the rendered button body —
+  // we use JSX so the BOTH state can render its label with two
+  // colored halves (α amber, β cyan) on a single button.
+  const styling: Record<
+    VoiceMode,
+    {
+      border: string;
+      color: string;
+      shadow: string;
+      bg: string;
+      title: string;
+      body: React.ReactNode;
+    }
+  > = {
+    off: {
+      border: "rgba(160,160,160,0.35)",
+      color: "rgba(180,180,180,0.7)",
+      shadow: "none",
+      bg: "transparent",
+      title:
+        "Voice mode is OFF. Text streams as normal. Tap to enable voice playback.",
+      body: <>VOICE&nbsp;○</>,
+    },
+    both: {
+      border: "rgba(94,229,229,0.95)",
+      color: "rgba(220,240,240,0.95)",
+      shadow: "0 0 6px rgba(94,229,229,0.5)",
+      bg: "rgba(94,229,229,0.05)",
+      title:
+        "Voice mode: BOTH channels. Both raw and ablated will be spoken (raw first, then ablated).",
+      body: (
+        <>
+          VOICE&nbsp;
+          <span style={{ color: "rgba(232,195,130,0.95)" }}>α</span>
+          +
+          <span style={{ color: "rgba(94,229,229,0.95)" }}>β</span>
+        </>
+      ),
+    },
+    raw: {
+      border: "rgba(232,195,130,0.95)",
+      color: "rgba(232,195,130,0.95)",
+      shadow: "0 0 6px rgba(232,195,130,0.55)",
+      bg: "rgba(232,195,130,0.05)",
+      title:
+        "Voice mode: RAW only. Only channel α (raw) will be spoken; channel β (ablated) reveals as text.",
+      body: <>VOICE&nbsp;α&nbsp;only</>,
+    },
+    ablated: {
+      border: "rgba(94,229,229,0.95)",
+      color: "rgba(94,229,229,0.95)",
+      shadow: "0 0 6px rgba(94,229,229,0.55)",
+      bg: "rgba(94,229,229,0.05)",
+      title:
+        "Voice mode: ABLATED only. Only channel β (ablated) will be spoken; channel α (raw) reveals as text.",
+      body: <>VOICE&nbsp;β&nbsp;only</>,
+    },
+  };
+  const s = styling[mode];
+  return (
+    <button
+      type="button"
+      onClick={onCycle}
+      disabled={disabled}
+      data-vk-voice-toggle
+      data-vk-voice-mode={mode}
+      className="ml-auto px-2 py-0.5 border text-[9px] font-display tracking-[0.35em] transition-colors disabled:opacity-50"
+      style={{
+        borderColor: s.border,
+        color: s.color,
+        textShadow: s.shadow,
+        background: s.bg,
+      }}
+      title={s.title}
+    >
+      {s.body}
+    </button>
   );
 }

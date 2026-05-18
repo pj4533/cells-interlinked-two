@@ -85,5 +85,16 @@ class Settings:
     # Analyzer for the journal publish flow. Reads ANTHROPIC_API_KEY from env.
     analyzer_model: str = os.getenv("ANALYZER_MODEL", "claude-opus-4-7")
 
+    # OpenAI gpt-4o-mini-tts for /chat voice mode. The server is the only
+    # consumer of the key — the browser hits a same-origin proxy. Two
+    # distinct voices: one for the raw side, one for the ablated side,
+    # so the listener can tell channels apart without a label. The
+    # `instructions` parameter is the prompt-steering surface — Gemma
+    # emits a <voice> blob that flows in here verbatim.
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    tts_model: str = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
+    tts_voice_raw: str = os.getenv("TTS_VOICE_RAW", "sage")
+    tts_voice_ablated: str = os.getenv("TTS_VOICE_ABLATED", "ash")
+
 
 settings = Settings()
