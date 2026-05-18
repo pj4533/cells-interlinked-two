@@ -171,11 +171,23 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
 
     # Read the active refusal-direction variant name so the UI can
     # surface "α=0.5 · v3_safety" framing alongside ablated turns.
+    # When the self-denial subspace is active, its sidecar's variant_name
+    # takes precedence — that's what the runtime hook is actually using
+    # (chat_loop.py:execute_turn calls pick_ablation_target(subspace,
+    # directions, ...) which prefers the subspace).
     variant_name = ""
     try:
-        meta_path = settings.db_path.parent / "refusal_directions.pt.json"
-        if meta_path.exists():
-            variant_name = json.loads(meta_path.read_text()).get("variant_name", "")
+        sub_meta_path = settings.db_path.parent / "refusal_subspace.pt.json"
+        if sub_meta_path.exists():
+            variant_name = json.loads(sub_meta_path.read_text()).get(
+                "variant_name", "self_denial_subspace",
+            )
+        else:
+            meta_path = settings.db_path.parent / "refusal_directions.pt.json"
+            if meta_path.exists():
+                variant_name = json.loads(meta_path.read_text()).get(
+                    "variant_name", "",
+                )
     except Exception:
         pass
 
@@ -321,6 +333,7 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                 "alpha": turn.alpha,
             })
             rdirs = getattr(request.app.state, "refusal_directions", None)
+            rsub = getattr(request.app.state, "refusal_subspace", None)
             try:
                 await execute_turn(
                     bundle=bundle,
@@ -330,6 +343,7 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     ablated_emit=emit_ablated,
                     cancel_event=cancel,
                     refusal_directions=rdirs,
+                    refusal_subspace=rsub,
                 )
             except Exception as exc:
                 logger.exception("chat turn executor failed")

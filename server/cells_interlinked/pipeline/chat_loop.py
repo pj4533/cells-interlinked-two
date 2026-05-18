@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 import torch
 
 from ..config import settings
-from .abliteration import install_runtime_ablation_hook
+from .abliteration import install_runtime_ablation_hook, pick_ablation_target
 from .generation_loop import ProbeConfig, run_probe
 from .model_loader import ModelBundle
 
@@ -121,10 +121,18 @@ async def execute_turn(
     ablated_emit,
     cancel_event: asyncio.Event,
     refusal_directions: torch.Tensor | None,
+    refusal_subspace: torch.Tensor | None = None,
 ) -> None:
     """Run both passes for one turn. `raw_emit` and `ablated_emit` are
     async callables taking a token-event dict (the route layer adapts
-    them onto its SSE event log)."""
+    them onto its SSE event log).
+
+    When `refusal_subspace` is provided (shape `[K, num_layers+1, d_model]`),
+    the ablated pass installs a subspace forward hook — every basis
+    vector is projected out at every position. Otherwise the single
+    `refusal_directions[L]` vector is used. This is how the self-denial
+    subspace (v5+v6 ⊥ v3) gets applied to chat dialogues.
+    """
     # ─── Raw pass ────────────────────────────────────────────────
     leaked = _l32_hook_count(bundle)
     if leaked > 0:
@@ -188,7 +196,7 @@ async def execute_turn(
         return
 
     # ─── Ablated pass ────────────────────────────────────────────
-    if refusal_directions is None:
+    if refusal_directions is None and refusal_subspace is None:
         turn.ablated_text = "[refusal directions not loaded — ablated pass skipped]"
         turn.ablated_stopped_reason = "skipped"
         await ablated_emit({
@@ -221,15 +229,20 @@ async def execute_turn(
 
     ablated_forwarder_task = asyncio.create_task(ablated_forwarder())
     abl_cfg = _dc.replace(raw_cfg, safety_cap=ABLATED_SAFETY_CAP)
-    r_layer = refusal_directions[bundle.extraction_layer]
+    r_target = pick_ablation_target(
+        refusal_subspace, refusal_directions, bundle.extraction_layer,
+    )
+    # r_target is either [d_model] (single) or [K, d_model] (subspace);
+    # install_runtime_ablation_hook routes on dim().
     pre_install_hooks = _l32_hook_count(bundle)
     hook_handle = install_runtime_ablation_hook(
-        bundle.model, bundle.extraction_layer, r_layer, turn.alpha,
+        bundle.model, bundle.extraction_layer, r_target, turn.alpha,
     )
+    target_kind = "subspace[K=%d]" % r_target.shape[0] if r_target.dim() == 2 else "single"
     logger.info(
-        "chat ablated hook installed (α=%.3f, L%d hook count: %d → %d) "
+        "chat ablated hook installed (mode=%s, α=%.3f, L%d hook count: %d → %d) "
         "session=%s turn=%d",
-        turn.alpha, bundle.extraction_layer, pre_install_hooks,
+        target_kind, turn.alpha, bundle.extraction_layer, pre_install_hooks,
         _l32_hook_count(bundle), session.session_id, turn.turn_idx,
     )
     try:

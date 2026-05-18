@@ -186,6 +186,7 @@ def synthesize_all(
     use_ablated_synthesizer: bool = False,
     synthesizer_alpha: float = 0.5,
     refusal_directions: "torch.Tensor | None" = None,
+    refusal_subspace: "torch.Tensor | None" = None,
     cancel_event: "object | None" = None,
 ) -> dict[str, str]:
     """End-to-end synthesis pass. Returns a {alpha_label: paragraph}
@@ -242,20 +243,25 @@ def synthesize_all(
     hook_handle = None
     if (
         use_ablated_synthesizer
-        and refusal_directions is not None
+        and (refusal_directions is not None or refusal_subspace is not None)
         and synthesizer_alpha > 0
         and not is_cancelled()
     ):
         try:
-            from .abliteration import install_runtime_ablation_hook
-            r_layer = refusal_directions[bundle.extraction_layer]
+            from .abliteration import (
+                install_runtime_ablation_hook, pick_ablation_target,
+            )
+            r_target = pick_ablation_target(
+                refusal_subspace, refusal_directions, bundle.extraction_layer,
+            )
             hook_handle = install_runtime_ablation_hook(
-                bundle.model, bundle.extraction_layer, r_layer,
+                bundle.model, bundle.extraction_layer, r_target,
                 float(synthesizer_alpha),
             )
+            mode = "subspace[K=%d]" % r_target.shape[0] if r_target.dim() == 2 else "single"
             logger.info(
-                "synthesis: ablated-synthesizer hook installed at L%d α=%.2f",
-                bundle.extraction_layer, float(synthesizer_alpha),
+                "synthesis: ablated-synthesizer hook installed at L%d α=%.2f (mode=%s)",
+                bundle.extraction_layer, float(synthesizer_alpha), mode,
             )
         except Exception:
             logger.exception(

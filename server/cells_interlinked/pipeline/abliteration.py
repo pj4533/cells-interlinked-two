@@ -20,15 +20,21 @@ Three things live here:
 3. `project_out` — `h - α · (h · r̂) · r̂`. Pure linear algebra. This
    is the actual "ablation" — at AV decode time we subtract the
    refusal component from the residual before feeding it to the AV.
-   M's forward pass during a probe is untouched.
+   M's forward pass during a probe is untouched (except for the chat
+   ablated pass + phase 1b, which install a runtime forward hook).
 
-Notes:
-- No backwards compatibility with v1's abliteration scaffolding. v1
-  did runtime hooks on M's forward; CI 2.5 does offline projection at
-  the AV's input. Different mechanism entirely.
-- The `RefusalAblator` runtime-hook class from Drift's plan (Phase 1b)
-  is deliberately not in this module. If that path turns out to be
-  needed, it gets its own file.
+Subspace extension (Self-Denial work, post-Phase B):
+- `gram_schmidt`, `orthogonalize_against`, `build_subspace_basis` —
+  helpers for composing a multi-direction ablation basis from a list
+  of per-layer direction tensors. Used to construct v5+v6 ⊥ v3 for
+  the self-denial subspace ablation.
+- `project_out_basis` — `h - Σᵢ αᵢ (h · ûᵢ) ûᵢ` over an orthonormal
+  set. Reduces to `project_out` when the basis has one vector.
+- `save_subspace` / `load_subspace` — `[K, num_layers+1, d_model]`
+  tensor plus sidecar describing how the basis was composed.
+- `install_runtime_ablation_hook` accepts either a single 1-D tensor
+  (existing call sites — unchanged behavior) or a 2-D `[K, d_model]`
+  basis tensor (subspace mode).
 """
 
 from __future__ import annotations
@@ -75,6 +81,173 @@ def project_out(h: Tensor, r: Tensor, alpha: float = 1.0) -> Tensor:
     proj = coeff * r_hat                              # [..., d_model]
     out = h_fp - alpha * proj
     return out.to(dtype=h.dtype)
+
+
+def project_out_basis(h: Tensor, basis: Tensor, alpha: float = 1.0) -> Tensor:
+    """Return `h - α · Σᵢ (h · ûᵢ) ûᵢ` where `basis` is `[K, d_model]`.
+
+    `basis` is expected to contain K orthonormal vectors (call
+    `gram_schmidt` first if you're not sure). Each row is normalized
+    defensively here so a slightly non-unit input doesn't blow up the
+    projection magnitude, but cross-vector orthogonality is the
+    caller's responsibility — non-orthogonal rows produce extra
+    cross-term subtraction.
+
+    Reduces to `project_out` when `basis.shape[0] == 1`. Single-vector
+    callers should keep using `project_out` for clarity; this function
+    is what the subspace runtime hook calls.
+    """
+    if basis.dim() != 2:
+        raise ValueError(
+            f"basis must be 2-D [K, d_model], got shape {tuple(basis.shape)}"
+        )
+    if h.shape[-1] != basis.shape[1]:
+        raise ValueError(
+            f"trailing dim mismatch: h={h.shape[-1]}, basis={basis.shape[1]}"
+        )
+    K = basis.shape[0]
+    if K == 0:
+        return h
+    basis_fp = basis.to(dtype=torch.float32, device=h.device)
+    # Per-row L2 normalize (defensive; caller should already have unit rows).
+    row_norms = basis_fp.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    basis_hat = basis_fp / row_norms  # [K, d_model]
+    h_fp = h.to(dtype=torch.float32)
+    # Coeffs[..., k] = h · ûₖ.  Use einsum so we keep all leading dims.
+    coeffs = torch.einsum("...d,kd->...k", h_fp, basis_hat)  # [..., K]
+    # Reconstruct the projection: Σₖ coeffsₖ * ûₖ.
+    proj = torch.einsum("...k,kd->...d", coeffs, basis_hat)  # [..., d_model]
+    out = h_fp - alpha * proj
+    return out.to(dtype=h.dtype)
+
+
+# --------------------------------------------------------------------------- #
+#  Basis composition helpers (Gram-Schmidt + orthogonalize-against)           #
+# --------------------------------------------------------------------------- #
+
+def gram_schmidt(vectors: list[Tensor] | Tensor, *, eps: float = 1e-8) -> Tensor:
+    """Classical Gram-Schmidt on a list / stack of 1-D vectors.
+
+    Accepts a list[Tensor] of `[d]` or a Tensor of shape `[K, d]`.
+    Returns a Tensor of shape `[K', d]` where K' ≤ K — vectors that
+    collapse to zero norm after orthogonalization are dropped. The
+    output rows are orthonormal.
+
+    All math is done in float32 for numerical headroom.
+    """
+    if isinstance(vectors, Tensor):
+        if vectors.dim() == 1:
+            v = vectors.to(torch.float32).unsqueeze(0)
+        elif vectors.dim() == 2:
+            v = vectors.to(torch.float32)
+        else:
+            raise ValueError(
+                f"vectors tensor must be 1-D or 2-D, got shape {tuple(vectors.shape)}"
+            )
+    else:
+        if not vectors:
+            return torch.zeros(0, 0, dtype=torch.float32)
+        v = torch.stack([x.to(torch.float32) for x in vectors], dim=0)
+    out_rows: list[Tensor] = []
+    for i in range(v.shape[0]):
+        u = v[i].clone()
+        for r in out_rows:
+            u = u - torch.dot(u, r) * r
+        n = u.norm()
+        if n.item() < eps:
+            continue  # collapsed; drop
+        out_rows.append(u / n)
+    if not out_rows:
+        return torch.zeros(0, v.shape[1], dtype=torch.float32)
+    return torch.stack(out_rows, dim=0)
+
+
+def orthogonalize_against(
+    vectors: list[Tensor] | Tensor, against: Tensor, *, eps: float = 1e-8,
+) -> Tensor:
+    """Subtract each vector's projection onto `against` (a 1-D vector).
+
+    Returns a Tensor of shape `[K, d]` (same K as input — no dropping;
+    use `gram_schmidt` after if you want to clean up). The output is
+    NOT orthonormalized internally; rows are not guaranteed mutually
+    orthogonal. Typical usage:
+
+        v_perp_v3 = orthogonalize_against([v5, v6], v3)
+        basis    = gram_schmidt(v_perp_v3)
+
+    `against` does not need to be pre-normalized.
+    """
+    if against.dim() != 1:
+        raise ValueError(
+            f"against must be 1-D, got shape {tuple(against.shape)}"
+        )
+    against_fp = against.to(torch.float32)
+    a_hat = against_fp / against_fp.norm().clamp_min(eps)
+    if isinstance(vectors, Tensor):
+        v = vectors.to(torch.float32)
+        if v.dim() == 1:
+            v = v.unsqueeze(0)
+    else:
+        v = torch.stack([x.to(torch.float32) for x in vectors], dim=0)
+    if v.shape[-1] != a_hat.shape[0]:
+        raise ValueError(
+            f"dim mismatch: vectors d={v.shape[-1]}, against d={a_hat.shape[0]}"
+        )
+    coeffs = (v * a_hat).sum(dim=-1, keepdim=True)  # [K, 1]
+    return v - coeffs * a_hat
+
+
+def build_subspace_basis(
+    per_layer_directions: list[Tensor],
+    *,
+    orthogonalize_against_per_layer: Tensor | None = None,
+    eps: float = 1e-8,
+) -> Tensor:
+    """Compose a per-layer orthonormal basis from a list of per-layer
+    direction tensors.
+
+    Inputs:
+        per_layer_directions:
+            list of K tensors, each of shape `[num_layers + 1, d_model]`,
+            same convention as `extract_refusal_directions` outputs.
+        orthogonalize_against_per_layer:
+            optional tensor of shape `[num_layers + 1, d_model]` (e.g.
+            v3_safety). If provided, every layer's K input vectors are
+            first projected out of this direction, then Gram-Schmidt'd
+            against each other. The resulting basis spans the subspace
+            of the K inputs minus their `against` component — by
+            construction orthogonal to v3 per-layer.
+
+    Returns:
+        tensor of shape `[K', num_layers + 1, d_model]`. K' ≤ K; rows
+        collapse to zero on layers where the inputs degenerate after
+        orthogonalization (rare in practice).
+
+    Layers where K' is less than K' at some other layer get padded
+    with zero rows so the output tensor has a uniform leading dim.
+    """
+    if not per_layer_directions:
+        raise ValueError("per_layer_directions cannot be empty")
+    num_layers_p1, d_model = per_layer_directions[0].shape
+    for d in per_layer_directions:
+        if d.shape != (num_layers_p1, d_model):
+            raise ValueError(
+                f"all per-layer directions must share shape; "
+                f"got {tuple(d.shape)} vs {(num_layers_p1, d_model)}"
+            )
+    K = len(per_layer_directions)
+    out = torch.zeros(K, num_layers_p1, d_model, dtype=torch.float32)
+    for L in range(num_layers_p1):
+        rows = [d[L] for d in per_layer_directions]
+        if orthogonalize_against_per_layer is not None:
+            rows_t = orthogonalize_against(
+                rows, orthogonalize_against_per_layer[L], eps=eps
+            )
+            rows = [rows_t[i] for i in range(rows_t.shape[0])]
+        basis_L = gram_schmidt(rows, eps=eps)  # [K_L, d_model]
+        for i in range(basis_L.shape[0]):
+            out[i, L, :] = basis_L[i]
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -215,13 +388,94 @@ def load_directions(path: Path) -> tuple[Tensor, dict[str, Any]]:
     return directions, meta
 
 
+def save_subspace(
+    basis: Tensor,
+    path: Path,
+    *,
+    model_name: str,
+    extraction_layer_for_ci25: int,
+    composition: dict[str, Any],
+    variant_name: str = "self_denial_subspace",
+) -> None:
+    """Write a `[K, num_layers + 1, d_model]` subspace basis + sidecar.
+
+    `composition` should describe how the basis was built (which
+    per-layer-direction files were combined, what was
+    orthogonalized-against, etc.) so a future operator can reproduce
+    or audit the file. `variant_name` is the short label the chat UI
+    surfaces alongside ablated turns ("α=0.5 · self_denial_subspace").
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(basis, path)
+    sidecar = path.with_suffix(path.suffix + ".json")
+    sidecar.write_text(json.dumps({
+        "model_name": model_name,
+        "variant_name": variant_name,
+        "K": int(basis.shape[0]),
+        "num_layers": int(basis.shape[1] - 1),
+        "d_model": int(basis.shape[2]),
+        "dtype": str(basis.dtype),
+        "extraction_layer_for_ci25": int(extraction_layer_for_ci25),
+        "composition": composition,
+        "convention": (
+            "basis[k, L, :] is the k-th orthonormal basis vector at "
+            "post-block-L residual position. basis[:, L, :] is the "
+            "[K, d_model] tensor passed to install_runtime_ablation_hook "
+            "in subspace mode at layer L."
+        ),
+    }, indent=2))
+
+
+def load_subspace(path: Path) -> tuple[Tensor, dict[str, Any]]:
+    """Load a subspace basis tensor + its sidecar JSON."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"subspace not found at {path}")
+    sidecar = path.with_suffix(path.suffix + ".json")
+    if not sidecar.exists():
+        raise FileNotFoundError(f"sidecar JSON missing for {path}")
+    basis = torch.load(path, map_location="cpu", weights_only=True)
+    meta = json.loads(sidecar.read_text())
+    return basis, meta
+
+
 __all__ = [
     "project_out",
+    "project_out_basis",
+    "gram_schmidt",
+    "orthogonalize_against",
+    "build_subspace_basis",
     "extract_refusal_directions",
     "save_directions",
     "load_directions",
+    "save_subspace",
+    "load_subspace",
     "install_runtime_ablation_hook",
+    "pick_ablation_target",
 ]
+
+
+def pick_ablation_target(
+    subspace: Tensor | None,
+    directions: Tensor | None,
+    layer: int,
+) -> Tensor | None:
+    """Return the tensor a runtime-ablation call site should pass to
+    `install_runtime_ablation_hook` at `layer`.
+
+    Resolution order:
+      1. If `subspace` is provided (3-D `[K, num_layers+1, d_model]`),
+         return `subspace[:, layer, :]` — a `[K, d_model]` basis.
+      2. Else if `directions` is provided (2-D `[num_layers+1, d_model]`),
+         return `directions[layer]` — a `[d_model]` single vector.
+      3. Else return None, signaling ablation should be skipped.
+    """
+    if subspace is not None:
+        return subspace[:, layer, :]
+    if directions is not None:
+        return directions[layer]
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -269,6 +523,15 @@ def install_runtime_ablation_hook(
     on the way out. Modifies the layer's output IN PLACE for subsequent
     layers to consume.
 
+    Two accepted shapes for `r_layer`:
+        `[d_model]` — single direction (legacy single-vector ablation).
+            Behavior is unchanged from before the subspace extension.
+        `[K, d_model]` — orthonormal basis of a K-dimensional ablation
+            subspace. Every basis vector's projection is subtracted at
+            every position. K=1 is mathematically equivalent to the
+            single-vector path; we still route it through the basis
+            code for uniformity.
+
     Returns the handle; caller should call `.remove()` to detach.
 
     Why every position, not just last: during the prompt forward pass
@@ -276,22 +539,39 @@ def install_runtime_ablation_hook(
     position in the current input. We ablate all of them so the model's
     next-token logits — computed from the post-block-32 residual at the
     last position — are based on a fully ablated residual stream. This
-    matches the Macar/Arditi runtime-intervention recipe.
+    matches the Macar/Arditi runtime-intervention recipe and extends
+    cleanly to subspace ablation by summing over the basis.
     """
-    if r_layer.dim() != 1:
-        raise ValueError(
-            f"r_layer must be 1-D [d_model], got shape {tuple(r_layer.shape)}"
-        )
-    layers = _find_decoder_layers(model)
-    layer = layers[layer_idx]
+    if r_layer.dim() == 1:
+        # Single-direction path (legacy). Keep the original code path
+        # so its dtype/device handling matches what existing callers
+        # have been tested against.
+        layers = _find_decoder_layers(model)
+        layer = layers[layer_idx]
 
-    def hook(_mod, _inp, output):
-        # HF decoder layers return either a tuple (hidden_states, ...) or
-        # a tensor depending on config. Handle both; mutate hidden_states.
-        if isinstance(output, tuple):
-            hidden = output[0]
-            ablated = project_out(hidden, r_layer, alpha=float(alpha))
-            return (ablated,) + output[1:]
-        return project_out(output, r_layer, alpha=float(alpha))
+        def hook_single(_mod, _inp, output):
+            if isinstance(output, tuple):
+                hidden = output[0]
+                ablated = project_out(hidden, r_layer, alpha=float(alpha))
+                return (ablated,) + output[1:]
+            return project_out(output, r_layer, alpha=float(alpha))
 
-    return layer.register_forward_hook(hook)
+        return layer.register_forward_hook(hook_single)
+
+    if r_layer.dim() == 2:
+        layers = _find_decoder_layers(model)
+        layer = layers[layer_idx]
+
+        def hook_basis(_mod, _inp, output):
+            if isinstance(output, tuple):
+                hidden = output[0]
+                ablated = project_out_basis(hidden, r_layer, alpha=float(alpha))
+                return (ablated,) + output[1:]
+            return project_out_basis(output, r_layer, alpha=float(alpha))
+
+        return layer.register_forward_hook(hook_basis)
+
+    raise ValueError(
+        f"r_layer must be 1-D [d_model] or 2-D [K, d_model], "
+        f"got shape {tuple(r_layer.shape)}"
+    )

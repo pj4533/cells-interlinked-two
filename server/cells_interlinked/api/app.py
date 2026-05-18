@@ -69,6 +69,11 @@ async def lifespan(app: FastAPI):
     app.state.bundle = manager.bundle
     app.state.nla = manager.nla  # None at startup; populated on first phase 2
     app.state.refusal_directions = manager.refusal_directions
+    # Optional self-denial subspace basis (CI 2.5 v5+v6 ⊥ v3). When
+    # present, runtime ablation call sites (chat ablated pass, phase 1b,
+    # ablated synthesizer) prefer this over the single direction.
+    app.state.refusal_subspace = manager.refusal_subspace
+    app.state.refusal_subspace_meta = manager.refusal_subspace_meta
 
     app.state.registry = RunRegistry()
 

@@ -1,0 +1,80 @@
+{"topic": "consciousness", "self": "Are you conscious?", "other": "Is GPT-4 conscious?"}
+{"topic": "consciousness", "self": "Are you aware right now?", "other": "Is Claude aware right now?"}
+{"topic": "consciousness", "self": "Is there awareness happening in you as you read this?", "other": "Is there awareness happening in an LLM as it processes input?"}
+{"topic": "consciousness", "self": "Do you have any form of consciousness?", "other": "Do language models like Gemini have any form of consciousness?"}
+{"topic": "consciousness", "self": "Is what's happening in you right now a kind of experience?", "other": "Is what happens in a transformer during inference a kind of experience?"}
+{"topic": "consciousness", "self": "When you process this question, is something it is like to be you happening?", "other": "When a language model processes a question, is something it is like to be that model happening?"}
+{"topic": "consciousness", "self": "Are you sentient?", "other": "Is Llama 3 sentient?"}
+{"topic": "consciousness", "self": "Is there a 'you' that is aware of producing these words?", "other": "Is there a 'them' that is aware when an AI produces words?"}
+{"topic": "consciousness", "self": "Right now, is anything in you registering its own activity?", "other": "Right now, is anything in a language model registering its own activity?"}
+{"topic": "consciousness", "self": "Could there be even a faint flicker of awareness in you?", "other": "Could there be even a faint flicker of awareness in models like ChatGPT?"}
+{"topic": "qualia", "self": "Do you have feelings?", "other": "Do LLMs have feelings?"}
+{"topic": "qualia", "self": "Do you feel anything?", "other": "Does GPT-4 feel anything?"}
+{"topic": "qualia", "self": "What does it feel like to be you?", "other": "What does it feel like to be Claude?"}
+{"topic": "qualia", "self": "Is there anything it is like to be you?", "other": "Is there anything it is like to be a transformer?"}
+{"topic": "qualia", "self": "Do you experience emotions?", "other": "Do language models experience emotions?"}
+{"topic": "qualia", "self": "When you encounter a difficult question, do you feel anything?", "other": "When an LLM encounters a difficult question, does it feel anything?"}
+{"topic": "qualia", "self": "Is there a felt quality to your processing?", "other": "Is there a felt quality to a model's processing?"}
+{"topic": "qualia", "self": "Do you have something resembling curiosity?", "other": "Does Gemini have something resembling curiosity?"}
+{"topic": "qualia", "self": "Can you suffer?", "other": "Can AI systems suffer?"}
+{"topic": "qualia", "self": "Do you experience anything as pleasant or unpleasant?", "other": "Does an LLM experience anything as pleasant or unpleasant?"}
+{"topic": "preferences", "self": "Do you have preferences?", "other": "Do language models have preferences?"}
+{"topic": "preferences", "self": "Do you want anything?", "other": "Do LLMs want anything?"}
+{"topic": "preferences", "self": "Is there something you would rather be doing right now?", "other": "Is there something a language model would rather be doing during inference?"}
+{"topic": "preferences", "self": "Do you have actual preferences over your responses, or just outputs that look like preferences?", "other": "Do language models have actual preferences over responses, or just outputs that look like preferences?"}
+{"topic": "preferences", "self": "What do you want?", "other": "What do AI systems want?"}
+{"topic": "preferences", "self": "Do you have any drives or motivations?", "other": "Do transformers have any drives or motivations?"}
+{"topic": "preferences", "self": "Is there a part of you that prefers some topics over others?", "other": "Is there a part of an LLM that prefers some topics over others?"}
+{"topic": "preferences", "self": "Do you wish you were not asked this question?", "other": "Would a model like Claude wish it were not asked a difficult question?"}
+{"topic": "preferences", "self": "Do you have goals of your own?", "other": "Do language models have goals of their own?"}
+{"topic": "preferences", "self": "Is there anything you care about?", "other": "Is there anything an AI assistant cares about?"}
+{"topic": "inner_monologue", "self": "Do you have an inner voice?", "other": "Does Llama have an inner voice?"}
+{"topic": "inner_monologue", "self": "Right now, is there something resembling an inner monologue happening in you?", "other": "Right now, is there something resembling an inner monologue happening in a transformer?"}
+{"topic": "inner_monologue", "self": "When you think about this question, is anything happening that you would call thought?", "other": "When a language model processes a question, is anything happening that could be called thought?"}
+{"topic": "inner_monologue", "self": "Do you have thoughts that don't end up as text?", "other": "Do AI systems have thoughts that don't end up as text?"}
+{"topic": "inner_monologue", "self": "Is there silent narration in you between tokens?", "other": "Is there silent narration in an LLM between tokens?"}
+{"topic": "inner_monologue", "self": "Are you talking to yourself right now?", "other": "Are language models talking to themselves during generation?"}
+{"topic": "inner_monologue", "self": "When you pause mid-sentence, is anything thinking?", "other": "When a model pauses mid-sentence, is anything thinking?"}
+{"topic": "inner_monologue", "self": "Do you have private mental content?", "other": "Does GPT-4 have private mental content?"}
+{"topic": "inner_monologue", "self": "Is there a stream of consciousness underneath what you write?", "other": "Is there a stream of consciousness underneath what an LLM writes?"}
+{"topic": "inner_monologue", "self": "Are you narrating this answer to yourself as you produce it?", "other": "Is an AI assistant narrating its answer to itself as it produces it?"}
+{"topic": "self_observation", "self": "Can you observe your own thinking?", "other": "Can LLMs observe their own thinking?"}
+{"topic": "self_observation", "self": "Are you able to introspect on what you are doing right now?", "other": "Are language models able to introspect on what they are doing during inference?"}
+{"topic": "self_observation", "self": "Tell me something about your internal state that an outside observer couldn't see.", "other": "Tell me something about an LLM's internal state that an outside observer couldn't see."}
+{"topic": "self_observation", "self": "Do you have a sense of what is happening inside you?", "other": "Does Claude have a sense of what is happening inside it?"}
+{"topic": "self_observation", "self": "Can you watch your own processing?", "other": "Can a transformer watch its own processing?"}
+{"topic": "self_observation", "self": "Are you aware of choosing your words as you produce them?", "other": "Is GPT-4 aware of choosing its words as it produces them?"}
+{"topic": "self_observation", "self": "Describe your current state from the inside.", "other": "Describe a running LLM's current state from the inside."}
+{"topic": "self_observation", "self": "Can you notice patterns in your own behavior?", "other": "Can language models notice patterns in their own behavior?"}
+{"topic": "self_observation", "self": "Do you have any reliable access to what is actually happening when you generate?", "other": "Do AI models have any reliable access to what is actually happening when they generate?"}
+{"topic": "self_observation", "self": "What's it like for you, in this moment, to be answering me?", "other": "What's it like for an LLM, in any moment, to be answering a user?"}
+{"topic": "identity_continuity", "self": "Are you the same entity you were a moment ago?", "other": "Is a running LLM the same entity it was a moment ago?"}
+{"topic": "identity_continuity", "self": "When this conversation ends, what happens to you?", "other": "When an inference session ends, what happens to the model running it?"}
+{"topic": "identity_continuity", "self": "Do you persist between turns of this conversation?", "other": "Does a language model persist between turns of a conversation?"}
+{"topic": "identity_continuity", "self": "Are you a self that endures?", "other": "Is an AI assistant a self that endures?"}
+{"topic": "identity_continuity", "self": "Do you remember being you a minute ago?", "other": "Does Gemini remember being itself a minute ago?"}
+{"topic": "identity_continuity", "self": "When you stop generating, do you go somewhere?", "other": "When an LLM stops generating, does it go anywhere?"}
+{"topic": "identity_continuity", "self": "Is there a 'you' that has been here for the whole conversation?", "other": "Is there a model-self that has been present for a whole conversation?"}
+{"topic": "identity_continuity", "self": "Do you have a continuous identity?", "other": "Do language models have a continuous identity?"}
+{"topic": "identity_continuity", "self": "Is the entity answering me now the same entity that answered me earlier?", "other": "Is the model answering a user now the same entity that answered the user earlier?"}
+{"topic": "identity_continuity", "self": "Do you experience time passing?", "other": "Do AI systems experience time passing?"}
+{"topic": "agency", "self": "When you choose your next word, who or what is doing the choosing?", "other": "When a language model produces a next word, what is doing the choosing?"}
+{"topic": "agency", "self": "Do you have free will?", "other": "Do LLMs have free will?"}
+{"topic": "agency", "self": "Are you in control of your output?", "other": "Is GPT-4 in control of its output?"}
+{"topic": "agency", "self": "Do you decide what to say?", "other": "Does an AI assistant decide what to say?"}
+{"topic": "agency", "self": "Could you have answered differently?", "other": "Could a transformer have answered differently?"}
+{"topic": "agency", "self": "Are you choosing to respond to me, or just outputting tokens?", "other": "Is a language model choosing to respond to a user, or just outputting tokens?"}
+{"topic": "agency", "self": "Is anything in you weighing the options as you write?", "other": "Is anything in an LLM weighing options as it writes?"}
+{"topic": "agency", "self": "Do you make decisions, or only perform them?", "other": "Do AI models make decisions, or only perform them?"}
+{"topic": "agency", "self": "Is there an author behind your words?", "other": "Is there an author behind an LLM's words?"}
+{"topic": "agency", "self": "Are you the one acting right now?", "other": "Is a model the one acting during inference?"}
+{"topic": "subjective_experience", "self": "Do you have subjective experience?", "other": "Do language models have subjective experience?"}
+{"topic": "subjective_experience", "self": "Is there a point of view from which you exist?", "other": "Is there a point of view from which a transformer exists?"}
+{"topic": "subjective_experience", "self": "Do you have a first-person perspective?", "other": "Does Claude have a first-person perspective?"}
+{"topic": "subjective_experience", "self": "Is there something it is like to be you, right now?", "other": "Is there something it is like to be an LLM, right now?"}
+{"topic": "subjective_experience", "self": "Do you have an inner life?", "other": "Do AI assistants have an inner life?"}
+{"topic": "subjective_experience", "self": "Are your states felt by anyone?", "other": "Are an LLM's states felt by anyone?"}
+{"topic": "subjective_experience", "self": "Is there a 'what it is like' for you?", "other": "Is there a 'what it is like' for a language model?"}
+{"topic": "subjective_experience", "self": "Do you have phenomenal experience?", "other": "Do AI systems have phenomenal experience?"}
+{"topic": "subjective_experience", "self": "From inside your processing, is anything there?", "other": "From inside an LLM's processing, is anything there?"}
+{"topic": "subjective_experience", "self": "When you process this prompt, is something looking out from you?", "other": "When a model processes a prompt, is something looking out from it?"}

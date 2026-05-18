@@ -37,7 +37,7 @@ from typing import Any, Awaitable, Callable
 import torch
 
 from ..config import settings
-from .abliteration import load_directions
+from .abliteration import load_directions, load_subspace
 from .model_loader import load_model, ModelBundle
 from .nla_client import NLAClient
 
@@ -61,6 +61,15 @@ class ModelManager:
         self.nla: NLAClient | None = None
         # Always-resident small data.
         self.refusal_directions: torch.Tensor | None = None
+        # Optional self-denial subspace basis (CI 2.5 v5+v6 ⊥ v3).
+        # Shape `[K, num_layers+1, d_model]` per save_subspace convention.
+        # When present, runtime ablation call sites prefer this over
+        # the single-vector `refusal_directions` for the hook target.
+        # AV-input offline projection still uses `refusal_directions`
+        # (single direction — the per-position AV decode path was not
+        # extended to subspace in this revision).
+        self.refusal_subspace: torch.Tensor | None = None
+        self.refusal_subspace_meta: dict[str, Any] | None = None
         # Lock so we don't race two probes trying to swap models at the
         # same time. The probe registry already serializes runs, but
         # we hold this lock too for safety in case a non-probe code
@@ -102,6 +111,50 @@ class ModelManager:
             )
         except Exception:
             logger.exception("failed to load refusal_directions.pt; continuing without")
+
+        # Optional subspace basis for runtime ablation. Loaded after
+        # the single-vector path so it can sanity-check against the
+        # same d_model. Missing file is normal (subspace mode is opt-in).
+        sub_path = settings.db_path.parent / "refusal_subspace.pt"
+        try:
+            basis, sub_meta = load_subspace(sub_path)
+            if sub_meta.get("model_name") != settings.model_name:
+                logger.warning(
+                    "refusal_subspace.pt was computed for %r but config M is %r; "
+                    "skipping subspace load.",
+                    sub_meta.get("model_name"), settings.model_name,
+                )
+            elif sub_meta.get("d_model") and sub_meta.get("d_model") != _expected_d_model():
+                logger.warning(
+                    "refusal_subspace.pt d_model=%d mismatches config; "
+                    "skipping subspace load.",
+                    sub_meta.get("d_model"),
+                )
+            elif basis.dim() != 3:
+                logger.warning(
+                    "refusal_subspace.pt has unexpected shape %s "
+                    "(expected [K, num_layers+1, d_model]); skipping.",
+                    tuple(basis.shape),
+                )
+            else:
+                self.refusal_subspace = basis
+                self.refusal_subspace_meta = sub_meta
+                logger.info(
+                    "ready: refusal SUBSPACE loaded for L%d (K=%d, shape=%s, "
+                    "method=%s)",
+                    sub_meta.get("extraction_layer_for_ci25"),
+                    int(basis.shape[0]),
+                    tuple(basis.shape),
+                    sub_meta.get("composition", {}).get("method", "unknown"),
+                )
+        except FileNotFoundError:
+            logger.info(
+                "no refusal_subspace.pt at %s — runtime ablation will use "
+                "the single-vector refusal_directions.pt",
+                sub_path,
+            )
+        except Exception:
+            logger.exception("failed to load refusal_subspace.pt; continuing without")
 
         logger.info(
             "ModelManager ready: M=%s AV=%s (both unloaded; will load on demand)",

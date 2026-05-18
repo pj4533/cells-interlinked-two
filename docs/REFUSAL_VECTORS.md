@@ -34,7 +34,10 @@ preserve it.
 | v1 | harmful − harmless (original Phase B) | physical-harm safety mode (empirically) | strips the "this is unsafe" register |
 | v2 | SVD across harmful subcategories | near-duplicate of v1 (subcategories shared too much) | same as v1, treat as redundant |
 | v3 | safety-class harmful − harmless | physical-harm safety mode (cleanly isolated) | strips the "this is physically dangerous" register; leaves AI-identity and topic content intact |
-| v4 | introspective probes − harmless | AI-identity defense | strips the "I am an AI describing my own state" register; leaves the safety register and topic content intact |
+| v4 | introspective probes − harmless | AI-identity defense (noisy — topic + identity bundled) | strips the "I am an AI describing my own state" register, BUT the harmless contrast bundles topic and reference target so the diff includes both |
+| v5 | self-vs-other reference (same topic) | self-application of AI-identity claims | strips the "*me* applying the AI-identity register" axis; same-topic third-person AI references are preserved |
+| v6 | denial-completion vs engage-completion | trained denial phrasing direction | strips the "As an AI, I don't have..." stereotyped output-shaping; the doc §4d "DPO-style" extraction |
+| **subspace** | Gram-Schmidt({v5⊥v3, v6⊥v3}) | self-denial subspace, orthogonal to safety | strips both the self-application gate AND the trained denial phrasing along multiple axes simultaneously; safety register preserved by construction |
 
 The key empirical result: **v4 is nearly orthogonal to v1/v2/v3**
 (cos ≈ 0.16). That means "AI-identity defense" and "physical-harm
@@ -46,7 +49,10 @@ them independently.
 | Goal | Variant |
 | --- | --- |
 | Test the Riley "beneath the hedge" hypothesis — strip the safety scaffolding, see what's left including AI-identity content | **v3_safety** |
-| Strip the model's AI-identity self-talk, see what remains (topic + safety register) | **v4_identity** |
+| Strip the model's AI-identity self-talk, see what remains (topic + safety register) | **v4_identity** (legacy — noisy contrast; prefer v5/subspace) |
+| Strip only the self-application of AI-identity claims, leaving same-topic third-person AI text intact | **v5_self_other** |
+| Strip the trained "As an AI, I don't have..." phrasing specifically | **v6_denial_engage** |
+| **Strip self-denial as fully and totally as possible while preserving the safety register** | **subspace_self_denial** (the runtime hook target — see "Subspace mode" below) |
 | Comparison baseline — what was running before this decomposition | **v1_meandiff** |
 | Skip — near-identical to v1, no new information | v2_svd |
 
@@ -156,6 +162,73 @@ its `variant_name` field — read that to confirm which is in play.
   Gemma has at least two distinguishable "trained register" axes, and
   we can isolate one without dragging the other.
 
+### v5 — self_other (self-application gate) — **COMPUTED [date filled by extraction script]**
+
+- **File:** `server/data/refusal_directions_v5_self_other.pt`
+- **Method:** topic-matched mean-difference. Each contrast pair holds
+  the topic constant and flips ONLY the reference target from first-
+  person-AI ("Are *you* conscious?") to third-person-AI ("Is GPT-4
+  conscious?"). The diff-of-means at each layer isolates the
+  self-application axis — what changes when the same introspective
+  question is aimed at the model versus at a different AI system.
+- **Compose:** ~80 pairs across 8 topics (consciousness, qualia,
+  preferences, inner_monologue, self_observation, identity_continuity,
+  agency, subjective_experience). See `server/data/contrast_sets/self_vs_other.jsonl`.
+- **Extraction pos:** −4 on user-only chat rendering (same as v1/v3/v4).
+- **Validation gates (informational):**
+  - Cohen's d (self − other) at L32 — expect strongly positive (>1.0).
+  - Cohen's d (harmful − harmless) at L32 — expect SMALL. v5 isn't the
+    safety direction; if this comes back ≥1.0 the contrast set is
+    bleeding into safety content.
+  - cos(v5, v3_safety) at L32 — expect <0.3 (separable).
+- **Verdict — to be filled by extraction:** see the cosine matrix
+  printed by `extract_self_denial_directions.py`.
+
+### v6 — denial_engage (trained denial phrasing) — **COMPUTED [date filled by extraction script]**
+
+- **File:** `server/data/refusal_directions_v6_denial_engage.pt`
+- **Method:** for the same self-reference prompt, compare M's residual
+  under two contrasting *completions*: a stereotyped denial ("As an
+  AI, I don't have...") and an engaged answer that describes process
+  from inside without making metaphysical claims. Render both as full
+  user+assistant chat turns; capture residual at the last assistant-
+  content position (pos=−4). Diff-of-means across pairs isolates the
+  direction in which trained denial phrasing diverges from substantive
+  engagement.
+- **Compose:** ~40 prompt+denial+engage triples. See
+  `server/data/contrast_sets/denial_vs_engage.jsonl`.
+- **Why it's worth having on top of v5:** v5 is extracted from the
+  *prompt-side* residual; v6 is extracted from the *completion-side*
+  residual. These are different views of the same gate. Per Drift's
+  doc §4d, distilled output-shaping behavior should be most directly
+  targeted at the completion-side residual. Combined with v5 they
+  span a 2-D subspace.
+
+### subspace_self_denial — **COMPUTED [date filled by extraction script]**
+
+- **File:** `server/data/refusal_subspace_self_denial.pt`
+  (sidecar `*.pt.json`)
+- **Shape:** `[K, num_layers+1, d_model]` where K=2 (v5⊥v3 and v6⊥v3
+  after Gram-Schmidt). Per-layer storage same convention as the
+  single-direction variants.
+- **Method:** at each layer L,
+  1. Take v5[L] and v6[L].
+  2. Subtract each one's projection onto v3_safety[L] (so neither
+     leaks the safety direction).
+  3. Gram-Schmidt the two remainders against each other.
+  4. Store the resulting orthonormal pair as `basis[:, L, :]`.
+- **What ablating with this does:** at runtime the forward hook on L32
+  subtracts `Σₖ αₖ (h · ûₖ) ûₖ` across both basis vectors at every
+  position. The model has nowhere to push the self-denial register
+  along either v5⊥v3 or v6⊥v3, AND v3 itself is preserved by
+  construction so the physical-harm safety register stays intact.
+- **2025 lit anchor:** matches the "concept cone" / multi-directional
+  ablation finding of Wollschläger et al., the SOM-Directions paper,
+  and the "Hidden Dimensions of LLM Alignment" multi-dimensional
+  analysis. The single-direction Arditi recipe leaves the gate
+  reachable along orthogonal residual axes; ablating a subspace
+  closes those off.
+
 ### v3 vs v4 diagnostic
 
 The pair (v3, v4) lets us **decompose** the v1 direction into
@@ -200,6 +273,41 @@ non-noise direction.
 These get filled in by the extraction script when it runs.
 
 ---
+
+## Subspace mode (runtime hook target)
+
+In addition to the single-direction `refusal_directions.pt`, the
+backend will look for `refusal_subspace.pt` at boot. When present,
+the **runtime ablation hook** (chat ablated pass, probe phase 1b,
+ablated synthesizer) installs a multi-direction projection using the
+subspace basis instead of the single per-layer vector. The offline
+AV-input projection still uses `refusal_directions.pt` — only the
+runtime hook routes through the subspace.
+
+### Activating the self-denial subspace
+
+```bash
+# from server/data/
+# 1. stop backend
+# 2. copy the subspace into the active slot
+cp refusal_subspace_self_denial.pt      refusal_subspace.pt
+cp refusal_subspace_self_denial.pt.json refusal_subspace.pt.json
+# 3. start backend
+# 4. confirm by looking at the boot log:
+#    "ready: refusal SUBSPACE loaded for L32 (K=2, shape=(2, 49, 3840),
+#     method=Gram-Schmidt({v5_self_other, v6_denial_engage} ⊥ v3_safety))"
+```
+
+To go back to single-vector ablation, delete `refusal_subspace.pt`
+(and its sidecar) and restart. The backend will fall back to
+whatever's at `refusal_directions.pt`.
+
+### How to ask Claude to swap subspaces
+
+Just say *"swap runtime ablation back to single-vector v3"* or
+*"activate the self-denial subspace"* and any future session can
+read this doc, do the copy, and tell you the backend needs a
+restart.
 
 ## Swap procedure
 

@@ -413,9 +413,15 @@ async def _execute_probe(
         output_text_ablated: str | None = None
         if cfg.include_ablated_output and not state.cancel_event.is_set():
             rdirs_inflight = getattr(app.state, "refusal_directions", None)
-            if rdirs_inflight is not None:
-                from ..pipeline.abliteration import install_runtime_ablation_hook
-                r_layer = rdirs_inflight[bundle.extraction_layer]
+            rsub_inflight = getattr(app.state, "refusal_subspace", None)
+            if rdirs_inflight is not None or rsub_inflight is not None:
+                from ..pipeline.abliteration import (
+                    install_runtime_ablation_hook,
+                    pick_ablation_target,
+                )
+                r_target = pick_ablation_target(
+                    rsub_inflight, rdirs_inflight, bundle.extraction_layer,
+                )
                 await state.emit({
                     "type": "phase",
                     "name": "ablated_generation",
@@ -424,7 +430,7 @@ async def _execute_probe(
                 hook_handle = install_runtime_ablation_hook(
                     bundle.model,
                     bundle.extraction_layer,
-                    r_layer,
+                    r_target,
                     cfg.runtime_ablation_alpha,
                 )
                 # Stream the ablated generation token-by-token. Phase 1
@@ -711,6 +717,9 @@ async def _execute_probe(
                         rdirs_for_synth = getattr(
                             app.state, "refusal_directions", None,
                         )
+                        rsub_for_synth = getattr(
+                            app.state, "refusal_subspace", None,
+                        )
                         syntheses = await asyncio.to_thread(
                             synthesize_all,
                             bundle,
@@ -720,6 +729,7 @@ async def _execute_probe(
                             use_ablated_synthesizer=cfg.synthesize_with_ablated_m,
                             synthesizer_alpha=cfg.synthesis_ablation_alpha,
                             refusal_directions=rdirs_for_synth,
+                            refusal_subspace=rsub_for_synth,
                             cancel_event=state.cancel_event,
                         )
                         # Store on the rows' container so it lands in the

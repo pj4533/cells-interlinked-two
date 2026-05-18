@@ -46,13 +46,28 @@ next-env.d.ts
 
 # Local data (per-user runtime state — DBs, downloaded weights, run logs)
 data/
-server/data/
 # Exception: journal/data/reports/ is the published-report tree that the
 # publisher writes on `Publish`. It IS meant to be checked in (Vercel
 # reads it at build time). Without this un-ignore the publisher's
 # `git add` silently no-ops and nothing reaches the public site.
 !journal/data/
 !journal/data/**
+# Exception: server/data/ is mostly runtime state (downloaded weights,
+# computed refusal-direction tensors, sqlite DBs) — BUT
+# server/data/contrast_sets/ holds JSONL source data for the
+# refusal-direction extraction scripts (self_vs_other, denial_vs_engage),
+# which is source content equivalent to HARMFUL_PROMPTS in
+# refusal_prompts.py and should be tracked. Two-step pattern: un-ignore
+# the directory, then re-ignore the runtime files explicitly.
+!server/data/
+!server/data/contrast_sets/
+!server/data/contrast_sets/**
+server/data/*.pt
+server/data/*.pt.json
+server/data/*.db
+server/data/*.sqlite
+server/data/*.sqlite.*
+server/data/*.bak-*
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
