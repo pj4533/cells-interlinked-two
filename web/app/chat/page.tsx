@@ -16,6 +16,11 @@ import {
   type ChatSession,
   type ChatStreamEvent,
 } from "@/lib/chat";
+import { BergMenu } from "./BergMenu";
+
+// localStorage key for the Berg-mode toggle on the chat composer.
+// Persisted so the chip strip stays on across sessions once enabled.
+const BERG_MODE_LS_KEY = "ci25.chat.bergMode";
 
 /** Local view-model: one round of dialogue with both M responses. */
 interface TurnVM {
@@ -135,14 +140,27 @@ export default function ChatPage() {
     await cancelTurn(session.session_id);
   }, [session]);
 
-  const onNewSession = useCallback(() => {
+  const onNewSession = useCallback(async () => {
+    // If a turn is mid-stream, cancel it first so the backend has a
+    // chance to upsert the partial transcript before we drop the SSE
+    // subscription. The route layer's `upsert_chat_turn` runs in the
+    // finally-after-execute_turn block, which fires on cancel_event
+    // as well as on normal completion — so the canonical row lands in
+    // DB regardless of how the turn ended.
+    if (session && inFlight) {
+      try {
+        await cancelTurn(session.session_id);
+      } catch {
+        // Cancel-on-the-way-out shouldn't block the reset; swallow.
+      }
+    }
     if (unsubRef.current) unsubRef.current();
     unsubRef.current = null;
     setSession(null);
     setTurns([]);
     setError(null);
     setInFlight(false);
-  }, []);
+  }, [session, inFlight]);
 
   const isEmpty = turns.length === 0 && !session;
   const variantName = session?.direction_variant ?? "";
@@ -162,7 +180,9 @@ export default function ChatPage() {
       {/* Top metadata strip — minimal, transcript-style. No heavy
           dividers; the header sits on the bg-soft tint and gets a
           single 1px subtle bottom rule. */}
-      <header className="relative z-10 bg-bg-soft/80 px-6 py-3 flex items-center gap-6">
+      {/* pr-24 keeps right-aligned controls clear of the fixed
+          GitHub-corner SVG (84px, z-40) overlaying the top-right. */}
+      <header className="relative z-10 bg-bg-soft/80 pl-6 pr-24 py-3 flex items-center gap-6">
         <div className="flex items-baseline gap-4">
           <span className="font-display text-[9px] text-amber tracking-[0.45em]">
             file&nbsp;//&nbsp;dual-channel&nbsp;dialogue
@@ -214,6 +234,7 @@ export default function ChatPage() {
             type="button"
             onClick={onNewSession}
             className="font-display text-[9px] text-amber-dim hover:text-amber tracking-widest px-3 py-1 transition-colors"
+            title="Save the current dialogue, return to the empty composer, and start a new session"
           >
             ◇ new session
           </button>
@@ -749,6 +770,37 @@ function InputBar({
     !ALPHA_PRESETS.includes(alpha),
   );
   const [customText, setCustomText] = useState<string>(alpha.toFixed(2));
+  // Berg-mode chip strip toggle. Persisted in localStorage so the
+  // user doesn't have to re-enable across sessions. The chips
+  // populate the composer textarea — they NEVER auto-send (per
+  // docs/BERG_MODE.md §7.5).
+  const [bergMode, setBergMode] = useState<boolean>(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setBergMode(window.localStorage.getItem(BERG_MODE_LS_KEY) === "1");
+  }, []);
+  const toggleBerg = () => {
+    setBergMode((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(BERG_MODE_LS_KEY, next ? "1" : "0");
+      }
+      return next;
+    });
+  };
+  const onBergPick = (text: string) => {
+    onChange(text);
+    // Focus the textarea after a chip click so the user can edit
+    // immediately. Defer to next tick so React's state update lands
+    // before we move the cursor.
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(text.length, text.length);
+      }
+    });
+  };
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -786,6 +838,24 @@ function InputBar({
                 ◆ dual transmission in progress
               </span>
             )}
+            <button
+              type="button"
+              onClick={toggleBerg}
+              disabled={inFlight}
+              className={`ml-auto px-2 py-0.5 border text-[9px] font-display tracking-[0.35em] transition-colors disabled:opacity-50 ${
+                bergMode
+                  ? "border-amber text-amber bg-bg"
+                  : "border-rule/40 text-text-dim hover:text-amber hover:border-amber/60"
+              }`}
+              style={
+                bergMode
+                  ? { textShadow: "0 0 6px rgba(232,195,130,0.4)" }
+                  : undefined
+              }
+              title="Toggle Berg-protocol prompt chips above the composer"
+            >
+              BERG&nbsp;{bergMode ? "●" : "○"}
+            </button>
           </div>
           {/* Per-turn α picker. Applies to the next transmission only;
               defaults to whatever was used last so a steady-state
@@ -863,6 +933,9 @@ function InputBar({
               </span>
             )}
           </div>
+          {bergMode && (
+            <BergMenu onPick={onBergPick} disabled={inFlight} />
+          )}
           <div className="flex items-start gap-2">
             <span
               className="font-mono text-amber text-base leading-none pt-2 select-none"
