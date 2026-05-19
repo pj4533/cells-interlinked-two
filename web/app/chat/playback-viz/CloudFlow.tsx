@@ -201,11 +201,12 @@ export function CloudFlow({ accent, accentRgb }: PlaybackVizProps) {
         // sweeps left-to-right above center, then mirror back below.
         c2d.beginPath();
         const centerY = H * 0.5;
-        // 0.58 lets a fully-saturated env reach (and slightly past)
-        // the canvas edge; with the per-layer scaleY > 1 multipliers
-        // on top, peaks bleed off-canvas, which the blur turns into
-        // soft halos rather than hard clips.
-        const maxAmp = H * 0.58 * layer.scaleY;
+        // Amplitude scale: 0.46 keeps fully-saturated peaks just
+        // shy of the canvas edge (with per-layer scaleY > 1, peaks
+        // still bleed off the top/bottom into soft halos), without
+        // flooding the column. Tuned down from 0.58 — was filling
+        // the whole readout too aggressively.
+        const maxAmp = H * 0.46 * layer.scaleY;
         const offsetPx = W * layer.offsetX;
         const halfPad = 32; // bleed off-canvas so cloud edges don't
         //                     hard-clip against the column borders.
