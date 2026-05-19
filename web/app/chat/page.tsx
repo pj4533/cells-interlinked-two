@@ -19,7 +19,7 @@ import {
   type ChatStreamEvent,
 } from "@/lib/chat";
 import { BergMenu } from "./BergMenu";
-import { attachAudio, primeAudioContext } from "./playback-viz";
+import { prepareClip, primeAudioContext } from "./playback-viz";
 import { ChannelVoiceActivity } from "./VoiceMonitor";
 
 // localStorage key for the Berg-mode toggle on the chat composer.
@@ -599,71 +599,61 @@ async function runVoicePlayback(
       ),
     );
 
-  /** Play an MP3 blob URL through an HTMLAudioElement. Resolves when
-   *  the clip finishes or errors. If the browser blocks autoplay, the
-   *  inner promise stays pending: we install a resume callback the
-   *  monitor's tap-to-play button can call to retry play() under a
-   *  fresh user gesture. */
+  /** Play a clip URL by fetching its bytes, decoding into the audio
+   *  graph, and playing through an AudioBufferSource. Resolves when
+   *  the clip naturally ends.
+   *
+   *  Why not HTMLAudioElement: on Safari each `audio.play()` is
+   *  re-checked against the autoplay policy independently, so
+   *  Gemma's 15+s generation gap means every clip needs a fresh
+   *  tap. Worse on iOS, `createMediaElementSource` often emits
+   *  silence into the analyser even though the element plays
+   *  through default output — so the cloud sees zeros and looks
+   *  dead. AudioBufferSource sidesteps both: once the context is
+   *  primed (one gesture per session), `source.start()` just works,
+   *  and the audio is INSIDE the graph so the analyser receives
+   *  the exact samples it plays. */
   const playClip = async (
     url: string,
     side: "raw" | "ablated",
   ): Promise<void> => {
-    const audio = new Audio(url);
-    // Eagerly load metadata. iOS Safari is more conservative about
-    // when it fetches an audio element's data; without preload it
-    // sometimes waits until the first play() call, and that delay
-    // can race createMediaElementSource into a weird state. "auto"
-    // tells the browser to start buffering immediately.
-    audio.preload = "auto";
-    // Connect this audio element to the shared analyser so the
-    // playback visualization (clouds / bars / whatever's active)
-    // can read real-time frequency data. `attachAudio` awaits
-    // ctx.resume() internally so the source connects only once the
-    // graph is confirmed running — without this await, the FIRST
-    // clip after a fresh context race-loses to the resume promise,
-    // attach bails, and that clip plays un-captured (no viz).
+    let bytes: ArrayBuffer;
     try {
-      await attachAudio(audio);
-    } catch {
-      // best-effort; don't let viz issues block playback
+      const res = await fetch(url);
+      bytes = await res.arrayBuffer();
+    } finally {
+      // We have the bytes; the blob URL is no longer needed
+      // regardless of what comes next.
+      URL.revokeObjectURL(url);
     }
-    return new Promise<void>((resolve) => {
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        resolve();
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve();
-      };
 
-      const tryPlay = async () => {
-        try {
-          await audio.play();
-        } catch (err) {
-          // NotAllowedError → autoplay blocked. Install resume hook.
-          // (We don't try to distinguish — any rejection should surface
-          // a tap-to-play; clicking always satisfies the gesture
-          // requirement and is harmless even if the real error was
-          // something else.)
-          const name =
-            err && typeof err === "object" && "name" in err
-              ? (err as { name: string }).name
-              : "PlayError";
-          console.warn(`audio.play() rejected (${name}); awaiting tap`);
+    const controller = await prepareClip(bytes);
+
+    // tryPlay is recursive on autoplay-blocked: the catch installs
+    // a tap-to-play prompt; the user's tap fires voiceResume, which
+    // re-enters tryPlay inside a fresh gesture call stack so
+    // ctx.resume() succeeds and `source.start()` lands.
+    const tryPlay = async (): Promise<void> => {
+      try {
+        await controller.play();
+      } catch (err) {
+        const name =
+          err && typeof err === "object" && "name" in err
+            ? (err as { name: string }).name
+            : "PlayError";
+        console.warn(`source.play() rejected (${name}); awaiting tap`);
+        await new Promise<void>((resolve) => {
           advance(side === "raw" ? "blocked_raw" : "blocked_ablated", {
             voiceResume: () => {
-              // Clear the blocked state and retry. The click that
-              // invoked this resume IS the fresh gesture, so play()
-              // will succeed on this attempt.
               advance(side === "raw" ? "playing_raw" : "playing_ablated");
-              void tryPlay();
+              resolve();
             },
           });
-        }
-      };
-      void tryPlay();
-    });
+        });
+        await tryPlay();
+      }
+    };
+    await tryPlay();
   };
 
   const rawSpeech = (evt.raw_speech ?? "").trim();

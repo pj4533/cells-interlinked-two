@@ -3,49 +3,34 @@
 /** Shared AudioContext + AnalyserNode for chat-mode playback
  * visualizations.
  *
- * The voice playback driver creates a new <audio> per clip; we tap
- * each one through createMediaElementSource → analyser → destination
- * so visualizations can read live frequency / waveform data via
- * `getAnalyser()`. The graph is a singleton (one AudioContext per
- * page lifecycle); the analyser persists across clips so React
- * visualizations just keep reading and naturally show silence
- * between clips.
+ * Architecture: clip audio is fetched as bytes, decoded into an
+ * AudioBuffer, and played via AudioBufferSource → analyser →
+ * destination. We deliberately do NOT use HTMLAudioElement +
+ * createMediaElementSource. Two reasons:
  *
- * ── Critical gotcha (the bug this module exists to dodge) ──
+ *   1. Safari's autoplay policy gates each `audio.play()` call
+ *      independently against a "recent user gesture". Gemma's
+ *      ~15s generation gap means every clip's play() gets
+ *      rejected and forces a tap-to-play. With BufferSource,
+ *      `source.start()` only requires the AudioContext to be in
+ *      "running" state — a single initial gesture (the TRANSMIT
+ *      click that primes the context) is enough for the rest of
+ *      the session.
  *
- * createMediaElementSource *captures* the audio element's output:
- * after the call, audio no longer reaches the speakers via the
- * element's default path — it ONLY flows through the analyser →
- * destination chain in the graph. If the AudioContext is suspended
- * at that moment (autoplay policy keeps it suspended until a fresh
- * user gesture; Gemma's ~15s generation gap means the TRANSMIT
- * click's gesture token is long stale by the time we'd attach),
- * the graph doesn't pull samples and the audio is silent.
+ *   2. iOS Safari has long-standing bugs with createMediaElementSource:
+ *      the audio plays through the element's default output path
+ *      while the source node sometimes emits silence into the
+ *      graph, so the analyser sees zeros and the visualization
+ *      sits dead. AudioBufferSource feeds the graph directly —
+ *      audio and analyser data are the same samples.
  *
- * Two-part defense:
- *   1. `primeAudioContext()` is called from a `pointerdown`
- *      listener on first user interaction with the chat page —
- *      that IS a fresh gesture, so the resume actually takes.
- *   2. `attachAudio()` refuses to capture an element when the
- *      context is not running. In that case it returns null, the
- *      audio element plays normally through default output, and
- *      the visualization falls back to silent baseline. Better to
- *      lose the responsive viz on the first clip than to silence
- *      playback entirely.
- *
- * Notes:
- *   - blob: URLs are same-origin with their creator (the page),
- *     so the analyser receives un-tainted samples regardless of
- *     which port the audio bytes came from.
- *   - createMediaElementSource may only be called ONCE per element.
- *     We guard via a WeakSet so a double-attach (from React strict-
- *     mode double-effects or a play retry under autoplay block)
- *     can't throw.
+ * The graph is a singleton (one AudioContext per page lifecycle);
+ * the analyser persists across clips so React visualizations just
+ * keep reading and naturally show silence between clips.
  */
 
 let ctx: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
-const attached = new WeakSet<HTMLMediaElement>();
 
 function ensureContext(): AnalyserNode | null {
   if (analyser) return analyser;
@@ -74,9 +59,9 @@ function ensureContext(): AnalyserNode | null {
 }
 
 /** Initialize the AudioContext and resume it. Call this from a
- *  user-gesture handler (pointerdown, click) — that's when resume()
- *  is permitted to take effect. Safe to call any number of times;
- *  it's idempotent. */
+ *  user-gesture handler (pointerdown, touchstart, click) — that's
+ *  when resume() is permitted to take effect. Safe to call any
+ *  number of times; it's idempotent. */
 export function primeAudioContext(): void {
   ensureContext();
   if (ctx && ctx.state === "suspended") {
@@ -86,68 +71,76 @@ export function primeAudioContext(): void {
   }
 }
 
-/** Connect an HTMLMediaElement to the shared analyser. Returns the
- *  analyser on success, or `null` if the context can't be put into
- *  a running state right now (in which case the caller's audio
- *  should play normally — we deliberately do NOT capture it,
- *  because capturing through a suspended graph silences playback).
- *
- *  Async because `ctx.resume()` is async: the FIRST attach after
- *  a fresh context is created can race the resume promise that
- *  primeAudioContext kicked off, with the context still reading
- *  "suspended" for a few microtask ticks before flipping to
- *  "running". A synchronous state check would bail at that moment
- *  and the first clip would play un-captured (no viz). Awaiting
- *  resume here makes the answer deterministic.
- *
- *  Idempotent — calling twice on the same element is a no-op.
- */
-export async function attachAudio(
-  audio: HTMLMediaElement,
-): Promise<AnalyserNode | null> {
-  const a = ensureContext();
-  if (!a || !ctx) return null;
-  if (ctx.state === "suspended") {
-    try {
-      await ctx.resume();
-    } catch (e) {
-      console.warn("AudioContext resume rejected during attach", e);
-    }
-  }
-  if (ctx.state !== "running") {
-    return null;
-  }
-  if (attached.has(audio)) return a;
-  try {
-    const src = ctx.createMediaElementSource(audio);
-    src.connect(a);
-    attached.add(audio);
-  } catch (e) {
-    // Most commonly: element was already attached in another path.
-    console.warn("attachAudio failed; falling back to direct playback", e);
-    return null;
-  }
-  return a;
-}
-
-/** Read the shared analyser. Returns null if no audio has ever been
- * attached this session (visualizations should treat this as "render
- * a silent baseline"). */
 export function getAnalyser(): AnalyserNode | null {
   return analyser;
 }
 
-/** Test-only: expose the current AudioContext state. Used by the
- *  e2e smoke to verify priming actually puts the context in
- *  `running`. */
 export function getContextState(): AudioContextState | null {
   return ctx?.state ?? null;
 }
 
-// Dev/test hook: expose internals on window so e2e can introspect
-// without bundle-internal imports. The added overhead is one
-// property assignment per page load; production users will never
-// hit it.
+/** Controller returned by `prepareClip`. `play()` starts playback
+ *  and resolves when the clip naturally ends, or throws
+ *  `"autoplay-blocked"` if the context can't reach `running` state
+ *  (caller should display a tap-to-play prompt + retry). */
+export interface ClipController {
+  /** Start playback. Resolves on natural end. Idempotent — calling
+   *  while playing returns a promise that resolves at the same end
+   *  event. */
+  play: () => Promise<void>;
+  /** Schedule duration in seconds, for callers that want to size
+   *  progress bars / show ETA. */
+  duration: number;
+}
+
+/** Decode raw audio bytes and return a controller that can start
+ *  playback through the shared analyser. Decode happens up-front so
+ *  `play()` is instant once a user gesture is available. */
+export async function prepareClip(
+  bytes: ArrayBuffer,
+): Promise<ClipController> {
+  const a = ensureContext();
+  if (!a || !ctx) throw new Error("audio context unavailable");
+  const buffer = await ctx.decodeAudioData(bytes.slice(0));
+
+  let started = false;
+  let endedPromise: Promise<void> | null = null;
+
+  const play = async (): Promise<void> => {
+    if (endedPromise) return endedPromise;
+    // If the context is suspended, attempt to resume. resume() can
+    // only succeed inside a user-gesture call stack on Safari, but
+    // we try regardless — it's cheap and the caller will know via
+    // the thrown error if it didn't take.
+    if (ctx!.state === "suspended") {
+      try {
+        await ctx!.resume();
+      } catch {
+        /* keep going to the state check below */
+      }
+    }
+    if (ctx!.state !== "running") {
+      throw new Error("autoplay-blocked");
+    }
+    // Create the source lazily so retries (after autoplay-blocked
+    // throws) get a fresh source node. AudioBufferSource is
+    // one-shot — `start()` can only be called once per node.
+    const source = ctx!.createBufferSource();
+    source.buffer = buffer;
+    source.connect(a);
+    started = true;
+    endedPromise = new Promise<void>((resolve) => {
+      source.onended = () => resolve();
+    });
+    source.start();
+    return endedPromise;
+  };
+
+  void started; // silence unused-var warning in some configs
+  return { play, duration: buffer.duration };
+}
+
+// Dev/test hook: expose internals on window so e2e can introspect.
 if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).__ci_audio_graph = {
     getContextState,

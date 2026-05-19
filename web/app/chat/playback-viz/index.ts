@@ -24,9 +24,10 @@ export const PLAYBACK_VIZ_REGISTRY: Record<
 export const ACTIVE_PLAYBACK_VIZ: PlaybackVizKind = "clouds";
 
 export {
-  attachAudio,
   getAnalyser,
   getContextState,
+  prepareClip,
   primeAudioContext,
+  type ClipController,
 } from "./audio-graph";
 export type { PlaybackVizProps } from "./types";
