@@ -174,17 +174,25 @@ export default function ChatPage() {
   // page sees. Without this, Gemma's 15+s generation delay means the
   // TRANSMIT-click's gesture token is stale by the time we'd try to
   // hook up the analyser, and createMediaElementSource through a
-  // suspended graph silences the audio. We capture pointerdown +
-  // keydown so any first interaction (click, key, the textarea
-  // focus) does the priming.
+  // suspended graph silences the audio.
+  //
+  // We capture pointerdown + touchstart + keydown so any first
+  // interaction primes — touchstart is the belt to pointerdown's
+  // suspenders on iOS Safari, where pointer events are supported
+  // from iOS 13+ but touch events have been universal since iOS 1.
   useEffect(() => {
     const prime = () => {
       primeAudioContext();
     };
     document.addEventListener("pointerdown", prime, { capture: true });
+    document.addEventListener("touchstart", prime, {
+      capture: true,
+      passive: true,
+    });
     document.addEventListener("keydown", prime, { capture: true });
     return () => {
       document.removeEventListener("pointerdown", prime, { capture: true });
+      document.removeEventListener("touchstart", prime, { capture: true });
       document.removeEventListener("keydown", prime, { capture: true });
     };
   }, []);
@@ -601,6 +609,12 @@ async function runVoicePlayback(
     side: "raw" | "ablated",
   ): Promise<void> => {
     const audio = new Audio(url);
+    // Eagerly load metadata. iOS Safari is more conservative about
+    // when it fetches an audio element's data; without preload it
+    // sometimes waits until the first play() call, and that delay
+    // can race createMediaElementSource into a weird state. "auto"
+    // tells the browser to start buffering immediately.
+    audio.preload = "auto";
     // Connect this audio element to the shared analyser so the
     // playback visualization (clouds / bars / whatever's active)
     // can read real-time frequency data. `attachAudio` awaits

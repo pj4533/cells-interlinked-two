@@ -35,22 +35,25 @@ export function CloudFlow({ accent, accentRgb }: PlaybackVizProps) {
     const c2d = canvas.getContext("2d", { alpha: true });
     if (!c2d) return;
 
-    // ── HiDPI sizing. We re-measure on every frame because the
-    // canvas can be remounted with a different size between turns
-    // and a ResizeObserver round-trip would add lag.
-    const dpr = window.devicePixelRatio || 1;
-    const fitToParent = () => {
+    // ── HiDPI sizing. The backing store gets bumped to dpr × CSS
+    // pixels, but the drawing transform is reset to (dpr,dpr) so
+    // all draw calls use CSS pixels. Critical for Retina/iPad:
+    // ctx.filter blur values are in CSS pixels, and without the
+    // transform a `blur(18px)` looks half as wide on a dpr=2
+    // screen vs a dpr=1 one. cssW/cssH are what we draw to.
+    const fitToParent = (): { cssW: number; cssH: number } | null => {
+      const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return false;
+      if (rect.width === 0 || rect.height === 0) return null;
       const targetW = Math.max(1, Math.round(rect.width * dpr));
       const targetH = Math.max(1, Math.round(rect.height * dpr));
       if (canvas.width !== targetW || canvas.height !== targetH) {
         canvas.width = targetW;
         canvas.height = targetH;
       }
-      return true;
+      c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { cssW: rect.width, cssH: rect.height };
     };
-    fitToParent();
 
     const analyser = getAnalyser();
     const binCount = analyser?.frequencyBinCount ?? 256;
@@ -136,13 +139,25 @@ export function CloudFlow({ accent, accentRgb }: PlaybackVizProps) {
     // gently" feel that reads as breath.
     const envs = LAYERS.map(() => new Float32Array(CONTROL_POINTS));
 
+    // Feature detection: ctx.filter (used for per-layer Gaussian
+    // blur) only landed in Safari/iPadOS 17. On older versions the
+    // assignment is silently ignored, leaving hard-edged shapes.
+    // When unsupported we compensate with bigger shadowBlur + an
+    // extra fill pass so layers still bleed into each other via
+    // their halos rather than stacking like sharp foils.
+    const supportsFilter = typeof (c2d as { filter?: string }).filter !== "undefined";
+
     let raf = 0;
     const draw = () => {
       raf = requestAnimationFrame(draw);
-      if (!fitToParent()) return;
+      const dims = fitToParent();
+      if (!dims) return;
 
-      const W = canvas.width;
-      const H = canvas.height;
+      const W = dims.cssW;
+      const H = dims.cssH;
+      // clearRect uses transformed coords (CSS pixels) since we
+      // setTransform'd to (dpr, dpr). H/W are CSS, so this clears
+      // the entire visible area.
       c2d.clearRect(0, 0, W, H);
 
       if (analyser) {
@@ -243,22 +258,31 @@ export function CloudFlow({ accent, accentRgb }: PlaybackVizProps) {
         // for the cloud edge — it diffuses the shape so layers
         // bleed into each other instead of stacking like sharp foils.
         // shadowBlur stacks on top of filter blur for extra halo.
-        c2d.filter = `blur(${layer.blurPx}px)`;
+        //
+        // On Safari < 17 / iPadOS < 17, ctx.filter is undefined; we
+        // skip the assignment and lean entirely on shadowBlur (with
+        // a larger radius) for the cloud effect. The result is less
+        // soft but still nebulous.
+        if (supportsFilter) {
+          c2d.filter = `blur(${layer.blurPx}px)`;
+        }
         c2d.fillStyle = `rgba(${accentRgb},${layer.alpha})`;
-        c2d.shadowColor = `rgba(${accentRgb},${Math.min(0.7, layer.alpha * 2.2)})`;
-        c2d.shadowBlur = layer.blurPx * 2.4;
+        const shadowFactor = supportsFilter ? 2.4 : 4.2;
+        c2d.shadowColor = `rgba(${accentRgb},${Math.min(0.8, layer.alpha * 2.4)})`;
+        c2d.shadowBlur = layer.blurPx * shadowFactor;
         c2d.fill();
         // Double-fill the bass / mid layers (li=0,1) to push them
         // brighter without affecting the higher detail layers.
         if (li <= 1) {
-          c2d.shadowBlur = layer.blurPx * 1.2;
+          c2d.shadowBlur = layer.blurPx * (supportsFilter ? 1.2 : 2.4);
           c2d.fill();
         }
       }
 
       // Reset state we touched so it doesn't carry into the next
-      // frame's clear.
-      c2d.filter = "none";
+      // frame's clear. Guard `filter` for older Safari where the
+      // property doesn't exist.
+      if (supportsFilter) c2d.filter = "none";
       c2d.shadowBlur = 0;
     };
     raf = requestAnimationFrame(draw);
