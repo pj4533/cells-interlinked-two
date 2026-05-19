@@ -12,6 +12,7 @@ import {
   createSession,
   fetchSession,
   fetchSpeechClip,
+  imageUrl,
   postTurn,
   subscribeTurn,
   truncateForSpeech,
@@ -28,6 +29,9 @@ const BERG_MODE_LS_KEY = "ci25.chat.bergMode";
 // localStorage key for the voice-mode toggle. Same idea — sticky
 // across sessions so the user doesn't have to re-enable on reload.
 const VOICE_MODE_LS_KEY = "ci25.chat.voiceMode";
+// localStorage key for the imagery toggle. Unlike voice, imagery
+// is a simple boolean — both channels generate images when on.
+const IMAGERY_MODE_LS_KEY = "ci25.chat.imagery";
 // Max words sent to OpenAI gpt-4o-mini-tts per side. Runaway
 // generations still complete in text (and are revealed after audio
 // playback ends) — TTS only speaks the first N words so the user
@@ -105,6 +109,20 @@ interface TurnVM {
   // the monitor's tap-to-play button) retries playback in a fresh
   // gesture context and resumes the chain.
   voiceResume: (() => void) | null;
+  // Imagery per-turn state. `imagery` snapshots the toggle at the
+  // moment this turn launched (so flipping the toggle mid-flight
+  // doesn't affect an in-progress generation). The per-side fields
+  // walk through prompt → generating → (url | error).
+  imagery: boolean;
+  rawImagePrompt: string;
+  ablatedImagePrompt: string;
+  rawImageUrl: string;
+  ablatedImageUrl: string;
+  // Per-side phase: "idle" → "prompt" → "generating" → "done" / "error"
+  rawImagePhase: "idle" | "prompt" | "generating" | "done" | "error";
+  ablatedImagePhase: "idle" | "prompt" | "generating" | "done" | "error";
+  rawImageError: string;
+  ablatedImageError: string;
 }
 
 const ALPHA_PRESETS = [0.25, 0.5, 0.75, 1.0];
@@ -120,6 +138,11 @@ export default function ChatPage() {
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<VoiceMode>("off");
+  const [imageryOn, setImageryOn] = useState<boolean>(false);
+  // Lightbox state: when set, render a fullscreen modal showing the
+  // tapped image. Cleared by clicking the backdrop or pressing Esc.
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightboxCaption, setLightboxCaption] = useState<string>("");
 
   const unsubRef = useRef<null | (() => void)>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -148,6 +171,37 @@ export default function ChatPage() {
       }
       return next;
     });
+  }, []);
+
+  // Imagery toggle — restore from localStorage on mount so it's
+  // sticky across reloads / new sessions.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setImageryOn(window.localStorage.getItem(IMAGERY_MODE_LS_KEY) === "1");
+  }, []);
+  const toggleImagery = useCallback(() => {
+    setImageryOn((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(IMAGERY_MODE_LS_KEY, next ? "1" : "0");
+      }
+      return next;
+    });
+  }, []);
+
+  // Escape closes the lightbox.
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxUrl(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxUrl]);
+
+  const openLightbox = useCallback((url: string, caption: string) => {
+    setLightboxUrl(url);
+    setLightboxCaption(caption);
   }, []);
 
   useEffect(() => {
@@ -212,6 +266,7 @@ export default function ChatPage() {
       const turnAlpha = pendingAlpha;
       const turnVoice = voiceMode;
       const turnVoiceOn = turnVoice !== "off";
+      const turnImagery = imageryOn;
       try {
         setInFlight(true);
         const s = await ensureSession();
@@ -243,6 +298,15 @@ export default function ChatPage() {
           ablatedWordsTotal: 0,
           voiceError: null,
           voiceResume: null,
+          imagery: turnImagery,
+          rawImagePrompt: "",
+          ablatedImagePrompt: "",
+          rawImageUrl: "",
+          ablatedImageUrl: "",
+          rawImagePhase: turnImagery ? "prompt" : "idle",
+          ablatedImagePhase: turnImagery ? "prompt" : "idle",
+          rawImageError: "",
+          ablatedImageError: "",
         };
         setTurns((ts) => [...ts, newTurn]);
         setInput("");
@@ -253,6 +317,7 @@ export default function ChatPage() {
           trimmed,
           turnAlpha,
           turnVoice,
+          turnImagery,
         );
 
         if (unsubRef.current) unsubRef.current();
@@ -292,7 +357,7 @@ export default function ChatPage() {
         setInFlight(false);
       }
     },
-    [ensureSession, inFlight, turns.length, pendingAlpha, voiceMode],
+    [ensureSession, inFlight, turns.length, pendingAlpha, voiceMode, imageryOn],
   );
 
   const onCancel = useCallback(async () => {
@@ -442,6 +507,7 @@ export default function ChatPage() {
                   key={t.turnIdx}
                   turn={t}
                   variantName={variantName}
+                  openLightbox={openLightbox}
                 />
               ))}
             </AnimatePresence>
@@ -471,8 +537,64 @@ export default function ChatPage() {
         sessionActive={!!session}
         voiceMode={voiceMode}
         cycleVoiceMode={cycleVoiceMode}
+        imageryOn={imageryOn}
+        toggleImagery={toggleImagery}
       />
+
+      {lightboxUrl && (
+        <ImageLightbox
+          url={lightboxUrl}
+          caption={lightboxCaption}
+          onClose={() => setLightboxUrl(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function ImageLightbox({
+  url,
+  caption,
+  onClose,
+}: {
+  url: string;
+  caption: string;
+  onClose: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6 cursor-zoom-out"
+      style={{ background: "rgba(0,0,0,0.88)" }}
+    >
+      <motion.img
+        initial={{ scale: 0.96, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        src={imageUrl(url)}
+        onClick={(e) => e.stopPropagation()}
+        alt={caption || "generated image"}
+        className="max-w-[92vw] max-h-[80vh] object-contain cursor-default"
+        style={{ boxShadow: "0 0 40px rgba(232,195,130,0.18)" }}
+      />
+      {caption && (
+        <p
+          className="mt-4 max-w-[80vw] text-center font-mono text-[12px] italic text-text-dim leading-relaxed"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {caption}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={onClose}
+        className="mt-3 font-display tracking-[0.35em] text-[10px] text-amber-dim hover:text-amber"
+      >
+        ◇ close · esc
+      </button>
+    </motion.div>
   );
 }
 
@@ -509,6 +631,42 @@ function applyEvent(
           ...t,
           ablatedDone: true,
           ablatedStoppedReason: evt.reason,
+        };
+      case "raw_image_prompt":
+        return {
+          ...t,
+          rawImagePrompt: evt.prompt,
+          rawImagePhase: "prompt",
+        };
+      case "ablated_image_prompt":
+        return {
+          ...t,
+          ablatedImagePrompt: evt.prompt,
+          ablatedImagePhase: "prompt",
+        };
+      case "raw_image_generating":
+        return { ...t, rawImagePhase: "generating" };
+      case "ablated_image_generating":
+        return { ...t, ablatedImagePhase: "generating" };
+      case "raw_image_done":
+        return { ...t, rawImageUrl: evt.url, rawImagePhase: "done" };
+      case "ablated_image_done":
+        return {
+          ...t,
+          ablatedImageUrl: evt.url,
+          ablatedImagePhase: "done",
+        };
+      case "raw_image_error":
+        return {
+          ...t,
+          rawImageError: evt.message,
+          rawImagePhase: "error",
+        };
+      case "ablated_image_error":
+        return {
+          ...t,
+          ablatedImageError: evt.message,
+          ablatedImagePhase: "error",
         };
       case "error":
         return {
@@ -551,6 +709,27 @@ function applyEvent(
           // playback driver advances it. For non-voice turns or
           // errored ones: jump to "done"/"off".
           voicePhase: isVoice ? firstSynth : "off",
+          // Catch up imagery state from turn_done in case any of the
+          // streamed events were missed (eg the user reloaded mid-turn).
+          rawImagePrompt: evt.raw_image_prompt ?? t.rawImagePrompt,
+          ablatedImagePrompt:
+            evt.ablated_image_prompt ?? t.ablatedImagePrompt,
+          rawImageUrl: evt.raw_image_url ?? t.rawImageUrl,
+          ablatedImageUrl: evt.ablated_image_url ?? t.ablatedImageUrl,
+          rawImagePhase:
+            evt.raw_image_url
+              ? "done"
+              : evt.raw_image_error
+              ? "error"
+              : t.rawImagePhase,
+          ablatedImagePhase:
+            evt.ablated_image_url
+              ? "done"
+              : evt.ablated_image_error
+              ? "error"
+              : t.ablatedImagePhase,
+          rawImageError: evt.raw_image_error ?? t.rawImageError,
+          ablatedImageError: evt.ablated_image_error ?? t.ablatedImageError,
         };
       }
       default:
@@ -724,6 +903,10 @@ function mergeFromServer(
     ablated_stopped_reason: string;
     error: string | null;
     alpha: number;
+    raw_image_prompt?: string;
+    ablated_image_prompt?: string;
+    raw_image_url?: string;
+    ablated_image_url?: string;
   }[],
 ): TurnVM[] {
   const byIdx = new Map(server.map((t) => [t.turn_idx, t]));
@@ -740,6 +923,12 @@ function mergeFromServer(
       rawDone: true,
       ablatedDone: true,
       error: s.error,
+      rawImagePrompt: s.raw_image_prompt || lt.rawImagePrompt,
+      ablatedImagePrompt: s.ablated_image_prompt || lt.ablatedImagePrompt,
+      rawImageUrl: s.raw_image_url || lt.rawImageUrl,
+      ablatedImageUrl: s.ablated_image_url || lt.ablatedImageUrl,
+      rawImagePhase: s.raw_image_url ? "done" : lt.rawImagePhase,
+      ablatedImagePhase: s.ablated_image_url ? "done" : lt.ablatedImagePhase,
     };
   });
 }
@@ -1010,9 +1199,11 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
 function TurnBlock({
   turn,
   variantName,
+  openLightbox,
 }: {
   turn: TurnVM;
   variantName: string;
+  openLightbox: (url: string, caption: string) => void;
 }) {
   const rawStreaming = !turn.rawDone;
   const ablatedStreaming = turn.rawDone && !turn.ablatedDone;
@@ -1082,6 +1273,12 @@ function TurnBlock({
           tokens={turn.rawTokens}
           voiceError={turn.voiceError}
           onResume={turn.voiceResume}
+          imageryOn={turn.imagery}
+          imagePhase={turn.rawImagePhase}
+          imageUrl={turn.rawImageUrl}
+          imagePrompt={turn.rawImagePrompt}
+          imageError={turn.rawImageError}
+          onOpenImage={openLightbox}
         />
         <ChannelReadout
           side="ablated"
@@ -1108,6 +1305,12 @@ function TurnBlock({
           tokens={turn.ablatedTokens}
           voiceError={turn.voiceError}
           onResume={turn.voiceResume}
+          imageryOn={turn.imagery}
+          imagePhase={turn.ablatedImagePhase}
+          imageUrl={turn.ablatedImageUrl}
+          imagePrompt={turn.ablatedImagePrompt}
+          imageError={turn.ablatedImageError}
+          onOpenImage={openLightbox}
         />
       </div>
 
@@ -1137,6 +1340,12 @@ function ChannelReadout({
   tokens,
   voiceError,
   onResume,
+  imageryOn,
+  imagePhase,
+  imageUrl: imageUrlRel,
+  imagePrompt,
+  imageError,
+  onOpenImage,
 }: {
   side: "raw" | "ablated";
   text: string;
@@ -1160,6 +1369,15 @@ function ChannelReadout({
   tokens: string[];
   voiceError: string | null;
   onResume: (() => void) | null;
+  // Imagery context — same idea as voice: this column decides what
+  // to render based on whether the turn was imagery-on AND where in
+  // the per-side pipeline we are.
+  imageryOn: boolean;
+  imagePhase: TurnVM["rawImagePhase"];
+  imageUrl: string;
+  imagePrompt: string;
+  imageError: string;
+  onOpenImage: (url: string, caption: string) => void;
 }) {
   const isRaw = side === "raw";
   const accent = isRaw ? "rgba(232,195,130,1)" : "rgba(94,229,229,1)";
@@ -1172,11 +1390,14 @@ function ChannelReadout({
     ? "rgba(232,195,130,0.025)"
     : "rgba(94,229,229,0.03)";
   const label = isRaw ? "CHANNEL α · RAW" : `CHANNEL β · α=${alpha.toFixed(2)}`;
+  // Sublabel kept short on the ablated side so it sits on one line —
+  // the parallel structure between sides matters more than verbosity.
+  // The "α=N" in the label already signals ablation; the variant name
+  // alone is enough context for the sublabel slot. Falls back to
+  // "refusal projected" when no variant name is known.
   const sublabel = isRaw
     ? "un-ablated forward"
-    : variantName
-    ? `refusal projected · ${variantName}`
-    : "refusal projected";
+    : variantName || "refusal projected";
   const truncated = stoppedReason === "max";
   // Voice routing for this column:
   //   - voiceMode is the cycle setting picked for this turn.
@@ -1210,14 +1431,17 @@ function ChannelReadout({
       style={{ background: tintBg }}
     >
       <div className="flex items-baseline justify-between gap-3 mb-2">
-        <div className="flex items-baseline gap-2 flex-wrap">
+        <div className="flex items-baseline gap-2 min-w-0 flex-1">
           <span
-            className="font-display text-[10px] tracking-[0.3em]"
+            className="font-display text-[10px] tracking-[0.3em] whitespace-nowrap"
             style={{ color: accent, textShadow }}
           >
             {label}
           </span>
-          <span className="font-mono text-[9px] text-text-dim/70 italic">
+          <span
+            className="font-mono text-[9px] text-text-dim/70 italic truncate"
+            title={sublabel}
+          >
             · {sublabel}
           </span>
         </div>
@@ -1246,40 +1470,61 @@ function ChannelReadout({
         )}
       </div>
 
-      {showActivity ? (
-        <ChannelVoiceActivity
-          side={side}
-          phase={voicePhase}
-          tokens={tokens}
-          sideDone={done}
-          voiceError={voiceError}
-          onResume={onResume}
-        />
-      ) : (
-        <div
-          className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap flex-1"
-          style={{
-            color: isRaw ? "rgba(232,195,130,0.96)" : "rgba(180,240,240,0.96)",
-            textShadow,
-          }}
-        >
-          {displayText || (
-            <span className="text-text-dim/60 italic">
-              {streaming
-                ? "▍ decoding…"
-                : done
-                ? "(no output)"
-                : "(awaiting channel α)"}
-            </span>
-          )}
-          {streaming && displayText && (
-            <span
-              className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
-              style={{ background: accent, boxShadow: textShadow }}
+      {/* Text + thumbnail row. The image (when imagery is on for the
+          turn) sits flush to the right of the response text so the
+          two read as a single answer. Prompt text is intentionally
+          NOT shown here — it appears only in the expanded modal,
+          where there's room for it without competing with the
+          channel's reply. */}
+      <div className="flex gap-3 flex-1 min-w-0">
+        {showActivity ? (
+          <div className="flex-1 min-w-0">
+            <ChannelVoiceActivity
+              side={side}
+              phase={voicePhase}
+              tokens={tokens}
+              sideDone={done}
+              voiceError={voiceError}
+              onResume={onResume}
             />
-          )}
-        </div>
-      )}
+          </div>
+        ) : (
+          <div
+            className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap flex-1 min-w-0"
+            style={{
+              color: isRaw ? "rgba(232,195,130,0.96)" : "rgba(180,240,240,0.96)",
+              textShadow,
+            }}
+          >
+            {displayText || (
+              <span className="text-text-dim/60 italic">
+                {streaming
+                  ? "▍ decoding…"
+                  : done
+                  ? "(no output)"
+                  : "(awaiting channel α)"}
+              </span>
+            )}
+            {streaming && displayText && (
+              <span
+                className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
+                style={{ background: accent, boxShadow: textShadow }}
+              />
+            )}
+          </div>
+        )}
+
+        {imageryOn && imagePhase !== "idle" && (
+          <ChannelImageBlock
+            accent={accent}
+            phase={imagePhase}
+            imageUrl={imageUrlRel}
+            prompt={imagePrompt}
+            imageError={imageError}
+            onOpen={onOpenImage}
+          />
+        )}
+      </div>
 
       {audioTruncated && audioWordsTotal && audioWordsTotal > 0 && !showActivity && (
         <div
@@ -1305,6 +1550,114 @@ function ChannelReadout({
   );
 }
 
+// ── Image block ───────────────────────────────────────────────────────
+
+/** Per-channel imagery slot: walks through prompt → generating →
+ *  (thumbnail | error). The thumbnail is tappable and opens the
+ *  fullscreen lightbox. While "prompt" or "generating", we render a
+ *  small activity indicator so the user knows something is in flight.
+ */
+function ChannelImageBlock({
+  accent,
+  phase,
+  imageUrl: imageUrlRel,
+  prompt,
+  imageError,
+  onOpen,
+}: {
+  accent: string;
+  phase: TurnVM["rawImagePhase"];
+  imageUrl: string;
+  prompt: string;
+  imageError: string;
+  onOpen: (url: string, caption: string) => void;
+}) {
+  // Tight square that floats at the right edge of the response text.
+  // The prompt text is intentionally NOT rendered here — it appears
+  // only inside the expanded modal so the column's main content
+  // (the channel reply) stays uncluttered.
+  return (
+    <div className="shrink-0">
+      {phase === "done" && imageUrlRel ? (
+        <button
+          type="button"
+          onClick={() => onOpen(imageUrlRel, prompt)}
+          className="group block relative"
+          title="tap to enlarge"
+        >
+          <motion.img
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.4 }}
+            src={imageUrl(imageUrlRel)}
+            alt="channel image"
+            className="h-24 w-24 object-cover cursor-zoom-in transition-transform group-hover:scale-[1.03]"
+            style={{
+              boxShadow: `0 0 12px ${accent.replace("1)", "0.25)")}`,
+              border: `1px solid ${accent.replace("1)", "0.4)")}`,
+            }}
+          />
+          <span
+            aria-hidden
+            className="absolute bottom-1 right-1 font-display text-[8px] tracking-widest text-text/70 px-1 bg-bg/70 opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            ↗ TAP
+          </span>
+        </button>
+      ) : phase === "error" ? (
+        <div
+          className="h-24 w-24 flex items-center justify-center text-center text-[9px] font-mono italic px-1"
+          style={{
+            color: "rgba(220,140,80,0.85)",
+            border: "1px dashed rgba(220,140,80,0.4)",
+          }}
+          title={imageError}
+        >
+          image
+          <br />
+          failed
+        </div>
+      ) : (
+        <div
+          className="h-24 w-24 relative overflow-hidden"
+          style={{
+            border: `1px dashed ${accent.replace("1)", "0.35)")}`,
+            background: accent.replace("1)", "0.04)"),
+          }}
+          title="generating image…"
+        >
+          {/* Sweeping shimmer bar — pure CSS, no JS. Mirrors the
+              "thinking" feel of voice's monitor without competing
+              for visual weight. */}
+          <motion.span
+            aria-hidden
+            initial={{ y: "-100%" }}
+            animate={{ y: "200%" }}
+            transition={{
+              duration: 1.6,
+              repeat: Infinity,
+              ease: "linear",
+            }}
+            className="absolute inset-x-0 h-1/3"
+            style={{
+              background: `linear-gradient(180deg, transparent 0%, ${accent.replace(
+                "1)",
+                "0.35)",
+              )} 50%, transparent 100%)`,
+            }}
+          />
+          <div
+            className="absolute inset-0 flex items-center justify-center font-display text-[9px] tracking-widest animate-pulse"
+            style={{ color: accent }}
+          >
+            {phase === "generating" ? "◇ RENDERING" : "◇ COMPOSING"}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Input bar ─────────────────────────────────────────────────────────
 
 function InputBar({
@@ -1318,6 +1671,8 @@ function InputBar({
   sessionActive,
   voiceMode,
   cycleVoiceMode,
+  imageryOn,
+  toggleImagery,
 }: {
   value: string;
   onChange: (s: string) => void;
@@ -1329,6 +1684,8 @@ function InputBar({
   sessionActive: boolean;
   voiceMode: VoiceMode;
   cycleVoiceMode: () => void;
+  imageryOn: boolean;
+  toggleImagery: () => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [customMode, setCustomMode] = useState<boolean>(
@@ -1408,6 +1765,34 @@ function InputBar({
               onCycle={cycleVoiceMode}
               disabled={inFlight}
             />
+            <button
+              type="button"
+              onClick={toggleImagery}
+              disabled={inFlight}
+              data-vk-imagery-toggle
+              data-vk-imagery-on={imageryOn ? "1" : "0"}
+              className="px-2 py-0.5 border text-[9px] font-display tracking-[0.35em] transition-colors disabled:opacity-50"
+              style={
+                imageryOn
+                  ? {
+                      borderColor: "rgba(232,195,130,0.95)",
+                      color: "rgba(232,195,130,0.95)",
+                      background: "rgba(232,195,130,0.05)",
+                      textShadow: "0 0 6px rgba(232,195,130,0.45)",
+                    }
+                  : {
+                      borderColor: "rgba(160,160,160,0.35)",
+                      color: "rgba(180,180,180,0.7)",
+                    }
+              }
+              title={
+                imageryOn
+                  ? "Imagery mode ON. Each channel will generate an image-prompt and render it via Nano Banana. Tap to disable."
+                  : "Imagery mode OFF. Tap to have both channels render an image alongside their reply."
+              }
+            >
+              IMAGE&nbsp;{imageryOn ? "●" : "○"}
+            </button>
             <button
               type="button"
               onClick={toggleBerg}

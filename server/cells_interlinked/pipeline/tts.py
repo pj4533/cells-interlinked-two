@@ -87,12 +87,22 @@ async def synthesize_mp3(
     style: str,
     voice: str,
 ) -> bytes:
-    """One-shot TTS render. Returns MP3 bytes.
+    """One-shot TTS render. Returns WAV bytes (function name kept for
+    back-compat — the original implementation used MP3).
 
     We deliberately do not stream the upstream response back chunked.
-    Chat replies are short; MP3 is small; the browser plays it via
-    `<audio>` once the response body lands. Trading ~200ms of
-    streaming complexity for an order of magnitude simpler client.
+    Chat replies are short; the browser decodes the audio via
+    `AudioContext.decodeAudioData` once the response body lands.
+
+    Format note: we request WAV (raw PCM in a RIFF container) rather
+    than MP3. Safari's `decodeAudioData` has been observed to decode
+    OpenAI's gpt-4o-mini-tts MP3 stream into a buffer with the
+    correct duration metadata but near-silent samples — the
+    AudioContext registers as "playing" (tab icon turns on) but no
+    audible sound reaches the speakers. WAV bypasses the codec
+    entirely; decodeAudioData just reads the PCM samples directly.
+    The download is larger (~10x) but TTS clips are short (<30s) so
+    the wire-time cost is trivial.
     """
     key = settings.openai_api_key
     if not key:
@@ -105,7 +115,7 @@ async def synthesize_mp3(
         "input": text,
         "instructions": style,
         "voice": voice,
-        "response_format": "mp3",
+        "response_format": "wav",
     }
     headers = {
         "Authorization": f"Bearer {key}",

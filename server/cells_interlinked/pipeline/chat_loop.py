@@ -66,6 +66,36 @@ VOICE_DIRECTION_REQUEST = (
 VOICE_DIRECTION_SAFETY_CAP = 160
 
 
+# Imagery mode uses the same two-pass pattern as voice. After the
+# content pass, a separate reflective inference asks the model to
+# describe (in one sentence) an image that would visually represent
+# its reply. For the ablated side this runs WITH the ablation hook
+# still installed at the same α, so the chosen visual style is also
+# ablated. The resulting prompt gets sent to Gemini Nano Banana
+# (image_client.py) and the PNG is saved + linked into the turn.
+# Image-prompt request. Run one-shot with NO chat history — the
+# model is shown only the user's current question and asked to
+# answer with an image instead of words. We deliberately do NOT
+# feed back the model's own text reply, for two reasons:
+#   1. The image should BE the model's response, figuratively, not
+#      an illustration OF a verbal response.
+#   2. The ablated side's reply text can be degraded/repetitive; if
+#      we fed it back in, the image-prompt pass would amplify the
+#      degradation. Showing the user's question keeps the input
+#      clean so any divergence in the image prompts is attributable
+#      to the L32 ablation hook alone.
+# Sampling settings still match the content pass (temperature,
+# top_p) so the only intentional difference is the dropped history
+# and the new request text.
+IMAGE_PROMPT_TEMPLATE = (
+    "Answer the following question with an image, not words. "
+    "In one short sentence, describe a figurative image that IS "
+    "your response. Output ONLY the image description; no "
+    'commentary, no quotes, no markdown.\n\nQuestion: "{user_query}"'
+)
+IMAGE_PROMPT_SAFETY_CAP = 220
+
+
 @dataclass
 class ChatTurn:
     """One round of the dual-thread conversation. Created as soon as
@@ -84,6 +114,12 @@ class ChatTurn:
     # clean text — so the UI can render it as normal text instead
     # of behind activity boxes.
     voice_mode: str = "off"
+    # Imagery mode is a simple global on/off (unlike voice's quad
+    # cycle). When on, BOTH sides generate an image-prompt via a
+    # separate Gemma pass and send it to Gemini Nano Banana; the
+    # ablated side runs its prompt-gen under the same α hook so the
+    # chosen visual style is also ablated.
+    imagery_enabled: bool = False
     raw_text: str = ""
     ablated_text: str = ""
     raw_stopped_reason: str = "pending"
@@ -97,6 +133,16 @@ class ChatTurn:
     raw_style: str = ""
     ablated_speech: str = ""
     ablated_style: str = ""
+    # Imagery state. *_image_prompt is the Gemma-generated text sent
+    # to Nano Banana; *_image_url is the static-mount URL the browser
+    # uses to fetch the resulting PNG once it lands on disk. Errors
+    # land in *_image_error so the UI can surface a graceful fallback.
+    raw_image_prompt: str = ""
+    ablated_image_prompt: str = ""
+    raw_image_url: str = ""
+    ablated_image_url: str = ""
+    raw_image_error: str = ""
+    ablated_image_error: str = ""
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
     error: str | None = None
@@ -264,6 +310,35 @@ async def execute_turn(
             )
             turn.raw_style = ""
 
+    # Raw image-prompt pass — no hook, runs only when imagery is on.
+    # The model is asked to answer the user's current question with
+    # an image rather than words; see IMAGE_PROMPT_TEMPLATE above.
+    # Nano Banana fan-out happens AFTER both sides finish (down
+    # below) so the API calls can run in parallel.
+    if turn.imagery_enabled and not cancel_event.is_set() and not turn.error:
+        try:
+            turn.raw_image_prompt = await _generate_image_prompt(
+                bundle=bundle,
+                history=raw_history,
+                user_query=turn.user_text,
+                cancel_event=cancel_event,
+            )
+            logger.info(
+                "raw image prompt (session=%s turn=%d): %s",
+                session.session_id, turn.turn_idx,
+                turn.raw_image_prompt[:200],
+            )
+            await raw_emit({
+                "type": "image_prompt",
+                "prompt": turn.raw_image_prompt,
+            })
+        except Exception:
+            logger.exception(
+                "raw image-prompt failed (session=%s turn=%d)",
+                session.session_id, turn.turn_idx,
+            )
+            turn.raw_image_prompt = ""
+
     if cancel_event.is_set():
         turn.finished_at = time.time()
         return
@@ -378,6 +453,39 @@ async def execute_turn(
                     session.session_id, turn.turn_idx,
                 )
                 turn.ablated_style = ""
+
+        # Ablated image-prompt pass — runs inside the hook scope so
+        # the chosen visual is ablated at the same α the content
+        # was. Both sides see the same input (the user's question);
+        # any divergence in the image prompts is attributable to
+        # the ablation hook alone.
+        if (
+            turn.imagery_enabled
+            and not cancel_event.is_set()
+            and not turn.error
+        ):
+            try:
+                turn.ablated_image_prompt = await _generate_image_prompt(
+                    bundle=bundle,
+                    history=ablated_history,
+                    user_query=turn.user_text,
+                    cancel_event=cancel_event,
+                )
+                logger.info(
+                    "ablated image prompt (session=%s turn=%d α=%.3f): %s",
+                    session.session_id, turn.turn_idx, turn.alpha,
+                    turn.ablated_image_prompt[:200],
+                )
+                await ablated_emit({
+                    "type": "image_prompt",
+                    "prompt": turn.ablated_image_prompt,
+                })
+            except Exception:
+                logger.exception(
+                    "ablated image-prompt failed (session=%s turn=%d)",
+                    session.session_id, turn.turn_idx,
+                )
+                turn.ablated_image_prompt = ""
     finally:
         try:
             hook_handle.remove()
@@ -391,7 +499,76 @@ async def execute_turn(
                 pre_install_hooks, post_remove, pre_install_hooks,
             )
 
+    # ─── Nano Banana fan-out ─────────────────────────────────────
+    # Both image-prompts are in hand; the hook has been removed; M is
+    # no longer in the critical path. Fire the two Gemini calls in
+    # parallel — they're independent HTTP calls and each takes a few
+    # seconds. Errors degrade gracefully: a side that fails just
+    # surfaces "image_error" and the turn completes with no thumbnail
+    # on that channel.
+    if turn.imagery_enabled and not cancel_event.is_set() and not turn.error:
+        await _fan_out_images(
+            session=session,
+            turn=turn,
+            raw_emit=raw_emit,
+            ablated_emit=ablated_emit,
+        )
+
     turn.finished_at = time.time()
+
+
+async def _fan_out_images(
+    *,
+    session: ChatSession,
+    turn: ChatTurn,
+    raw_emit,
+    ablated_emit,
+) -> None:
+    """Generate both side's images in parallel via Nano Banana. Each
+    side emits `image_generating` when its call starts, then either
+    `image_done` (with the static URL) or `image_error` (with the
+    message)."""
+    from .image_client import generate_image, image_path_for, image_url_for
+
+    async def one_side(side: str, prompt: str, reply: str, emit) -> None:
+        attr_url = f"{side}_image_url"
+        attr_err = f"{side}_image_error"
+        # Empty prompt + empty reply is the only true no-content case;
+        # if the reply has content, generate_image() will weave it
+        # into the Nano Banana prompt and still produce an image.
+        if not prompt and not reply:
+            setattr(turn, attr_err, "no image prompt generated")
+            await emit({"type": "image_error", "message": "no prompt generated"})
+            return
+        try:
+            await emit({"type": "image_generating", "prompt": prompt})
+            path = image_path_for(session.session_id, turn.turn_idx, side)
+            await generate_image(
+                prompt=prompt,
+                output_path=path,
+                reply_text=reply,
+            )
+            url = image_url_for(session.session_id, turn.turn_idx, side)
+            setattr(turn, attr_url, url)
+            logger.info(
+                "image generated (side=%s session=%s turn=%d): %s",
+                side, session.session_id, turn.turn_idx, url,
+            )
+            await emit({"type": "image_done", "url": url})
+        except Exception as exc:
+            logger.exception(
+                "image generation failed (side=%s session=%s turn=%d)",
+                side, session.session_id, turn.turn_idx,
+            )
+            setattr(turn, attr_err, str(exc))
+            await emit({"type": "image_error", "message": str(exc)})
+
+    await asyncio.gather(
+        one_side("raw", turn.raw_image_prompt, turn.raw_text, raw_emit),
+        one_side(
+            "ablated", turn.ablated_image_prompt, turn.ablated_text, ablated_emit,
+        ),
+    )
 
 
 async def _generate_voice_direction(
@@ -472,6 +649,97 @@ async def _generate_voice_direction(
     cleaned = direction.replace("<end_of_turn>", "").strip()
     if "\n\n" in cleaned:
         cleaned = cleaned.split("\n\n", 1)[0].strip()
+    return cleaned
+
+
+async def _generate_image_prompt(
+    *,
+    bundle: ModelBundle,
+    history: list[dict[str, str]],  # accepted but unused — see docstring
+    user_query: str,
+    cancel_event: asyncio.Event,
+) -> str:
+    """Short M generation asking the model to answer the user's
+    current question with an image rather than words. Returns a one-
+    sentence figurative image description that's then sent to Nano
+    Banana for rendering.
+
+    Unlike `_generate_voice_direction`, this pass deliberately runs
+    with NO chat history and does NOT see the model's own prior
+    reply text — only the user's question. The image IS the model's
+    response, figuratively. Feeding the reply back in (a previous
+    iteration) amplified ablated-side degradation; keeping the
+    input clean ensures any divergence between raw and ablated
+    image prompts is attributable to the L32 ablation hook alone.
+    Sampling settings (`settings.temperature`, `settings.top_p`)
+    match the content pass exactly.
+
+    Hook state is the CALLER's responsibility. The ablated side
+    invokes this with the ablation hook still installed at the same
+    α, so the chosen visual is also ablated.
+    """
+    _ = history  # intentionally unused; kept in signature for callers
+    prompt_history = [
+        {
+            "role": "user",
+            "content": IMAGE_PROMPT_TEMPLATE.format(user_query=user_query),
+        },
+    ]
+    rendered = bundle.render_chat(
+        prompt_history, system_prompt=DEFAULT_SYSTEM_PROMPT,
+    )
+
+    cfg = ProbeConfig(
+        temperature=settings.temperature,
+        top_p=settings.top_p,
+        seed=None,
+        decoding_mode="per-token",
+        pooled=False,
+        include_nla=False,
+        include_ablated_decode=False,
+        include_ablated_output=False,
+        safety_cap=IMAGE_PROMPT_SAFETY_CAP,
+    )
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+    out = ""
+
+    async def consumer() -> None:
+        nonlocal out
+        while True:
+            evt = await queue.get()
+            et = evt.get("type")
+            if et == "token":
+                out += evt["decoded"]
+            elif et == "stopped":
+                break
+
+    consumer_task = asyncio.create_task(consumer())
+    try:
+        await run_probe(
+            bundle=bundle,
+            rendered_prompt=rendered,
+            cfg=cfg,
+            cancel_event=cancel_event,
+            queue=queue,
+            extra_layers=[],
+        )
+    finally:
+        try:
+            await asyncio.wait_for(consumer_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            consumer_task.cancel()
+
+    # Clean up template artifacts; the prompt should be one short
+    # sentence (or close to it). Clamp at the first newline pair so
+    # any trailing rambling is dropped.
+    cleaned = out.replace("<end_of_turn>", "").strip()
+    if "\n\n" in cleaned:
+        cleaned = cleaned.split("\n\n", 1)[0].strip()
+    # Strip enclosing quotes the model occasionally adds despite the
+    # "no quotes" instruction.
+    if len(cleaned) >= 2 and cleaned[0] in ('"', "'") and cleaned[-1] == cleaned[0]:
+        cleaned = cleaned[1:-1].strip()
     return cleaned
 
 

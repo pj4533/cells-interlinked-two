@@ -102,6 +102,13 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   -- Per-turn α for the ablated pass. NULL on legacy rows; the
   -- session's alpha is used as a fallback on read.
   alpha                   REAL,
+  -- Imagery state. Populated only when imagery was enabled for the
+  -- turn AND that side's Nano Banana call succeeded. The URLs are
+  -- relative paths into the /chat-images static mount.
+  raw_image_prompt        TEXT NOT NULL DEFAULT '',
+  ablated_image_prompt    TEXT NOT NULL DEFAULT '',
+  raw_image_url           TEXT NOT NULL DEFAULT '',
+  ablated_image_url       TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (session_id, turn_idx)
 );
 
@@ -149,12 +156,24 @@ async def init_db(path: Path) -> None:
         ):
             if col not in cols:
                 await db.execute(f"ALTER TABLE probes ADD COLUMN {col} {typ}")
-        # chat_turns: per-turn alpha (column added after initial release).
+        # chat_turns: per-turn alpha + imagery columns added after
+        # initial release. Idempotent ALTERs for any column missing
+        # on an existing DB.
         cur = await db.execute("PRAGMA table_info(chat_turns)")
         chat_cols = {row[1] for row in await cur.fetchall()}
         await cur.close()
         if "alpha" not in chat_cols:
             await db.execute("ALTER TABLE chat_turns ADD COLUMN alpha REAL")
+        for col in (
+            "raw_image_prompt",
+            "ablated_image_prompt",
+            "raw_image_url",
+            "ablated_image_url",
+        ):
+            if col not in chat_cols:
+                await db.execute(
+                    f"ALTER TABLE chat_turns ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
         await db.execute(
             "INSERT OR IGNORE INTO autorun_state "
             "(id, running, last_change_at, total_runs, last_run_id, last_event) "
@@ -599,6 +618,10 @@ async def upsert_chat_turn(
     finished_at: float | None,
     error: str | None,
     alpha: float,
+    raw_image_prompt: str = "",
+    ablated_image_prompt: str = "",
+    raw_image_url: str = "",
+    ablated_image_url: str = "",
 ) -> None:
     """Write the canonical state of one turn. Called once at turn
     completion (or with finished_at=None to record an in-flight row,
@@ -610,8 +633,10 @@ async def upsert_chat_turn(
             "INSERT INTO chat_turns "
             "(session_id, turn_idx, user_text, raw_text, ablated_text, "
             " raw_stopped_reason, ablated_stopped_reason, started_at, "
-            " finished_at, error, alpha) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            " finished_at, error, alpha, "
+            " raw_image_prompt, ablated_image_prompt, "
+            " raw_image_url, ablated_image_url) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(session_id, turn_idx) DO UPDATE SET "
             "  user_text=excluded.user_text, "
             "  raw_text=excluded.raw_text, "
@@ -621,11 +646,17 @@ async def upsert_chat_turn(
             "  started_at=excluded.started_at, "
             "  finished_at=excluded.finished_at, "
             "  error=excluded.error, "
-            "  alpha=excluded.alpha",
+            "  alpha=excluded.alpha, "
+            "  raw_image_prompt=excluded.raw_image_prompt, "
+            "  ablated_image_prompt=excluded.ablated_image_prompt, "
+            "  raw_image_url=excluded.raw_image_url, "
+            "  ablated_image_url=excluded.ablated_image_url",
             (
                 session_id, turn_idx, user_text, raw_text, ablated_text,
                 raw_stopped_reason, ablated_stopped_reason, started_at,
                 finished_at, error, alpha,
+                raw_image_prompt, ablated_image_prompt,
+                raw_image_url, ablated_image_url,
             ),
         )
         if turn_idx == 0:
@@ -654,7 +685,9 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
         async with db.execute(
             "SELECT turn_idx, user_text, raw_text, ablated_text, "
             "       raw_stopped_reason, ablated_stopped_reason, "
-            "       started_at, finished_at, error, alpha "
+            "       started_at, finished_at, error, alpha, "
+            "       raw_image_prompt, ablated_image_prompt, "
+            "       raw_image_url, ablated_image_url "
             "FROM chat_turns WHERE session_id = ? ORDER BY turn_idx",
             (session_id,),
         ) as cur:
@@ -680,6 +713,10 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
                 # Legacy rows (alpha column added later) fall back to
                 # the session-level α the chat was created with.
                 "alpha": t["alpha"] if t["alpha"] is not None else session_alpha,
+                "raw_image_prompt": t["raw_image_prompt"] or "",
+                "ablated_image_prompt": t["ablated_image_prompt"] or "",
+                "raw_image_url": t["raw_image_url"] or "",
+                "ablated_image_url": t["ablated_image_url"] or "",
             }
             for t in trows
         ],

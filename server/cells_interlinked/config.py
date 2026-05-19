@@ -97,5 +97,13 @@ class Settings:
     tts_voice_raw: str = os.getenv("TTS_VOICE_RAW", "sage")
     tts_voice_ablated: str = os.getenv("TTS_VOICE_ABLATED", "sage")
 
+    # Google Gemini image generation ("Nano Banana") for /chat imagery
+    # mode. Server-side only; the key never reaches the browser. Images
+    # are saved under data/chat_images/<session>/<turn>_<side>.png and
+    # served back through the static mount at /chat-images.
+    google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
+    image_model: str = os.getenv("IMAGE_MODEL", "gemini-2.5-flash-image")
+    image_dir: Path = Path(os.getenv("IMAGE_DIR", "./data/chat_images"))
+
 
 settings = Settings()

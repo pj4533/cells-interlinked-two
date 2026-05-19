@@ -129,6 +129,12 @@ class TurnRequest(BaseModel):
     #               on the default prompt
     # Accepts the legacy boolean for back-compat — `true` → "both".
     voice_mode: str = "off"
+    # Per-turn imagery toggle. When true, BOTH sides generate an
+    # image-prompt via a separate Gemma pass and send it to Gemini
+    # Nano Banana; the resulting PNGs are saved under
+    # data/chat_images/ and surfaced as thumbnails next to each
+    # channel's text.
+    imagery_enabled: bool = False
 
 
 class TurnResponse(BaseModel):
@@ -146,6 +152,13 @@ class TurnView(BaseModel):
     finished_at: float | None
     error: str | None
     alpha: float
+    # Imagery state. Empty strings when imagery was off for the turn
+    # (or the side's generation failed); the *_image_url fields are
+    # relative paths into the /chat-images static mount.
+    raw_image_prompt: str = ""
+    ablated_image_prompt: str = ""
+    raw_image_url: str = ""
+    ablated_image_url: str = ""
 
 
 class SessionView(BaseModel):
@@ -168,6 +181,10 @@ def _turn_to_view(t: ChatTurn) -> TurnView:
         finished_at=t.finished_at,
         error=t.error,
         alpha=t.alpha,
+        raw_image_prompt=t.raw_image_prompt,
+        ablated_image_prompt=t.ablated_image_prompt,
+        raw_image_url=t.raw_image_url,
+        ablated_image_url=t.ablated_image_url,
     )
 
 
@@ -258,6 +275,10 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
             started_at=t["started_at"],
             finished_at=t["finished_at"],
             error=t["error"],
+            raw_image_prompt=t.get("raw_image_prompt", ""),
+            ablated_image_prompt=t.get("ablated_image_prompt", ""),
+            raw_image_url=t.get("raw_image_url", ""),
+            ablated_image_url=t.get("ablated_image_url", ""),
         ))
     sessions[sid] = session
     return session
@@ -320,6 +341,7 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
         user_text=req.user_text.strip(),
         alpha=turn_alpha,
         voice_mode=voice_mode,
+        imagery_enabled=bool(req.imagery_enabled),
     )
     session.turns.append(turn)
     log = _TurnEventLog()
@@ -327,24 +349,32 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
     cancel = asyncio.Event()
     _cancels(request)[sid] = cancel
 
-    async def emit_raw(evt: dict) -> None:
-        # Re-tag the generation-loop's "token" event so the client can
-        # distinguish raw from ablated. "stopped" / others pass through
-        # tagged with side so the UI knows when each pass ended.
-        side_evt = {**evt, "side": "raw"}
-        if evt.get("type") == "token":
-            side_evt["type"] = "raw_token"
-        elif evt.get("type") == "stopped":
-            side_evt["type"] = "raw_stopped"
-        await log.append(side_evt)
+    # Per-side event relabeler. Every event flowing out of execute_turn
+    # gets tagged with its channel + a typed name the client SSE
+    # listeners can hook (raw_token vs ablated_token, etc). Image
+    # events follow the same pattern so the browser EventSource
+    # delivers them — without an addEventListener for the exact name,
+    # the event is silently dropped.
+    _RELABEL = {
+        "token": "{side}_token",
+        "stopped": "{side}_stopped",
+        "image_prompt": "{side}_image_prompt",
+        "image_generating": "{side}_image_generating",
+        "image_done": "{side}_image_done",
+        "image_error": "{side}_image_error",
+    }
 
-    async def emit_ablated(evt: dict) -> None:
-        side_evt = {**evt, "side": "ablated"}
-        if evt.get("type") == "token":
-            side_evt["type"] = "ablated_token"
-        elif evt.get("type") == "stopped":
-            side_evt["type"] = "ablated_stopped"
-        await log.append(side_evt)
+    def _make_emitter(side: str):
+        async def emit(evt: dict) -> None:
+            side_evt = {**evt, "side": side}
+            tmpl = _RELABEL.get(evt.get("type", ""))
+            if tmpl:
+                side_evt["type"] = tmpl.format(side=side)
+            await log.append(side_evt)
+        return emit
+
+    emit_raw = _make_emitter("raw")
+    emit_ablated = _make_emitter("ablated")
 
     async def driver() -> None:
         async with session._lock:
@@ -387,6 +417,10 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     finished_at=turn.finished_at,
                     error=turn.error,
                     alpha=turn.alpha,
+                    raw_image_prompt=turn.raw_image_prompt,
+                    ablated_image_prompt=turn.ablated_image_prompt,
+                    raw_image_url=turn.raw_image_url,
+                    ablated_image_url=turn.ablated_image_url,
                 )
             except Exception:
                 logger.exception("failed to persist chat turn")
@@ -408,6 +442,16 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                 "raw_style": turn.raw_style,
                 "ablated_speech": turn.ablated_speech,
                 "ablated_style": turn.ablated_style,
+                # Imagery final state — empty when imagery was off or
+                # the side's generation failed. URLs are relative paths
+                # served by the /chat-images static mount.
+                "imagery_enabled": turn.imagery_enabled,
+                "raw_image_prompt": turn.raw_image_prompt,
+                "ablated_image_prompt": turn.ablated_image_prompt,
+                "raw_image_url": turn.raw_image_url,
+                "ablated_image_url": turn.ablated_image_url,
+                "raw_image_error": turn.raw_image_error,
+                "ablated_image_error": turn.ablated_image_error,
             })
             await log.close()
 

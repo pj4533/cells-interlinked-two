@@ -50,7 +50,11 @@ async def speak(req: SpeakRequest) -> Response:
         raise HTTPException(status_code=502, detail=str(exc))
     return Response(
         content=audio,
-        media_type="audio/mpeg",
+        # WAV (PCM in RIFF) — Safari's decodeAudioData handles this
+        # reliably; MP3 sometimes decoded to a buffer of near-silent
+        # samples on Safari, which is the bug we worked around by
+        # switching format in pipeline/tts.py.
+        media_type="audio/wav",
         headers={
             "Cache-Control": "no-store",
             # The /chat page is on a different port (3001) than the

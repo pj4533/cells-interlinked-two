@@ -29,6 +29,13 @@ export interface ChatTurnView {
   finished_at: number | null;
   error: string | null;
   alpha: number;
+  // Imagery state. Empty strings when imagery was off for the turn
+  // or that side's Nano Banana call failed; *_image_url is the
+  // /chat-images-mount relative path.
+  raw_image_prompt?: string;
+  ablated_image_prompt?: string;
+  raw_image_url?: string;
+  ablated_image_url?: string;
 }
 
 export interface ChatSessionView extends ChatSession {
@@ -66,6 +73,29 @@ export type ChatStreamEvent =
       reason: string;
       total_tokens: number;
     }
+  // Imagery events. Each side independently emits prompt → generating
+  // → (done | error). `generating` is the activity-indicator trigger;
+  // `done` carries the static-mount URL the thumbnail loads from.
+  | {
+      type: "raw_image_prompt" | "ablated_image_prompt";
+      side: "raw" | "ablated";
+      prompt: string;
+    }
+  | {
+      type: "raw_image_generating" | "ablated_image_generating";
+      side: "raw" | "ablated";
+      prompt?: string;
+    }
+  | {
+      type: "raw_image_done" | "ablated_image_done";
+      side: "raw" | "ablated";
+      url: string;
+    }
+  | {
+      type: "raw_image_error" | "ablated_image_error";
+      side: "raw" | "ablated";
+      message: string;
+    }
   | { type: "error"; message: string }
   | {
       type: "turn_done";
@@ -80,6 +110,13 @@ export type ChatStreamEvent =
       raw_style?: string;
       ablated_speech?: string;
       ablated_style?: string;
+      imagery_enabled?: boolean;
+      raw_image_prompt?: string;
+      ablated_image_prompt?: string;
+      raw_image_url?: string;
+      ablated_image_url?: string;
+      raw_image_error?: string;
+      ablated_image_error?: string;
     }
   | { type: "ping" };
 
@@ -112,6 +149,7 @@ export async function postTurn(
   userText: string,
   alpha: number,
   voiceMode: VoiceModeWire = "off",
+  imageryEnabled: boolean = false,
 ): Promise<{ turn_idx: number }> {
   const res = await fetch(`${API}/chat/sessions/${sessionId}/turn`, {
     method: "POST",
@@ -120,6 +158,7 @@ export async function postTurn(
       user_text: userText,
       alpha,
       voice_mode: voiceMode,
+      imagery_enabled: imageryEnabled,
     }),
   });
   if (!res.ok) {
@@ -127,6 +166,16 @@ export async function postTurn(
     throw new Error(`turn submit failed: ${res.status} ${detail}`);
   }
   return res.json();
+}
+
+/** Resolve a /chat-images relative URL to an absolute one the
+ *  browser can fetch. Server-served paths come back as
+ *  "/chat-images/<sess>/<turn>_<side>.png" — we prepend the API
+ *  base so they work even when the page is on port 3001. */
+export function imageUrl(relative: string): string {
+  if (!relative) return "";
+  if (/^https?:\/\//.test(relative)) return relative;
+  return `${API}${relative}`;
 }
 
 /** Cap TTS input so a runaway generation can't tie up the playback
@@ -235,6 +284,18 @@ export function subscribeTurn(
     "ablated_token",
     "raw_stopped",
     "ablated_stopped",
+    // Imagery events — server emits one per side per phase. Without
+    // an addEventListener for the exact name, the browser silently
+    // drops the event, so adding the prompt/generating/done/error
+    // variants here is the wiring that lets the thumbnail UI fire.
+    "raw_image_prompt",
+    "ablated_image_prompt",
+    "raw_image_generating",
+    "ablated_image_generating",
+    "raw_image_done",
+    "ablated_image_done",
+    "raw_image_error",
+    "ablated_image_error",
     "error",
     "turn_done",
     "ping",
