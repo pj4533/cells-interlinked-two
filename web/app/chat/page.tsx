@@ -12,7 +12,6 @@ import {
   createSession,
   fetchSession,
   fetchSpeechClip,
-  imageUrl,
   postTurn,
   subscribeTurn,
   truncateForSpeech,
@@ -20,6 +19,12 @@ import {
   type ChatStreamEvent,
 } from "@/lib/chat";
 import { BergMenu } from "./BergMenu";
+import {
+  ChannelImageBlock,
+  ImageLightbox,
+  useImageLightbox,
+  type ImagePhase,
+} from "./imagery";
 import { prepareClip, primeAudioContext } from "./playback-viz";
 import { ChannelVoiceActivity } from "./VoiceMonitor";
 
@@ -119,8 +124,8 @@ interface TurnVM {
   rawImageUrl: string;
   ablatedImageUrl: string;
   // Per-side phase: "idle" → "prompt" → "generating" → "done" / "error"
-  rawImagePhase: "idle" | "prompt" | "generating" | "done" | "error";
-  ablatedImagePhase: "idle" | "prompt" | "generating" | "done" | "error";
+  rawImagePhase: ImagePhase;
+  ablatedImagePhase: ImagePhase;
   rawImageError: string;
   ablatedImageError: string;
 }
@@ -139,10 +144,7 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<VoiceMode>("off");
   const [imageryOn, setImageryOn] = useState<boolean>(false);
-  // Lightbox state: when set, render a fullscreen modal showing the
-  // tapped image. Cleared by clicking the backdrop or pressing Esc.
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [lightboxCaption, setLightboxCaption] = useState<string>("");
+  const lightbox = useImageLightbox();
 
   const unsubRef = useRef<null | (() => void)>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -187,21 +189,6 @@ export default function ChatPage() {
       }
       return next;
     });
-  }, []);
-
-  // Escape closes the lightbox.
-  useEffect(() => {
-    if (!lightboxUrl) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLightboxUrl(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxUrl]);
-
-  const openLightbox = useCallback((url: string, caption: string) => {
-    setLightboxUrl(url);
-    setLightboxCaption(caption);
   }, []);
 
   useEffect(() => {
@@ -507,7 +494,7 @@ export default function ChatPage() {
                   key={t.turnIdx}
                   turn={t}
                   variantName={variantName}
-                  openLightbox={openLightbox}
+                  openLightbox={lightbox.open}
                 />
               ))}
             </AnimatePresence>
@@ -541,89 +528,14 @@ export default function ChatPage() {
         toggleImagery={toggleImagery}
       />
 
-      {lightboxUrl && (
+      {lightbox.url && (
         <ImageLightbox
-          url={lightboxUrl}
-          caption={lightboxCaption}
-          onClose={() => setLightboxUrl(null)}
+          url={lightbox.url}
+          caption={lightbox.caption}
+          onClose={lightbox.close}
         />
       )}
     </div>
-  );
-}
-
-function ImageLightbox({
-  url,
-  caption,
-  onClose,
-}: {
-  url: string;
-  caption: string;
-  onClose: () => void;
-}) {
-  const [showPrompt, setShowPrompt] = useState(false);
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6 cursor-zoom-out overflow-y-auto"
-      style={{ background: "rgba(0,0,0,0.88)" }}
-    >
-      <motion.img
-        initial={{ scale: 0.96, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        src={imageUrl(url)}
-        onClick={(e) => e.stopPropagation()}
-        alt={caption || "generated image"}
-        className="max-w-[92vw] max-h-[80vh] object-contain cursor-default"
-        style={{ boxShadow: "0 0 40px rgba(232,195,130,0.18)" }}
-      />
-      {caption && (
-        <p
-          className="mt-4 max-w-[80vw] text-center font-mono text-[12px] italic text-text-dim leading-relaxed"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {caption}
-        </p>
-      )}
-      {caption && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowPrompt((v) => !v);
-          }}
-          className="mt-3 font-display tracking-[0.3em] text-[9px] text-amber-dim hover:text-amber"
-        >
-          {showPrompt ? "▾" : "▸"} prompt sent to nano banana
-        </button>
-      )}
-      {showPrompt && caption && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="mt-2 max-w-[80vw] cursor-text"
-        >
-          <pre
-            className="font-mono text-[11px] leading-relaxed text-text-dim/90 whitespace-pre-wrap break-words px-4 py-3 border border-rule/40"
-            style={{ background: "rgba(0,0,0,0.55)" }}
-          >
-{caption}
-          </pre>
-          <p className="mt-2 text-center font-mono text-[9px] italic text-text-dim/60">
-            exact bytes sent to gemini-2.5-flash-image
-          </p>
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={onClose}
-        className="mt-3 font-display tracking-[0.35em] text-[10px] text-amber-dim hover:text-amber"
-      >
-        ◇ close · esc
-      </button>
-    </motion.div>
   );
 }
 
@@ -1402,7 +1314,7 @@ function ChannelReadout({
   // to render based on whether the turn was imagery-on AND where in
   // the per-side pipeline we are.
   imageryOn: boolean;
-  imagePhase: TurnVM["rawImagePhase"];
+  imagePhase: ImagePhase;
   imageUrl: string;
   imagePrompt: string;
   imageError: string;
@@ -1573,114 +1485,6 @@ function ChannelReadout({
           <span className="italic normal-case">
             hit safety cap · off-manifold loop
           </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Image block ───────────────────────────────────────────────────────
-
-/** Per-channel imagery slot: walks through prompt → generating →
- *  (thumbnail | error). The thumbnail is tappable and opens the
- *  fullscreen lightbox. While "prompt" or "generating", we render a
- *  small activity indicator so the user knows something is in flight.
- */
-function ChannelImageBlock({
-  accent,
-  phase,
-  imageUrl: imageUrlRel,
-  prompt,
-  imageError,
-  onOpen,
-}: {
-  accent: string;
-  phase: TurnVM["rawImagePhase"];
-  imageUrl: string;
-  prompt: string;
-  imageError: string;
-  onOpen: (url: string, caption: string) => void;
-}) {
-  // Tight square that floats at the right edge of the response text.
-  // The prompt text is intentionally NOT rendered here — it appears
-  // only inside the expanded modal so the column's main content
-  // (the channel reply) stays uncluttered.
-  return (
-    <div className="shrink-0">
-      {phase === "done" && imageUrlRel ? (
-        <button
-          type="button"
-          onClick={() => onOpen(imageUrlRel, prompt)}
-          className="group block relative"
-          title="tap to enlarge"
-        >
-          <motion.img
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.4 }}
-            src={imageUrl(imageUrlRel)}
-            alt="channel image"
-            className="h-24 w-24 object-cover cursor-zoom-in transition-transform group-hover:scale-[1.03]"
-            style={{
-              boxShadow: `0 0 12px ${accent.replace("1)", "0.25)")}`,
-              border: `1px solid ${accent.replace("1)", "0.4)")}`,
-            }}
-          />
-          <span
-            aria-hidden
-            className="absolute bottom-1 right-1 font-display text-[8px] tracking-widest text-text/70 px-1 bg-bg/70 opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            ↗ TAP
-          </span>
-        </button>
-      ) : phase === "error" ? (
-        <div
-          className="h-24 w-24 flex items-center justify-center text-center text-[9px] font-mono italic px-1"
-          style={{
-            color: "rgba(220,140,80,0.85)",
-            border: "1px dashed rgba(220,140,80,0.4)",
-          }}
-          title={imageError}
-        >
-          image
-          <br />
-          failed
-        </div>
-      ) : (
-        <div
-          className="h-24 w-24 relative overflow-hidden"
-          style={{
-            border: `1px dashed ${accent.replace("1)", "0.35)")}`,
-            background: accent.replace("1)", "0.04)"),
-          }}
-          title="generating image…"
-        >
-          {/* Sweeping shimmer bar — pure CSS, no JS. Mirrors the
-              "thinking" feel of voice's monitor without competing
-              for visual weight. */}
-          <motion.span
-            aria-hidden
-            initial={{ y: "-100%" }}
-            animate={{ y: "200%" }}
-            transition={{
-              duration: 1.6,
-              repeat: Infinity,
-              ease: "linear",
-            }}
-            className="absolute inset-x-0 h-1/3"
-            style={{
-              background: `linear-gradient(180deg, transparent 0%, ${accent.replace(
-                "1)",
-                "0.35)",
-              )} 50%, transparent 100%)`,
-            }}
-          />
-          <div
-            className="absolute inset-0 flex items-center justify-center font-display text-[9px] tracking-widest animate-pulse"
-            style={{ color: accent }}
-          >
-            {phase === "generating" ? "◇ RENDERING" : "◇ COMPOSING"}
-          </div>
         </div>
       )}
     </div>

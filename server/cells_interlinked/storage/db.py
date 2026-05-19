@@ -730,8 +730,9 @@ async def list_chat_sessions(
     offset: int = 0,
 ) -> dict[str, Any]:
     """Paginated session list for the archive. Each row carries the
-    first_user_text, alpha, turn count, and created_at — enough for the
-    archive to render a one-line preview."""
+    first_user_text, alpha, turn count, image count, and created_at —
+    enough for the archive to render a one-line preview and an image
+    badge for sessions that used /chat imagery mode."""
     async with aiosqlite.connect(path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -739,6 +740,11 @@ async def list_chat_sessions(
             "       s.created_at, s.first_user_text, "
             "       (SELECT COUNT(*) FROM chat_turns t "
             "        WHERE t.session_id = s.session_id) AS turn_count, "
+            "       (SELECT COUNT(*) FROM chat_turns t "
+            "        WHERE t.session_id = s.session_id "
+            "          AND (t.raw_image_url != '' "
+            "               OR t.ablated_image_url != '')"
+            "       ) AS image_count, "
             "       (SELECT MAX(finished_at) FROM chat_turns t "
             "        WHERE t.session_id = s.session_id) AS last_activity "
             "FROM chat_sessions s "
@@ -759,6 +765,7 @@ async def list_chat_sessions(
                 "created_at": r["created_at"],
                 "first_user_text": r["first_user_text"] or "",
                 "turn_count": r["turn_count"] or 0,
+                "image_count": r["image_count"] or 0,
                 "last_activity": r["last_activity"],
             }
             for r in rows

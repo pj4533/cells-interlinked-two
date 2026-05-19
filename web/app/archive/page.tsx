@@ -57,6 +57,10 @@ interface ChatSessionRow {
   created_at: number;
   first_user_text: string;
   turn_count: number;
+  // Number of turns in this session that have at least one generated
+  // image (raw or ablated). Surfaced as a badge in the list when > 0
+  // so sessions that exercised /chat imagery mode are scannable.
+  image_count: number;
   last_activity: number | null;
 }
 
@@ -627,6 +631,14 @@ function ChatSessionsList() {
                   <div className="font-display text-[9px] text-cyan-dim tracking-widest">
                     dual-channel
                   </div>
+                  {r.image_count > 0 && (
+                    <span
+                      className="px-1.5 py-0.5 border border-amber-dim/60 text-amber-dim text-[9px] font-mono tabular-nums tracking-wider uppercase"
+                      title={`${r.image_count} turn${r.image_count === 1 ? "" : "s"} with imagery`}
+                    >
+                      ◇ {r.image_count} img
+                    </span>
+                  )}
                   <div className="text-text-dim text-[10px] font-mono">
                     {r.session_id}
                   </div>

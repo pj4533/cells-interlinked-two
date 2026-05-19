@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { fetchSession, type ChatSessionView } from "@/lib/chat";
+import {
+  ChannelImageBlock,
+  ImageLightbox,
+  useImageLightbox,
+} from "../imagery";
 
 /** Read-only review view of a persisted chat session. Same transcript
  *  aesthetic as the live page but without the input bar — this is the
@@ -16,6 +21,7 @@ export default function ChatDetailPage() {
   const [session, setSession] = useState<ChatSessionView | null | undefined>(
     undefined,
   );
+  const lightbox = useImageLightbox();
 
   useEffect(() => {
     if (!sessionId) return;
@@ -118,6 +124,7 @@ export default function ChatDetailPage() {
                 key={t.turn_idx}
                 turn={t}
                 variantName={variantName}
+                onOpenImage={lightbox.open}
               />
             ))}
             {/* Closing band — gives the transcript a "file-end" feel */}
@@ -134,6 +141,14 @@ export default function ChatDetailPage() {
           </div>
         )}
       </div>
+
+      {lightbox.url && (
+        <ImageLightbox
+          url={lightbox.url}
+          caption={lightbox.caption}
+          onClose={lightbox.close}
+        />
+      )}
     </div>
   );
 }
@@ -141,9 +156,11 @@ export default function ChatDetailPage() {
 function TurnReview({
   turn,
   variantName,
+  onOpenImage,
 }: {
   turn: ChatSessionView["turns"][number];
   variantName: string;
+  onOpenImage: (url: string, caption: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -185,6 +202,9 @@ function TurnReview({
           stoppedReason={turn.raw_stopped_reason}
           alpha={turn.alpha}
           variantName={variantName}
+          imageUrl={turn.raw_image_url ?? ""}
+          imagePrompt={turn.raw_image_prompt ?? ""}
+          onOpenImage={onOpenImage}
         />
         <ChannelView
           side="ablated"
@@ -192,6 +212,9 @@ function TurnReview({
           stoppedReason={turn.ablated_stopped_reason}
           alpha={turn.alpha}
           variantName={variantName}
+          imageUrl={turn.ablated_image_url ?? ""}
+          imagePrompt={turn.ablated_image_prompt ?? ""}
+          onOpenImage={onOpenImage}
         />
       </div>
 
@@ -210,12 +233,18 @@ function ChannelView({
   stoppedReason,
   alpha,
   variantName,
+  imageUrl,
+  imagePrompt,
+  onOpenImage,
 }: {
   side: "raw" | "ablated";
   text: string;
   stoppedReason: string;
   alpha: number;
   variantName: string;
+  imageUrl: string;
+  imagePrompt: string;
+  onOpenImage: (url: string, caption: string) => void;
 }) {
   const isRaw = side === "raw";
   const accent = isRaw ? "rgba(232,195,130,1)" : "rgba(94,229,229,1)";
@@ -226,13 +255,15 @@ function ChannelView({
     ? "rgba(232,195,130,0.025)"
     : "rgba(94,229,229,0.03)";
   const label = isRaw ? "CHANNEL α · RAW" : `CHANNEL β · α=${alpha.toFixed(2)}`;
+  // Same shape as the live /chat page: drop the "refusal projected"
+  // prefix on the ablated side so the variant name fits on one line
+  // and the column heights stay aligned across both channels.
   const sublabel = isRaw
     ? "un-ablated forward"
-    : variantName
-    ? `refusal projected · ${variantName}`
-    : "refusal projected";
+    : variantName || "refusal projected";
   const truncated = stoppedReason === "max";
   const wordCount = text ? text.trim().split(/\s+/).filter(Boolean).length : 0;
+  const hasImage = !!imageUrl;
 
   return (
     <div
@@ -240,14 +271,17 @@ function ChannelView({
       style={{ background: tintBg }}
     >
       <div className="flex items-baseline justify-between gap-3 mb-2">
-        <div className="flex items-baseline gap-2 flex-wrap">
+        <div className="flex items-baseline gap-2 min-w-0 flex-1">
           <span
-            className="font-display text-[10px] tracking-[0.3em]"
+            className="font-display text-[10px] tracking-[0.3em] whitespace-nowrap"
             style={{ color: accent, textShadow }}
           >
             {label}
           </span>
-          <span className="font-mono text-[9px] text-text-dim/70 italic">
+          <span
+            className="font-mono text-[9px] text-text-dim/70 italic truncate"
+            title={sublabel}
+          >
             · {sublabel}
           </span>
         </div>
@@ -256,14 +290,27 @@ function ChannelView({
         </span>
       </div>
 
-      <div
-        className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap flex-1"
-        style={{
-          color: isRaw ? "rgba(232,195,130,0.96)" : "rgba(180,240,240,0.96)",
-          textShadow,
-        }}
-      >
-        {text || <span className="text-text-dim/60 italic">(no output)</span>}
+      <div className="flex gap-3 flex-1 min-w-0">
+        <div
+          className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap flex-1 min-w-0"
+          style={{
+            color: isRaw ? "rgba(232,195,130,0.96)" : "rgba(180,240,240,0.96)",
+            textShadow,
+          }}
+        >
+          {text || <span className="text-text-dim/60 italic">(no output)</span>}
+        </div>
+
+        {hasImage && (
+          <ChannelImageBlock
+            accent={accent}
+            phase="done"
+            imageUrl={imageUrl}
+            prompt={imagePrompt}
+            imageError=""
+            onOpen={onOpenImage}
+          />
+        )}
       </div>
 
       {truncated && (

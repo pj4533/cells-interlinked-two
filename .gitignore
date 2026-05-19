@@ -68,6 +68,12 @@ server/data/*.db
 server/data/*.sqlite
 server/data/*.sqlite.*
 server/data/*.bak-*
+# /chat imagery PNGs (one subdir per session) — generated at
+# runtime by Nano Banana; the DB references them by URL.
+server/data/chat_images/
+# Local ablation-sweep result dumps (jsonl + md), produced by
+# scripts/sweep_ablation_variants.py. Kept on disk, not in repo.
+server/data/_sweep_results/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
@@ -94,3 +100,6 @@ saes/
 *.log
 logs/
 .vercel
+
+# Local experimentation scripts kept on disk but not part of the repo
+server/scripts/sweep_ablation_variants.py
