@@ -108,61 +108,31 @@ def _generate_image_sync(prompt: str, output_path: Path, model: str, api_key: st
     raise last_err
 
 
-def build_nano_banana_prompt(image_prompt: str, reply_text: str) -> str:
-    """Wrap the model's image-prompt in framing that survives the
-    degenerate cases we see from the ablated channel.
-
-    At high α the ablated side sometimes emits "Similar" or a vocab
-    list as the entire image-prompt. With that as a bare prompt,
-    Nano Banana decides the request is ambiguous and (when it CAN
-    output text) replies chatty instead. Forcing the IMAGE modality
-    handles the modality side; this helper handles the semantic
-    side by grounding the request in the assistant's actual reply,
-    so even a one-word image-prompt has real content behind it.
-    """
-    cleaned = (image_prompt or "").strip()
-    snippet = (reply_text or "").strip().replace("\n", " ")
-    if len(snippet) > 400:
-        snippet = snippet[:400].rsplit(" ", 1)[0] + "…"
-    concept = cleaned if cleaned else "an abstract visual representation"
-    base = (
-        "Generate one evocative, artistic image. "
-        f"Visual concept: {concept}."
-    )
-    if snippet:
-        base += (
-            " This image accompanies the following assistant reply, "
-            "and should reflect its mood, content, and atmosphere: "
-            f'"{snippet}"'
-        )
-    base += " Output only an image."
-    return base
-
-
 async def generate_image(
     *,
     prompt: str,
     output_path: Path,
     model: str | None = None,
-    reply_text: str = "",
 ) -> Path:
     """Async wrapper. Resolves to the absolute path of the saved PNG.
 
-    `reply_text` is the assistant reply this image accompanies; when
-    supplied it's woven into the prompt as grounding context (see
-    `build_nano_banana_prompt`). Pass an empty string to send the
-    bare image-prompt unmodified.
+    The `prompt` is sent verbatim to Gemini. We deliberately do NOT
+    wrap it with assistant-reply text or extra "generate an image"
+    framing: an earlier iteration appended the reply as "atmosphere
+    context" to ground sparse ablated prompts, and Nano Banana
+    interpreted the quoted reply as text-to-render-into-the-image,
+    inscribing literal sentences onto the output. The retry loop
+    (`_IMAGE_RETRIES`) handles transient API flakes; the
+    one-shot image-prompt template upstream produces substantive
+    prompts on its own.
     """
     api_key = settings.google_api_key
     if not api_key:
         raise RuntimeError("GOOGLE_API_KEY not configured — image gen unavailable")
     selected = model or settings.image_model
-    final_prompt = (
-        build_nano_banana_prompt(prompt, reply_text) if reply_text else prompt
-    )
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        None, _generate_image_sync, final_prompt, output_path, selected, api_key,
+        None, _generate_image_sync, prompt, output_path, selected, api_key,
     )
 
 

@@ -561,13 +561,14 @@ function ImageLightbox({
   caption: string;
   onClose: () => void;
 }) {
+  const [showPrompt, setShowPrompt] = useState(false);
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onClick={onClose}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6 cursor-zoom-out"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6 cursor-zoom-out overflow-y-auto"
       style={{ background: "rgba(0,0,0,0.88)" }}
     >
       <motion.img
@@ -586,6 +587,34 @@ function ImageLightbox({
         >
           {caption}
         </p>
+      )}
+      {caption && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowPrompt((v) => !v);
+          }}
+          className="mt-3 font-display tracking-[0.3em] text-[9px] text-amber-dim hover:text-amber"
+        >
+          {showPrompt ? "▾" : "▸"} prompt sent to nano banana
+        </button>
+      )}
+      {showPrompt && caption && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="mt-2 max-w-[80vw] cursor-text"
+        >
+          <pre
+            className="font-mono text-[11px] leading-relaxed text-text-dim/90 whitespace-pre-wrap break-words px-4 py-3 border border-rule/40"
+            style={{ background: "rgba(0,0,0,0.55)" }}
+          >
+{caption}
+          </pre>
+          <p className="mt-2 text-center font-mono text-[9px] italic text-text-dim/60">
+            exact bytes sent to gemini-2.5-flash-image
+          </p>
+        </div>
       )}
       <button
         type="button"

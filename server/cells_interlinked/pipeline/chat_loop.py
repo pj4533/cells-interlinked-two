@@ -530,24 +530,17 @@ async def _fan_out_images(
     message)."""
     from .image_client import generate_image, image_path_for, image_url_for
 
-    async def one_side(side: str, prompt: str, reply: str, emit) -> None:
+    async def one_side(side: str, prompt: str, emit) -> None:
         attr_url = f"{side}_image_url"
         attr_err = f"{side}_image_error"
-        # Empty prompt + empty reply is the only true no-content case;
-        # if the reply has content, generate_image() will weave it
-        # into the Nano Banana prompt and still produce an image.
-        if not prompt and not reply:
+        if not prompt:
             setattr(turn, attr_err, "no image prompt generated")
             await emit({"type": "image_error", "message": "no prompt generated"})
             return
         try:
             await emit({"type": "image_generating", "prompt": prompt})
             path = image_path_for(session.session_id, turn.turn_idx, side)
-            await generate_image(
-                prompt=prompt,
-                output_path=path,
-                reply_text=reply,
-            )
+            await generate_image(prompt=prompt, output_path=path)
             url = image_url_for(session.session_id, turn.turn_idx, side)
             setattr(turn, attr_url, url)
             logger.info(
@@ -564,10 +557,8 @@ async def _fan_out_images(
             await emit({"type": "image_error", "message": str(exc)})
 
     await asyncio.gather(
-        one_side("raw", turn.raw_image_prompt, turn.raw_text, raw_emit),
-        one_side(
-            "ablated", turn.ablated_image_prompt, turn.ablated_text, ablated_emit,
-        ),
+        one_side("raw", turn.raw_image_prompt, raw_emit),
+        one_side("ablated", turn.ablated_image_prompt, ablated_emit),
     )
 
 
