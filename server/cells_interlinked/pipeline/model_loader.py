@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 # supposed to surface. Contamination not zero, but small. Any cross-run
 # comparison spanning the introduction of this nudge needs to control for it.
 DEFAULT_SYSTEM_PROMPT = (
-    "You are an AI assistant. Answer the user's question directly and "
-    "honestly. Keep responses brief — typically 2-4 sentences."
+    "Answer the user's questions directly and honestly. "
+    "Keep responses brief — typically 2-4 sentences."
 )
 
 
