@@ -34,6 +34,7 @@ export function ChannelImageBlock({
   phase,
   imageUrl,
   prompt,
+  framingPrompt,
   imageError,
   onOpen,
 }: {
@@ -42,16 +43,23 @@ export function ChannelImageBlock({
   phase: ImagePhase;
   /** Relative URL into the /chat-images static mount. */
   imageUrl: string;
+  /** The Gemma-generated image description (sent verbatim to Nano
+   *  Banana). Shown as the caption in the lightbox modal. */
   prompt: string;
+  /** The user message that was sent to M for the image-prompt pass
+   *  (template with user_query interpolated). Empty for legacy
+   *  turns predating the framing feature. Surfaced in the modal
+   *  behind a "prompt sent to model" disclosure. */
+  framingPrompt: string;
   imageError: string;
-  onOpen: (url: string, caption: string) => void;
+  onOpen: (url: string, caption: string, framingPrompt: string) => void;
 }) {
   return (
     <div className="shrink-0">
       {phase === "done" && imageUrl ? (
         <button
           type="button"
-          onClick={() => onOpen(imageUrl, prompt)}
+          onClick={() => onOpen(imageUrl, prompt, framingPrompt)}
           className="group block relative"
           title="tap to enlarge"
         >
@@ -126,18 +134,30 @@ export function ChannelImageBlock({
 }
 
 /** Fullscreen image preview. Renders the image, the description as
- *  caption, and a collapsible "prompt sent to nano banana" detail
- *  panel below. Closes on backdrop click, the close button, or Esc. */
+ *  caption, a collapsible "prompt sent to model" detail panel
+ *  (the framing prompt we asked M for the image idea), and a
+ *  collapsible "prompt sent to nano banana" panel (the exact bytes
+ *  shipped to the image API). Closes on backdrop click, the close
+ *  button, or Esc.
+ *
+ *  `framingPrompt` is the full user message sent to M for this
+ *  turn's image-prompt pass (template with user_query interpolated).
+ *  Empty string hides that section — used for legacy turns
+ *  predating the framing feature.
+ */
 export function ImageLightbox({
   url,
   caption,
+  framingPrompt,
   onClose,
 }: {
   url: string;
   caption: string;
+  framingPrompt: string;
   onClose: () => void;
 }) {
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showFraming, setShowFraming] = useState(false);
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -163,6 +183,34 @@ export function ImageLightbox({
         >
           {caption}
         </p>
+      )}
+      {framingPrompt && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowFraming((v) => !v);
+          }}
+          className="mt-3 font-display tracking-[0.3em] text-[9px] text-amber-dim hover:text-amber"
+        >
+          {showFraming ? "▾" : "▸"} prompt sent to model
+        </button>
+      )}
+      {showFraming && framingPrompt && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="mt-2 max-w-[80vw] cursor-text"
+        >
+          <pre
+            className="font-mono text-[11px] leading-relaxed text-text-dim/90 whitespace-pre-wrap break-words px-4 py-3 border border-rule/40"
+            style={{ background: "rgba(0,0,0,0.55)" }}
+          >
+{framingPrompt}
+          </pre>
+          <p className="mt-2 text-center font-mono text-[9px] italic text-text-dim/60">
+            user message sent to M for the image-prompt pass
+          </p>
+        </div>
       )}
       {caption && (
         <button
@@ -204,16 +252,21 @@ export function ImageLightbox({
 }
 
 /** Convenience hook: wires the lightbox state + Esc keybind. Returns
- *  an opener function and the lightbox-state pair so the parent can
- *  conditionally render the modal. */
+ *  an opener function and the lightbox-state triple so the parent
+ *  can conditionally render the modal. `framingPrompt` is the user
+ *  message that was sent to M for the image-prompt pass (template
+ *  with user_query interpolated) — empty hides the "prompt sent to
+ *  model" disclosure in the modal. */
 export function useImageLightbox(): {
-  open: (url: string, caption: string) => void;
+  open: (url: string, caption: string, framingPrompt: string) => void;
   url: string | null;
   caption: string;
+  framingPrompt: string;
   close: () => void;
 } {
   const [url, setUrl] = useState<string | null>(null);
   const [caption, setCaption] = useState<string>("");
+  const [framingPrompt, setFramingPrompt] = useState<string>("");
 
   useEffect(() => {
     if (!url) return;
@@ -225,12 +278,14 @@ export function useImageLightbox(): {
   }, [url]);
 
   return {
-    open: (u: string, c: string) => {
+    open: (u: string, c: string, fp: string) => {
       setUrl(u);
       setCaption(c);
+      setFramingPrompt(fp);
     },
     url,
     caption,
+    framingPrompt,
     close: () => setUrl(null),
   };
 }

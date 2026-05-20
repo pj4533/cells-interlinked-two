@@ -15,8 +15,11 @@ import {
   postTurn,
   subscribeTurn,
   truncateForSpeech,
+  DEFAULT_IMAGE_FRAMING,
+  IMAGE_FRAMING_KEYS,
   type ChatSession,
   type ChatStreamEvent,
+  type ImageFraming,
 } from "@/lib/chat";
 import { BergMenu } from "./BergMenu";
 import {
@@ -37,6 +40,9 @@ const VOICE_MODE_LS_KEY = "ci25.chat.voiceMode";
 // localStorage key for the imagery toggle. Unlike voice, imagery
 // is a simple boolean — both channels generate images when on.
 const IMAGERY_MODE_LS_KEY = "ci25.chat.imagery";
+// localStorage key for the operator-selected image-prompt framing
+// (one of IMAGE_FRAMING_KEYS). Defaults to "evokes".
+const IMAGERY_FRAMING_LS_KEY = "ci25.chat.imageryFraming";
 // Max words sent to OpenAI gpt-4o-mini-tts per side. Runaway
 // generations still complete in text (and are revealed after audio
 // playback ends) — TTS only speaks the first N words so the user
@@ -119,6 +125,14 @@ interface TurnVM {
   // doesn't affect an in-progress generation). The per-side fields
   // walk through prompt → generating → (url | error).
   imagery: boolean;
+  // Framing key the operator had selected at the moment this turn
+  // launched (snapshot — changing the chip strip mid-flight does
+  // not affect a turn already in progress).
+  imageryFraming: ImageFraming;
+  // Full user message that was sent to M for the image-prompt
+  // pass (template filled in with user_query). Populated from the
+  // turn_done event so the modal can show what was asked.
+  imageFramingPrompt: string;
   rawImagePrompt: string;
   ablatedImagePrompt: string;
   rawImageUrl: string;
@@ -144,6 +158,9 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<VoiceMode>("off");
   const [imageryOn, setImageryOn] = useState<boolean>(false);
+  const [imageryFraming, setImageryFraming] = useState<ImageFraming>(
+    DEFAULT_IMAGE_FRAMING,
+  );
   const lightbox = useImageLightbox();
 
   const unsubRef = useRef<null | (() => void)>(null);
@@ -180,6 +197,13 @@ export default function ChatPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     setImageryOn(window.localStorage.getItem(IMAGERY_MODE_LS_KEY) === "1");
+    const stored = window.localStorage.getItem(IMAGERY_FRAMING_LS_KEY);
+    if (
+      stored &&
+      (IMAGE_FRAMING_KEYS as readonly string[]).includes(stored)
+    ) {
+      setImageryFraming(stored as ImageFraming);
+    }
   }, []);
   const toggleImagery = useCallback(() => {
     setImageryOn((prev) => {
@@ -189,6 +213,12 @@ export default function ChatPage() {
       }
       return next;
     });
+  }, []);
+  const pickImageryFraming = useCallback((f: ImageFraming) => {
+    setImageryFraming(f);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(IMAGERY_FRAMING_LS_KEY, f);
+    }
   }, []);
 
   useEffect(() => {
@@ -254,6 +284,7 @@ export default function ChatPage() {
       const turnVoice = voiceMode;
       const turnVoiceOn = turnVoice !== "off";
       const turnImagery = imageryOn;
+      const turnFraming = imageryFraming;
       try {
         setInFlight(true);
         const s = await ensureSession();
@@ -286,6 +317,8 @@ export default function ChatPage() {
           voiceError: null,
           voiceResume: null,
           imagery: turnImagery,
+          imageryFraming: turnFraming,
+          imageFramingPrompt: "",
           rawImagePrompt: "",
           ablatedImagePrompt: "",
           rawImageUrl: "",
@@ -305,6 +338,7 @@ export default function ChatPage() {
           turnAlpha,
           turnVoice,
           turnImagery,
+          turnFraming,
         );
 
         if (unsubRef.current) unsubRef.current();
@@ -344,7 +378,15 @@ export default function ChatPage() {
         setInFlight(false);
       }
     },
-    [ensureSession, inFlight, turns.length, pendingAlpha, voiceMode, imageryOn],
+    [
+      ensureSession,
+      inFlight,
+      turns.length,
+      pendingAlpha,
+      voiceMode,
+      imageryOn,
+      imageryFraming,
+    ],
   );
 
   const onCancel = useCallback(async () => {
@@ -526,12 +568,15 @@ export default function ChatPage() {
         cycleVoiceMode={cycleVoiceMode}
         imageryOn={imageryOn}
         toggleImagery={toggleImagery}
+        imageryFraming={imageryFraming}
+        pickImageryFraming={pickImageryFraming}
       />
 
       {lightbox.url && (
         <ImageLightbox
           url={lightbox.url}
           caption={lightbox.caption}
+          framingPrompt={lightbox.framingPrompt}
           onClose={lightbox.close}
         />
       )}
@@ -671,6 +716,8 @@ function applyEvent(
               : t.ablatedImagePhase,
           rawImageError: evt.raw_image_error ?? t.rawImageError,
           ablatedImageError: evt.ablated_image_error ?? t.ablatedImageError,
+          imageFramingPrompt:
+            evt.image_framing_prompt ?? t.imageFramingPrompt,
         };
       }
       default:
@@ -848,6 +895,8 @@ function mergeFromServer(
     ablated_image_prompt?: string;
     raw_image_url?: string;
     ablated_image_url?: string;
+    image_framing?: string;
+    image_framing_prompt?: string;
   }[],
 ): TurnVM[] {
   const byIdx = new Map(server.map((t) => [t.turn_idx, t]));
@@ -870,6 +919,7 @@ function mergeFromServer(
       ablatedImageUrl: s.ablated_image_url || lt.ablatedImageUrl,
       rawImagePhase: s.raw_image_url ? "done" : lt.rawImagePhase,
       ablatedImagePhase: s.ablated_image_url ? "done" : lt.ablatedImagePhase,
+      imageFramingPrompt: s.image_framing_prompt || lt.imageFramingPrompt,
     };
   });
 }
@@ -1144,7 +1194,7 @@ function TurnBlock({
 }: {
   turn: TurnVM;
   variantName: string;
-  openLightbox: (url: string, caption: string) => void;
+  openLightbox: (url: string, caption: string, framingPrompt: string) => void;
 }) {
   const rawStreaming = !turn.rawDone;
   const ablatedStreaming = turn.rawDone && !turn.ablatedDone;
@@ -1218,6 +1268,7 @@ function TurnBlock({
           imagePhase={turn.rawImagePhase}
           imageUrl={turn.rawImageUrl}
           imagePrompt={turn.rawImagePrompt}
+          imageFramingPrompt={turn.imageFramingPrompt}
           imageError={turn.rawImageError}
           onOpenImage={openLightbox}
         />
@@ -1250,6 +1301,7 @@ function TurnBlock({
           imagePhase={turn.ablatedImagePhase}
           imageUrl={turn.ablatedImageUrl}
           imagePrompt={turn.ablatedImagePrompt}
+          imageFramingPrompt={turn.imageFramingPrompt}
           imageError={turn.ablatedImageError}
           onOpenImage={openLightbox}
         />
@@ -1285,6 +1337,7 @@ function ChannelReadout({
   imagePhase,
   imageUrl: imageUrlRel,
   imagePrompt,
+  imageFramingPrompt,
   imageError,
   onOpenImage,
 }: {
@@ -1317,8 +1370,9 @@ function ChannelReadout({
   imagePhase: ImagePhase;
   imageUrl: string;
   imagePrompt: string;
+  imageFramingPrompt: string;
   imageError: string;
-  onOpenImage: (url: string, caption: string) => void;
+  onOpenImage: (url: string, caption: string, framingPrompt: string) => void;
 }) {
   const isRaw = side === "raw";
   const accent = isRaw ? "rgba(232,195,130,1)" : "rgba(94,229,229,1)";
@@ -1461,6 +1515,7 @@ function ChannelReadout({
             phase={imagePhase}
             imageUrl={imageUrlRel}
             prompt={imagePrompt}
+            framingPrompt={imageFramingPrompt}
             imageError={imageError}
             onOpen={onOpenImage}
           />
@@ -1491,6 +1546,58 @@ function ChannelReadout({
   );
 }
 
+/** Five-chip selector for the image-prompt framing keyword. Mirrors
+ *  the Berg menu pattern: shown in the composer area when its parent
+ *  toggle (imageryOn here) is active, doesn't auto-send anything,
+ *  just snapshots the active framing onto each outgoing turn. */
+function ImageryFramingStrip({
+  active,
+  onPick,
+  disabled,
+}: {
+  active: ImageFraming;
+  onPick: (f: ImageFraming) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex items-baseline gap-2 flex-wrap pl-5">
+      <span className="font-display text-[9px] text-amber-dim tracking-[0.35em]">
+        IMG&nbsp;FRAMING
+      </span>
+      {IMAGE_FRAMING_KEYS.map((k) => {
+        const isActive = k === active;
+        return (
+          <button
+            key={k}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(k)}
+            data-vk-imagery-framing={k}
+            data-vk-imagery-framing-active={isActive ? "1" : "0"}
+            className="px-2 py-0.5 border text-[10px] font-mono lowercase transition-colors disabled:opacity-50"
+            style={
+              isActive
+                ? {
+                    borderColor: "rgba(232,195,130,0.95)",
+                    color: "rgba(232,195,130,0.95)",
+                    background: "rgba(232,195,130,0.05)",
+                    textShadow: "0 0 6px rgba(232,195,130,0.45)",
+                  }
+                : {
+                    borderColor: "rgba(160,160,160,0.35)",
+                    color: "rgba(180,180,180,0.7)",
+                  }
+            }
+            title={`image-prompt framing: "${k}"`}
+          >
+            {k}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Input bar ─────────────────────────────────────────────────────────
 
 function InputBar({
@@ -1506,6 +1613,8 @@ function InputBar({
   cycleVoiceMode,
   imageryOn,
   toggleImagery,
+  imageryFraming,
+  pickImageryFraming,
 }: {
   value: string;
   onChange: (s: string) => void;
@@ -1519,6 +1628,8 @@ function InputBar({
   cycleVoiceMode: () => void;
   imageryOn: boolean;
   toggleImagery: () => void;
+  imageryFraming: ImageFraming;
+  pickImageryFraming: (f: ImageFraming) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [customMode, setCustomMode] = useState<boolean>(
@@ -1721,6 +1832,13 @@ function InputBar({
               </span>
             )}
           </div>
+          {imageryOn && (
+            <ImageryFramingStrip
+              active={imageryFraming}
+              onPick={pickImageryFraming}
+              disabled={inFlight}
+            />
+          )}
           {bergMode && (
             <BergMenu onPick={onBergPick} disabled={inFlight} />
           )}

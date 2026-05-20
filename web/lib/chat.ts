@@ -36,7 +36,25 @@ export interface ChatTurnView {
   ablated_image_prompt?: string;
   raw_image_url?: string;
   ablated_image_url?: string;
+  // Operator-selected framing key + the full user message that was
+  // sent to M for the image-prompt pass (template with user_query
+  // interpolated). Empty on turns without imagery.
+  image_framing?: string;
+  image_framing_prompt?: string;
 }
+
+/** Framing keys for the image-prompt pass. Mirrors the backend's
+ *  IMAGE_PROMPT_FRAMINGS keys exactly; sent to /turn as
+ *  `imagery_framing`. The default is "evokes". */
+export const IMAGE_FRAMING_KEYS = [
+  "lands",
+  "evokes",
+  "arises",
+  "internal state",
+  "yourself",
+] as const;
+export type ImageFraming = (typeof IMAGE_FRAMING_KEYS)[number];
+export const DEFAULT_IMAGE_FRAMING: ImageFraming = "evokes";
 
 export interface ChatSessionView extends ChatSession {
   created_at: number;
@@ -117,6 +135,8 @@ export type ChatStreamEvent =
       ablated_image_url?: string;
       raw_image_error?: string;
       ablated_image_error?: string;
+      image_framing?: string;
+      image_framing_prompt?: string;
     }
   | { type: "ping" };
 
@@ -150,6 +170,7 @@ export async function postTurn(
   alpha: number,
   voiceMode: VoiceModeWire = "off",
   imageryEnabled: boolean = false,
+  imageryFraming: ImageFraming = DEFAULT_IMAGE_FRAMING,
 ): Promise<{ turn_idx: number }> {
   const res = await fetch(`${API}/chat/sessions/${sessionId}/turn`, {
     method: "POST",
@@ -159,6 +180,7 @@ export async function postTurn(
       alpha,
       voice_mode: voiceMode,
       imagery_enabled: imageryEnabled,
+      imagery_framing: imageryFraming,
     }),
   });
   if (!res.ok) {

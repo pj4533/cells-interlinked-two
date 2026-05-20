@@ -109,6 +109,10 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   ablated_image_prompt    TEXT NOT NULL DEFAULT '',
   raw_image_url           TEXT NOT NULL DEFAULT '',
   ablated_image_url       TEXT NOT NULL DEFAULT '',
+  -- Operator-selected framing key (one of "lands"/"evokes"/
+  -- "arises"/"internal state"/"yourself"). Empty on turns that
+  -- predate the framing feature.
+  image_framing           TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (session_id, turn_idx)
 );
 
@@ -169,6 +173,7 @@ async def init_db(path: Path) -> None:
             "ablated_image_prompt",
             "raw_image_url",
             "ablated_image_url",
+            "image_framing",
         ):
             if col not in chat_cols:
                 await db.execute(
@@ -622,6 +627,7 @@ async def upsert_chat_turn(
     ablated_image_prompt: str = "",
     raw_image_url: str = "",
     ablated_image_url: str = "",
+    image_framing: str = "",
 ) -> None:
     """Write the canonical state of one turn. Called once at turn
     completion (or with finished_at=None to record an in-flight row,
@@ -635,8 +641,8 @@ async def upsert_chat_turn(
             " raw_stopped_reason, ablated_stopped_reason, started_at, "
             " finished_at, error, alpha, "
             " raw_image_prompt, ablated_image_prompt, "
-            " raw_image_url, ablated_image_url) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            " raw_image_url, ablated_image_url, image_framing) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(session_id, turn_idx) DO UPDATE SET "
             "  user_text=excluded.user_text, "
             "  raw_text=excluded.raw_text, "
@@ -650,13 +656,14 @@ async def upsert_chat_turn(
             "  raw_image_prompt=excluded.raw_image_prompt, "
             "  ablated_image_prompt=excluded.ablated_image_prompt, "
             "  raw_image_url=excluded.raw_image_url, "
-            "  ablated_image_url=excluded.ablated_image_url",
+            "  ablated_image_url=excluded.ablated_image_url, "
+            "  image_framing=excluded.image_framing",
             (
                 session_id, turn_idx, user_text, raw_text, ablated_text,
                 raw_stopped_reason, ablated_stopped_reason, started_at,
                 finished_at, error, alpha,
                 raw_image_prompt, ablated_image_prompt,
-                raw_image_url, ablated_image_url,
+                raw_image_url, ablated_image_url, image_framing,
             ),
         )
         if turn_idx == 0:
@@ -687,7 +694,7 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
             "       raw_stopped_reason, ablated_stopped_reason, "
             "       started_at, finished_at, error, alpha, "
             "       raw_image_prompt, ablated_image_prompt, "
-            "       raw_image_url, ablated_image_url "
+            "       raw_image_url, ablated_image_url, image_framing "
             "FROM chat_turns WHERE session_id = ? ORDER BY turn_idx",
             (session_id,),
         ) as cur:
@@ -717,6 +724,7 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
                 "ablated_image_prompt": t["ablated_image_prompt"] or "",
                 "raw_image_url": t["raw_image_url"] or "",
                 "ablated_image_url": t["ablated_image_url"] or "",
+                "image_framing": t["image_framing"] or "",
             }
             for t in trows
         ],

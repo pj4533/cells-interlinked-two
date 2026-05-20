@@ -146,6 +146,7 @@ export default function ChatDetailPage() {
         <ImageLightbox
           url={lightbox.url}
           caption={lightbox.caption}
+          framingPrompt={lightbox.framingPrompt}
           onClose={lightbox.close}
         />
       )}
@@ -160,7 +161,7 @@ function TurnReview({
 }: {
   turn: ChatSessionView["turns"][number];
   variantName: string;
-  onOpenImage: (url: string, caption: string) => void;
+  onOpenImage: (url: string, caption: string, framingPrompt: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -204,6 +205,7 @@ function TurnReview({
           variantName={variantName}
           imageUrl={turn.raw_image_url ?? ""}
           imagePrompt={turn.raw_image_prompt ?? ""}
+          imageFramingPrompt={turn.image_framing_prompt ?? ""}
           onOpenImage={onOpenImage}
         />
         <ChannelView
@@ -214,6 +216,7 @@ function TurnReview({
           variantName={variantName}
           imageUrl={turn.ablated_image_url ?? ""}
           imagePrompt={turn.ablated_image_prompt ?? ""}
+          imageFramingPrompt={turn.image_framing_prompt ?? ""}
           onOpenImage={onOpenImage}
         />
       </div>
@@ -235,6 +238,7 @@ function ChannelView({
   variantName,
   imageUrl,
   imagePrompt,
+  imageFramingPrompt,
   onOpenImage,
 }: {
   side: "raw" | "ablated";
@@ -244,7 +248,8 @@ function ChannelView({
   variantName: string;
   imageUrl: string;
   imagePrompt: string;
-  onOpenImage: (url: string, caption: string) => void;
+  imageFramingPrompt: string;
+  onOpenImage: (url: string, caption: string, framingPrompt: string) => void;
 }) {
   const isRaw = side === "raw";
   const accent = isRaw ? "rgba(232,195,130,1)" : "rgba(94,229,229,1)";
@@ -307,6 +312,7 @@ function ChannelView({
             phase="done"
             imageUrl={imageUrl}
             prompt={imagePrompt}
+            framingPrompt={imageFramingPrompt}
             imageError=""
             onOpen={onOpenImage}
           />

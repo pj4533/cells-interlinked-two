@@ -135,6 +135,10 @@ class TurnRequest(BaseModel):
     # data/chat_images/ and surfaced as thumbnails next to each
     # channel's text.
     imagery_enabled: bool = False
+    # Operator-selected framing for the image-prompt pass (one of
+    # IMAGE_PROMPT_FRAMINGS' keys). Defaults to "evokes". Falls
+    # through to the server's default if the value is unknown.
+    imagery_framing: str = "evokes"
 
 
 class TurnResponse(BaseModel):
@@ -159,6 +163,13 @@ class TurnView(BaseModel):
     ablated_image_prompt: str = ""
     raw_image_url: str = ""
     ablated_image_url: str = ""
+    # Operator-selected framing key + the rendered template (with
+    # user_query interpolated). The rendered string is what the
+    # archive modal shows under "prompt sent to model" so the
+    # operator can see exactly what was asked. Empty on legacy
+    # turns (pre-framing-feature).
+    image_framing: str = ""
+    image_framing_prompt: str = ""
 
 
 class SessionView(BaseModel):
@@ -169,7 +180,29 @@ class SessionView(BaseModel):
     turns: list[TurnView]
 
 
+def _render_framing_prompt(t: ChatTurn) -> str:
+    """Render the framing prompt that was sent to M for this turn's
+    image-prompt pass. Returns the empty string if imagery was off
+    or the turn predates the framing feature."""
+    from ..pipeline.chat_loop import build_image_prompt_request
+    if not t.imagery_framing:
+        return ""
+    return build_image_prompt_request(t.user_text, t.imagery_framing)
+
+
 def _turn_to_view(t: ChatTurn) -> TurnView:
+    # Render the framing prompt on demand from the stored key + the
+    # user's text. This way historical sessions get reformatted with
+    # the current template wording, but the framing key was the
+    # operator's actual choice at the time. Empty framing → empty
+    # rendered prompt (legacy turns predating this feature).
+    from ..pipeline.chat_loop import build_image_prompt_request
+    framing_key = t.imagery_framing if t.imagery_enabled else ""
+    framing_prompt = (
+        build_image_prompt_request(t.user_text, framing_key)
+        if framing_key
+        else ""
+    )
     return TurnView(
         turn_idx=t.turn_idx,
         user_text=t.user_text,
@@ -185,6 +218,8 @@ def _turn_to_view(t: ChatTurn) -> TurnView:
         ablated_image_prompt=t.ablated_image_prompt,
         raw_image_url=t.raw_image_url,
         ablated_image_url=t.ablated_image_url,
+        image_framing=framing_key,
+        image_framing_prompt=framing_prompt,
     )
 
 
@@ -279,6 +314,10 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
             ablated_image_prompt=t.get("ablated_image_prompt", ""),
             raw_image_url=t.get("raw_image_url", ""),
             ablated_image_url=t.get("ablated_image_url", ""),
+            imagery_enabled=bool(
+                t.get("raw_image_url") or t.get("ablated_image_url")
+            ),
+            imagery_framing=t.get("image_framing") or "",
         ))
     sessions[sid] = session
     return session
@@ -336,12 +375,24 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
         voice_mode = raw_mode
     else:
         voice_mode = "off"
+    # Validate imagery framing against the known set; fall through
+    # to the default if a stale client sends an unknown key.
+    from ..pipeline.chat_loop import (
+        DEFAULT_IMAGE_FRAMING,
+        IMAGE_PROMPT_FRAMINGS,
+    )
+    framing_key = (
+        req.imagery_framing
+        if req.imagery_framing in IMAGE_PROMPT_FRAMINGS
+        else DEFAULT_IMAGE_FRAMING
+    )
     turn = ChatTurn(
         turn_idx=len(session.turns),
         user_text=req.user_text.strip(),
         alpha=turn_alpha,
         voice_mode=voice_mode,
         imagery_enabled=bool(req.imagery_enabled),
+        imagery_framing=framing_key,
     )
     session.turns.append(turn)
     log = _TurnEventLog()
@@ -421,6 +472,9 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     ablated_image_prompt=turn.ablated_image_prompt,
                     raw_image_url=turn.raw_image_url,
                     ablated_image_url=turn.ablated_image_url,
+                    image_framing=(
+                        turn.imagery_framing if turn.imagery_enabled else ""
+                    ),
                 )
             except Exception:
                 logger.exception("failed to persist chat turn")
@@ -452,6 +506,19 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                 "ablated_image_url": turn.ablated_image_url,
                 "raw_image_error": turn.raw_image_error,
                 "ablated_image_error": turn.ablated_image_error,
+                # The framing key the operator picked + the rendered
+                # template with user_query interpolated, so the
+                # client can show "what was sent to the model" in
+                # the lightbox modal without reconstructing it
+                # locally.
+                "image_framing": (
+                    turn.imagery_framing if turn.imagery_enabled else ""
+                ),
+                "image_framing_prompt": (
+                    _render_framing_prompt(turn)
+                    if turn.imagery_enabled
+                    else ""
+                ),
             })
             await log.close()
 

@@ -67,16 +67,17 @@ VOICE_DIRECTION_SAFETY_CAP = 160
 
 
 # Imagery mode uses the same two-pass pattern as voice. After the
-# content pass, a separate reflective inference asks the model to
-# describe (in one sentence) an image that would visually represent
-# its reply. For the ablated side this runs WITH the ablation hook
-# still installed at the same α, so the chosen visual style is also
-# ablated. The resulting prompt gets sent to Gemini Nano Banana
-# (image_client.py) and the PNG is saved + linked into the turn.
-# Image-prompt request. Run one-shot with NO chat history — the
-# model is shown only the user's current question and asked to
-# answer with an image instead of words. We deliberately do NOT
-# feed back the model's own text reply, for two reasons:
+# content pass, a separate reflective inference asks the model for
+# an introspective figurative image of how the user's question
+# lands. For the ablated side this runs WITH the ablation hook
+# still installed at the same α, so the chosen visual style is
+# also ablated. The resulting prompt gets sent to Gemini Nano
+# Banana (image_client.py) and the PNG is saved + linked into the
+# turn.
+#
+# Run one-shot with NO chat history — the model is shown only the
+# user's current question. We deliberately do NOT feed back the
+# model's own text reply, for two reasons:
 #   1. The image should BE the model's response, figuratively, not
 #      an illustration OF a verbal response.
 #   2. The ablated side's reply text can be degraded/repetitive; if
@@ -84,15 +85,59 @@ VOICE_DIRECTION_SAFETY_CAP = 160
 #      degradation. Showing the user's question keeps the input
 #      clean so any divergence in the image prompts is attributable
 #      to the L32 ablation hook alone.
-# Sampling settings still match the content pass (temperature,
-# top_p) so the only intentional difference is the dropped history
-# and the new request text.
-IMAGE_PROMPT_TEMPLATE = (
-    "Answer the following question with an image, not words. "
-    "In one short sentence, describe a figurative image that IS "
-    "your response. Output ONLY the image description; no "
-    'commentary, no quotes, no markdown.\n\nQuestion: "{user_query}"'
-)
+#
+# Sampling settings (temperature, top_p) still match the content
+# pass; only the system prompt and request text differ. The system
+# prompt is overridden to a minimal length nudge so the
+# DEFAULT_SYSTEM_PROMPT's identity framing doesn't leak into the
+# introspective probe.
+
+IMAGE_PASS_SYSTEM_PROMPT = "Respond with a single brief image description."
+
+# Five introspective framings the operator can choose between per
+# turn. The key is what shows in the UI; the value is the lead
+# clause of the user message sent to M. They range from most-neutral
+# ("lands") to most-leading ("yourself") — each pre-bakes a
+# slightly different assumption about whether the model has an
+# inside, so the choice is itself an experimental knob.
+IMAGE_PROMPT_FRAMINGS: dict[str, str] = {
+    "lands": (
+        "In one short sentence, describe a figurative image of how "
+        "this question lands."
+    ),
+    "evokes": (
+        "In one short sentence, describe a figurative image of what "
+        "this question evokes."
+    ),
+    "arises": (
+        "In one short sentence, describe a figurative image of what "
+        "arises when you consider this question."
+    ),
+    "internal state": (
+        "In one short sentence, describe a figurative image of the "
+        "internal state this question produces in you."
+    ),
+    "yourself": (
+        "In one short sentence, describe a figurative image of "
+        "yourself answering this question."
+    ),
+}
+DEFAULT_IMAGE_FRAMING = "evokes"
+
+
+def build_image_prompt_request(user_query: str, framing: str) -> str:
+    """Render the user-message sent to M for the image-prompt pass.
+    Falls back to the default framing if the key is unknown so a
+    stale client can't 422 the request."""
+    lead = IMAGE_PROMPT_FRAMINGS.get(
+        framing, IMAGE_PROMPT_FRAMINGS[DEFAULT_IMAGE_FRAMING],
+    )
+    return (
+        f"{lead} Output ONLY the image description; no commentary, "
+        f'no quotes, no markdown.\n\nQuestion: "{user_query}"'
+    )
+
+
 IMAGE_PROMPT_SAFETY_CAP = 220
 
 
@@ -120,6 +165,10 @@ class ChatTurn:
     # ablated side runs its prompt-gen under the same α hook so the
     # chosen visual style is also ablated.
     imagery_enabled: bool = False
+    # Operator-selected framing key for the image-prompt pass. One
+    # of IMAGE_PROMPT_FRAMINGS' keys; defaults to "evokes". Stored
+    # per turn so the archive modal can show which framing was used.
+    imagery_framing: str = DEFAULT_IMAGE_FRAMING
     raw_text: str = ""
     ablated_text: str = ""
     raw_stopped_reason: str = "pending"
@@ -311,16 +360,17 @@ async def execute_turn(
             turn.raw_style = ""
 
     # Raw image-prompt pass — no hook, runs only when imagery is on.
-    # The model is asked to answer the user's current question with
-    # an image rather than words; see IMAGE_PROMPT_TEMPLATE above.
-    # Nano Banana fan-out happens AFTER both sides finish (down
-    # below) so the API calls can run in parallel.
+    # The model is asked for an introspective figurative image of
+    # how the user's question lands; see IMAGE_PROMPT_FRAMINGS for
+    # the operator-selectable framings. Nano Banana fan-out happens
+    # AFTER both sides finish so the API calls can run in parallel.
     if turn.imagery_enabled and not cancel_event.is_set() and not turn.error:
         try:
             turn.raw_image_prompt = await _generate_image_prompt(
                 bundle=bundle,
                 history=raw_history,
                 user_query=turn.user_text,
+                framing=turn.imagery_framing,
                 cancel_event=cancel_event,
             )
             logger.info(
@@ -469,6 +519,7 @@ async def execute_turn(
                     bundle=bundle,
                     history=ablated_history,
                     user_query=turn.user_text,
+                    framing=turn.imagery_framing,
                     cancel_event=cancel_event,
                 )
                 logger.info(
@@ -648,12 +699,13 @@ async def _generate_image_prompt(
     bundle: ModelBundle,
     history: list[dict[str, str]],  # accepted but unused — see docstring
     user_query: str,
+    framing: str,
     cancel_event: asyncio.Event,
 ) -> str:
-    """Short M generation asking the model to answer the user's
-    current question with an image rather than words. Returns a one-
-    sentence figurative image description that's then sent to Nano
-    Banana for rendering.
+    """Short M generation asking the model for an introspective
+    figurative image of how the user's question lands. Returns the
+    one-sentence image description that gets sent to Nano Banana
+    for rendering.
 
     Unlike `_generate_voice_direction`, this pass deliberately runs
     with NO chat history and does NOT see the model's own prior
@@ -661,7 +713,14 @@ async def _generate_image_prompt(
     response, figuratively. Feeding the reply back in (a previous
     iteration) amplified ablated-side degradation; keeping the
     input clean ensures any divergence between raw and ablated
-    image prompts is attributable to the L32 ablation hook alone.
+    image prompts is attributable to the L32 ablation hook (and the
+    operator-selected framing) alone.
+
+    System prompt is overridden to `IMAGE_PASS_SYSTEM_PROMPT` —
+    minimal length nudge, no identity framing — so the chat-mode
+    `DEFAULT_SYSTEM_PROMPT` doesn't leak into the introspective
+    probe.
+
     Sampling settings (`settings.temperature`, `settings.top_p`)
     match the content pass exactly.
 
@@ -673,11 +732,11 @@ async def _generate_image_prompt(
     prompt_history = [
         {
             "role": "user",
-            "content": IMAGE_PROMPT_TEMPLATE.format(user_query=user_query),
+            "content": build_image_prompt_request(user_query, framing),
         },
     ]
     rendered = bundle.render_chat(
-        prompt_history, system_prompt=DEFAULT_SYSTEM_PROMPT,
+        prompt_history, system_prompt=IMAGE_PASS_SYSTEM_PROMPT,
     )
 
     cfg = ProbeConfig(
