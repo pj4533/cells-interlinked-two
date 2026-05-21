@@ -346,6 +346,13 @@ journal/                   separate Next.js app, deployed to cells-interlinked.v
 docs/
   CI_2_5_PLAN.md           original phase plan
   REFUSAL_VECTORS.md       per-variant explanation of v1..v4
+  PROTOCOLS.md             chat interrogation protocols (BERG, LINDSEY,
+                           ELEOS, SCHNEIDER, CHALMERS, JANUS, BUTLIN).
+                           Each is a preset library of prompts grounded
+                           in a published research lineage; one is
+                           active at a time via the chat PROTOCOL picker.
+  BERG_MODE.md             deep-dive on Berg's Layer-2 mechanistic
+                           experiment + the CI 2.5 ablation analogue.
 
 e2e/                       playwright smoke tests
 ```

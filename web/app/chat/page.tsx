@@ -21,7 +21,9 @@ import {
   type ChatStreamEvent,
   type ImageFraming,
 } from "@/lib/chat";
-import { BergMenu } from "./BergMenu";
+import { ProtocolMenu } from "./ProtocolMenu";
+import { ProtocolPicker, ProtocolInfoModal } from "./ProtocolPicker";
+import { getProtocol } from "@/lib/protocols";
 import {
   ChannelImageBlock,
   ImageLightbox,
@@ -33,7 +35,11 @@ import { ChannelVoiceActivity } from "./VoiceMonitor";
 
 // localStorage key for the Berg-mode toggle on the chat composer.
 // Persisted so the chip strip stays on across sessions once enabled.
-const BERG_MODE_LS_KEY = "ci25.chat.bergMode";
+/** localStorage key for the active interrogation protocol. Empty
+ *  string (or absent) = OFF; otherwise the value is the protocol id
+ *  ("berg" / "lindsey" / "eleos" / "schneider" / "chalmers" / "janus"
+ *  / "butlin"). See web/lib/protocols.ts for the registry. */
+const PROTOCOL_LS_KEY = "ci25.chat.protocol";
 // localStorage key for the voice-mode toggle. Same idea — sticky
 // across sessions so the user doesn't have to re-enable on reload.
 const VOICE_MODE_LS_KEY = "ci25.chat.voiceMode";
@@ -1636,27 +1642,29 @@ function InputBar({
     !ALPHA_PRESETS.includes(alpha),
   );
   const [customText, setCustomText] = useState<string>(alpha.toFixed(2));
-  // Berg-mode chip strip toggle. Persisted in localStorage so the
-  // user doesn't have to re-enable across sessions. The chips
-  // populate the composer textarea — they NEVER auto-send (per
-  // docs/BERG_MODE.md §7.5).
-  const [bergMode, setBergMode] = useState<boolean>(false);
+  // Active interrogation protocol — see web/lib/protocols.ts and
+  // docs/PROTOCOLS.md. null = OFF (no chip strip). Persisted in
+  // localStorage so the operator doesn't have to re-select across
+  // sessions. Chip clicks populate the composer textarea — they
+  // NEVER auto-send (the never-auto-send contract).
+  const [protocolId, setProtocolId] = useState<string | null>(null);
+  const [protocolInfoOpen, setProtocolInfoOpen] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setBergMode(window.localStorage.getItem(BERG_MODE_LS_KEY) === "1");
+    const stored = window.localStorage.getItem(PROTOCOL_LS_KEY);
+    setProtocolId(stored && stored.length > 0 ? stored : null);
   }, []);
-  const toggleBerg = () => {
-    setBergMode((prev) => {
-      const next = !prev;
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(BERG_MODE_LS_KEY, next ? "1" : "0");
-      }
-      return next;
-    });
+  const pickProtocol = (next: string | null) => {
+    setProtocolId(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(PROTOCOL_LS_KEY, next ?? "");
+    }
+    if (next === null) setProtocolInfoOpen(false);
   };
-  const onBergPick = (text: string) => {
+  const activeProtocol = getProtocol(protocolId);
+  const onProtocolPick = (text: string) => {
     onChange(text);
-    // Focus the textarea after a chip click so the user can edit
+    // Focus the textarea after a chip click so the operator can edit
     // immediately. Defer to next tick so React's state update lands
     // before we move the cursor.
     requestAnimationFrame(() => {
@@ -1737,24 +1745,12 @@ function InputBar({
             >
               IMAGE&nbsp;{imageryOn ? "●" : "○"}
             </button>
-            <button
-              type="button"
-              onClick={toggleBerg}
+            <ProtocolPicker
+              activeId={protocolId}
+              onChange={pickProtocol}
+              onOpenInfo={() => setProtocolInfoOpen(true)}
               disabled={inFlight}
-              className={`px-2 py-0.5 border text-[9px] font-display tracking-[0.35em] transition-colors disabled:opacity-50 ${
-                bergMode
-                  ? "border-amber text-amber bg-bg"
-                  : "border-rule/40 text-text-dim hover:text-amber hover:border-amber/60"
-              }`}
-              style={
-                bergMode
-                  ? { textShadow: "0 0 6px rgba(232,195,130,0.4)" }
-                  : undefined
-              }
-              title="Toggle Berg-protocol prompt chips above the composer"
-            >
-              BERG&nbsp;{bergMode ? "●" : "○"}
-            </button>
+            />
           </div>
           {/* Per-turn α picker. Applies to the next transmission only;
               defaults to whatever was used last so a steady-state
@@ -1839,8 +1835,18 @@ function InputBar({
               disabled={inFlight}
             />
           )}
-          {bergMode && (
-            <BergMenu onPick={onBergPick} disabled={inFlight} />
+          {activeProtocol && (
+            <ProtocolMenu
+              protocol={activeProtocol}
+              onPick={onProtocolPick}
+              disabled={inFlight}
+            />
+          )}
+          {protocolInfoOpen && activeProtocol && (
+            <ProtocolInfoModal
+              protocol={activeProtocol}
+              onClose={() => setProtocolInfoOpen(false)}
+            />
           )}
           <div className="flex items-start gap-2">
             <span
