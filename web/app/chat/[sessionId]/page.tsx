@@ -9,6 +9,13 @@ import {
   ImageLightbox,
   useImageLightbox,
 } from "../imagery";
+import {
+  TurnSelectToggle,
+  ShareSelectionBar,
+  ShareModal,
+  useShareSelection,
+  useShareModal,
+} from "../share";
 
 /** Read-only review view of a persisted chat session. Same transcript
  *  aesthetic as the live page but without the input bar — this is the
@@ -22,6 +29,8 @@ export default function ChatDetailPage() {
     undefined,
   );
   const lightbox = useImageLightbox();
+  const selection = useShareSelection();
+  const shareModal = useShareModal();
 
   useEffect(() => {
     if (!sessionId) return;
@@ -125,6 +134,8 @@ export default function ChatDetailPage() {
                 turn={t}
                 variantName={variantName}
                 onOpenImage={lightbox.open}
+                selected={selection.isSelected(t.turn_idx)}
+                onToggleSelect={() => selection.toggle(t.turn_idx)}
               />
             ))}
             {/* Closing band — gives the transcript a "file-end" feel */}
@@ -150,6 +161,24 @@ export default function ChatDetailPage() {
           onClose={lightbox.close}
         />
       )}
+
+      <ShareSelectionBar
+        count={selection.count}
+        onShare={shareModal.open}
+        onClear={selection.clear}
+      />
+
+      {shareModal.isOpen && selection.count > 0 && (
+        <ShareModal
+          sessionId={session.session_id}
+          selectedIdx={selection.selectedIdx}
+          anySelectionHasImagery={selection.selectedIdx.some((idx) => {
+            const t = session.turns.find((x) => x.turn_idx === idx);
+            return !!(t && (t.raw_image_url || t.ablated_image_url));
+          })}
+          onClose={shareModal.close}
+        />
+      )}
     </div>
   );
 }
@@ -158,13 +187,29 @@ function TurnReview({
   turn,
   variantName,
   onOpenImage,
+  selected,
+  onToggleSelect,
 }: {
   turn: ChatSessionView["turns"][number];
   variantName: string;
   onOpenImage: (url: string, caption: string, framingPrompt: string) => void;
+  selected: boolean;
+  onToggleSelect: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-4">
+    <div
+      className={
+        "flex flex-col gap-4 transition-colors " +
+        (selected
+          ? "pl-3 -ml-3 border-l-2 border-amber"
+          : "border-l-2 border-transparent")
+      }
+      style={
+        selected
+          ? { boxShadow: "inset 4px 0 16px -8px rgba(232,195,130,0.35)" }
+          : undefined
+      }
+    >
       <div className="flex items-baseline gap-3 text-[10px]">
         <span className="text-amber-dim font-display tracking-widest tabular-nums">
           {formatHMS(turn.started_at * 1000)}
@@ -186,6 +231,7 @@ function TurnReview({
             {((turn.finished_at - turn.started_at) || 0).toFixed(1)}s
           </span>
         )}
+        <TurnSelectToggle selected={selected} onToggle={onToggleSelect} />
       </div>
 
       <div
