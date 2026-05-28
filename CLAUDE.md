@@ -215,6 +215,16 @@ piece:
   list surfaces them under "dual-channel dialogues"; read-only
   transcript review at `/chat/[sessionId]`.
 - Riley starter probes with matched neutrals.
+- **Edge-consumer ablation (Phase B)** — Burgess-inspired per-attention-
+  head primitive that sits alongside the global L32 hook. Lives at
+  `pipeline/edge_consumer/` (hook + AP scorer + subset composer +
+  verdict). Chat surface exposes it via the new `ablation_mode`
+  session field (`global` | `edge_consumer` | `off`). CLI workflow:
+  `server/scripts/run_edge_consumer_pipeline.py` runs Steps 1+3+4
+  end-to-end (~overnight on M2 Ultra); intermediate artifacts under
+  `server/data/edge_consumer/`. Full reference:
+  `docs/EDGE_CONSUMER_ABLATION.md`. Phase A inspection UI deferred —
+  see `docs/EDGE_CONSUMER_PHASE_A_PLAN.md`.
 
 ## Removed in CI 2.5
 
@@ -319,6 +329,13 @@ server/cells_interlinked/
     nla_synthesizer.py     end-of-run synthesis pass — one paragraph per α
     abliteration.py        refusal-direction extract + project_out + runtime hook
     refusal_prompts.py     HARMFUL_PROMPTS + HARMLESS_PROMPTS
+    edge_consumer/         Burgess-inspired per-attention-head ablation primitive
+      hook.py              install_edge_consumer_ablation_hook (post-hook on q/k/v_proj)
+      proj_cache.py        precompute + persist W_{q,k,v} @ v_safety per layer
+      attribution.py       Step 1 — AP scores per (layer, head) via 3-pass patching
+      subset_compose.py    Step 3 — greedy sufficient subset (ε-swept refusal-rate)
+      verdict.py           Step 4 — paired-channel L2 diagnostic (raw/global/edge)
+      refusal_vocab.py     Arditi-style refusal-marker vocabulary
     chat_loop.py           ChatSession / ChatTurn + execute_turn (dual M generation)
     probes_library.py      curated probe library (Riley starters)
     probe_controls.py      BASELINE_CONTROLS, control_for(probe_text)
@@ -329,6 +346,13 @@ server/cells_interlinked/
   storage/db.py            aiosqlite schema + helpers (probes + chat_sessions + chat_turns)
   scripts/
     compute_refusal_direction.py    refusal-vector extraction script
+    run_edge_consumer_attribution.py   Step 1 — per-head AP scores
+    compose_edge_consumer_subset.py    Step 3 — sufficient subset (ε-swept)
+    run_edge_consumer_diagnostic.py    Step 4 — 2×2 L2 table on 100 prompts
+    run_edge_consumer_pipeline.py      Steps 1+3+4 end-to-end (one overnight)
+    _edge_consumer_common.py           shared helpers for the four above
+  tests/
+    test_edge_consumer_hook.py    fp64 correctness of the per-head post-hook
 
 web/
   app/
@@ -346,6 +370,8 @@ journal/                   separate Next.js app, deployed to cells-interlinked.v
 docs/
   CI_2_5_PLAN.md           original phase plan
   REFUSAL_VECTORS.md       per-variant explanation of v1..v4
+  EDGE_CONSUMER_ABLATION.md      Phase B reference (Burgess-style per-head ablation)
+  EDGE_CONSUMER_PHASE_A_PLAN.md  inspection-UI roadmap (post-overnight)
   PROTOCOLS.md             chat interrogation protocols (BERG, LINDSEY,
                            ELEOS, SCHNEIDER, CHALMERS, JANUS, BUTLIN).
                            Each is a preset library of prompts grounded

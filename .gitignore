@@ -74,6 +74,11 @@ server/data/chat_images/
 # Local ablation-sweep result dumps (jsonl + md), produced by
 # scripts/sweep_ablation_variants.py. Kept on disk, not in repo.
 server/data/_sweep_results/
+# Edge-consumer ablation artifacts (Step 1 attribution scores, Step 3
+# sufficient subsets, Step 4 verdict tables, proj caches). All computed
+# from refusal directions + Arditi prompts; reproducible by re-running
+# the scripts in docs/EDGE_CONSUMER_ABLATION.md §5.
+server/data/edge_consumer/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal

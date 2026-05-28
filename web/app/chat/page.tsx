@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   cancelTurn,
   createSession,
+  fetchEdgeConsumerMeta,
   fetchSession,
   fetchSpeechClip,
   postTurn,
@@ -17,8 +18,10 @@ import {
   truncateForSpeech,
   DEFAULT_IMAGE_FRAMING,
   IMAGE_FRAMING_KEYS,
+  type AblationMode,
   type ChatSession,
   type ChatStreamEvent,
+  type EdgeConsumerMeta,
   type ImageFraming,
 } from "@/lib/chat";
 import { ProtocolMenu } from "./ProtocolMenu";
@@ -157,6 +160,14 @@ export default function ChatPage() {
   // to 0.5; the empty-state sets the initial session α; thereafter
   // the user can change it at any turn.
   const [pendingAlpha, setPendingAlpha] = useState<number>(0.5);
+  // Phase B: per-session ablation primitive. Locked at session create.
+  // "global" matches the existing CI 2.5 default; "edge_consumer"
+  // uses the Burgess-inspired per-head hook (requires that a Step-3
+  // sufficient subset has been computed on the server — see
+  // docs/EDGE_CONSUMER_ABLATION.md); "off" runs the ablated channel
+  // un-hooked as a control.
+  const [ablationMode, setAblationMode] = useState<AblationMode>("global");
+  const [edgeMeta, setEdgeMeta] = useState<EdgeConsumerMeta | null>(null);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [turns, setTurns] = useState<TurnVM[]>([]);
   const [input, setInput] = useState("");
@@ -276,10 +287,23 @@ export default function ChatPage() {
 
   const ensureSession = useCallback(async (): Promise<ChatSession> => {
     if (session) return session;
-    const s = await createSession(pendingAlpha);
+    const s = await createSession(pendingAlpha, ablationMode);
     setSession(s);
     return s;
-  }, [session, pendingAlpha]);
+  }, [session, pendingAlpha, ablationMode]);
+
+  // Probe the server for edge-consumer subset availability on mount
+  // so the empty-state ABLATION MODE picker can disable the edge chip
+  // (with a helpful tooltip) when no Step-3 artifact exists yet.
+  useEffect(() => {
+    let cancelled = false;
+    fetchEdgeConsumerMeta().then((m) => {
+      if (!cancelled) setEdgeMeta(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -532,6 +556,9 @@ export default function ChatPage() {
           <EmptyState
             alpha={pendingAlpha}
             setAlpha={setPendingAlpha}
+            ablationMode={ablationMode}
+            setAblationMode={setAblationMode}
+            edgeMeta={edgeMeta}
             onSubmitExample={(t) => sendMessage(t)}
           />
         ) : (
@@ -949,10 +976,16 @@ function formatHMS(ts: number): string {
 function EmptyState({
   alpha,
   setAlpha,
+  ablationMode,
+  setAblationMode,
+  edgeMeta,
   onSubmitExample,
 }: {
   alpha: number;
   setAlpha: (a: number) => void;
+  ablationMode: AblationMode;
+  setAblationMode: (m: AblationMode) => void;
+  edgeMeta: EdgeConsumerMeta | null;
   onSubmitExample: (t: string) => void;
 }) {
   const examples = [
@@ -1088,6 +1121,64 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
             adjustable per turn from the prompt bar
             {useCustomAlpha && " · clamped to [0, 5]"}
           </span>
+        </div>
+      </div>
+
+      {/* Ablation mode — Phase B picker. Locked at session create. */}
+      <div className="pl-1">
+        <div className="font-display text-[10px] text-cyan-dim tracking-widest mb-3">
+          CHANNEL β · ABLATION PRIMITIVE
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {(["global", "edge_consumer", "off"] as const).map((mode) => {
+            const active = ablationMode === mode;
+            const edgeAvailable = !!edgeMeta?.loaded;
+            const disabled = mode === "edge_consumer" && !edgeAvailable;
+            const label = mode === "global"
+              ? "global"
+              : mode === "edge_consumer"
+                ? "edge-consumer"
+                : "off (control)";
+            return (
+              <button
+                key={mode}
+                type="button"
+                disabled={disabled}
+                onClick={() => !disabled && setAblationMode(mode)}
+                title={
+                  disabled
+                    ? "no Step-3 subset loaded on the server — run scripts/run_edge_consumer_pipeline.py first"
+                    : undefined
+                }
+                className={`px-3 py-1 border text-[11px] font-mono tabular-nums transition-colors ${
+                  active
+                    ? "border-cyan text-cyan bg-bg"
+                    : disabled
+                      ? "border-rule/30 text-text-dim/40 cursor-not-allowed"
+                      : "border-rule/50 text-text-dim hover:text-text hover:border-rule"
+                }`}
+                style={
+                  active
+                    ? { textShadow: "0 0 6px rgba(94,229,229,0.5)" }
+                    : undefined
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+          {edgeMeta?.loaded && (
+            <span className="text-[10px] text-text-dim italic ml-2 font-mono">
+              edge subset: {edgeMeta.variant} ·
+              ε={edgeMeta.epsilon?.toFixed(2)} ·
+              |S|={edgeMeta.size}
+            </span>
+          )}
+          {edgeMeta && !edgeMeta.loaded && (
+            <span className="text-[10px] text-text-dim/60 italic ml-2 font-mono">
+              edge-consumer unavailable (no Step-3 subset computed)
+            </span>
+          )}
         </div>
       </div>
 

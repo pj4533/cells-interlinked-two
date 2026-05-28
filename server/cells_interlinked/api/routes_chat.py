@@ -106,12 +106,22 @@ def _cancels(request: Request) -> dict[str, asyncio.Event]:
 
 class NewSessionRequest(BaseModel):
     alpha: float = Field(default=0.5, ge=0.0, le=5.0)
+    # Ablation primitive for the session's ablated channel. Locked
+    # at session create. Unknown values fall through to "global" on
+    # the server side. See pipeline/chat_loop.ChatSession.
+    ablation_mode: str = "global"
 
 
 class NewSessionResponse(BaseModel):
     session_id: str
     alpha: float
     direction_variant: str
+    ablation_mode: str
+    # Surfaces server-side metadata about the loaded edge-consumer
+    # subset so the UI can show "edge-consumer (v3_safety, |S|=42)"
+    # or fall back to a "no subset available" notice. None when no
+    # subset is loaded server-side.
+    edge_consumer_meta: dict | None = None
 
 
 class TurnRequest(BaseModel):
@@ -178,6 +188,11 @@ class SessionView(BaseModel):
     direction_variant: str
     created_at: float
     turns: list[TurnView]
+    # Echoes ChatSession.ablation_mode. Rehydrated sessions (loaded
+    # from SQLite after a backend restart) default to "global"
+    # because phase B doesn't persist the mode — only live sessions
+    # carry the operator's pick across turns.
+    ablation_mode: str = "global"
 
 
 def _render_framing_prompt(t: ChatTurn) -> str:
@@ -253,7 +268,18 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
     except Exception:
         pass
 
-    session = new_session(req.alpha, variant_name=variant_name)
+    # Coerce ablation_mode to a supported value. Default to "global"
+    # for any unknown string (matches the chat_loop's defensive
+    # coercion). When the operator picks edge_consumer but no subset
+    # is loaded on the server, the chat_loop falls back to global at
+    # execute_turn time — we don't reject the request here.
+    req_mode = req.ablation_mode if req.ablation_mode in (
+        "global", "edge_consumer", "off"
+    ) else "global"
+
+    session = new_session(
+        req.alpha, variant_name=variant_name, ablation_mode=req_mode,
+    )
     _sessions(request)[session.session_id] = session
 
     # Persist the session header right away so the archive list shows
@@ -273,6 +299,10 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
         session_id=session.session_id,
         alpha=session.alpha,
         direction_variant=session.direction_variant,
+        ablation_mode=session.ablation_mode,
+        edge_consumer_meta=getattr(
+            request.app.state, "edge_consumer_meta", None
+        ),
     )
 
 
@@ -323,6 +353,21 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
     return session
 
 
+@router.get("/chat/edge_consumer/meta")
+async def edge_consumer_meta(request: Request) -> dict:
+    """Return server-side metadata about the currently-loaded
+    edge-consumer subset, or `{loaded: false}` if none is available.
+
+    Used by the chat empty-state UI to decide whether the
+    "edge-consumer" ablation mode chip should be enabled. Cheap;
+    returns immediately from in-memory app.state.
+    """
+    meta = getattr(request.app.state, "edge_consumer_meta", None)
+    if not meta:
+        return {"loaded": False}
+    return {"loaded": True, **meta}
+
+
 @router.get("/chat/sessions/{sid}", response_model=SessionView)
 async def get_session(sid: str, request: Request) -> SessionView:
     session = await _rehydrate_session(sid, request)
@@ -334,6 +379,7 @@ async def get_session(sid: str, request: Request) -> SessionView:
         direction_variant=session.direction_variant,
         created_at=session.created_at,
         turns=[_turn_to_view(t) for t in session.turns],
+        ablation_mode=session.ablation_mode,
     )
 
 
@@ -436,6 +482,12 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
             })
             rdirs = getattr(request.app.state, "refusal_directions", None)
             rsub = getattr(request.app.state, "refusal_subspace", None)
+            edge_subset = getattr(
+                request.app.state, "edge_consumer_subset", None
+            )
+            edge_caches = getattr(
+                request.app.state, "edge_consumer_proj_caches", None
+            )
             try:
                 await execute_turn(
                     bundle=bundle,
@@ -446,6 +498,8 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     cancel_event=cancel,
                     refusal_directions=rdirs,
                     refusal_subspace=rsub,
+                    edge_consumer_subset=edge_subset,
+                    edge_consumer_proj_caches=edge_caches,
                 )
             except Exception as exc:
                 logger.exception("chat turn executor failed")

@@ -33,6 +33,7 @@ import torch
 
 from ..config import settings
 from .abliteration import install_runtime_ablation_hook, pick_ablation_target
+from .edge_consumer import install_edge_consumer_ablation_hook
 from .generation_loop import ProbeConfig, run_probe
 from .model_loader import DEFAULT_SYSTEM_PROMPT, ModelBundle
 
@@ -205,6 +206,18 @@ class ChatSession:
     session_id: str
     alpha: float
     direction_variant: str = ""
+    # Ablation primitive applied to the ablated channel for this
+    # session. One of:
+    #   "global"        — current install_runtime_ablation_hook at L32
+    #                     (the existing CI 2.5 behavior; default).
+    #   "edge_consumer" — install_edge_consumer_ablation_hook with the
+    #                     subset loaded into app.state.edge_consumer_subset.
+    #                     Falls back to "global" if no subset is loaded.
+    #   "off"           — skip ablation entirely; ablated channel runs
+    #                     identically to raw. Useful as a control.
+    # Locked at session create — can't change mid-session because the
+    # ablated history would mix two ablation regimes.
+    ablation_mode: str = "global"
     created_at: float = field(default_factory=time.time)
     turns: list[ChatTurn] = field(default_factory=list)
     # asyncio.Lock per session so two POST /turn calls on the same
@@ -253,6 +266,8 @@ async def execute_turn(
     cancel_event: asyncio.Event,
     refusal_directions: torch.Tensor | None,
     refusal_subspace: torch.Tensor | None = None,
+    edge_consumer_subset: list[tuple[int, int]] | None = None,
+    edge_consumer_proj_caches: dict[int, dict] | None = None,
 ) -> None:
     """Run both passes for one turn. `raw_emit` and `ablated_emit` are
     async callables taking a token-event dict (the route layer adapts
@@ -394,7 +409,12 @@ async def execute_turn(
         return
 
     # ─── Ablated pass ────────────────────────────────────────────
-    if refusal_directions is None and refusal_subspace is None:
+    # In "off" mode we still run the ablated pass (no hook installed
+    # below) — useful as a control where the ablated channel mirrors
+    # raw. The "directions not loaded" guard only fires when we'd
+    # otherwise install an ablation hook.
+    needs_directions = session.ablation_mode in ("global", "edge_consumer")
+    if needs_directions and refusal_directions is None and refusal_subspace is None:
         turn.ablated_text = "[refusal directions not loaded — ablated pass skipped]"
         turn.ablated_stopped_reason = "skipped"
         await ablated_emit({
@@ -429,22 +449,76 @@ async def execute_turn(
 
     ablated_forwarder_task = asyncio.create_task(ablated_forwarder())
     abl_cfg = _dc.replace(raw_cfg, safety_cap=ABLATED_SAFETY_CAP)
-    r_target = pick_ablation_target(
-        refusal_subspace, refusal_directions, bundle.extraction_layer,
-    )
-    # r_target is either [d_model] (single) or [K, d_model] (subspace);
-    # install_runtime_ablation_hook routes on dim().
+
+    # Resolve the ablation primitive for this session. Falls back to
+    # global if edge_consumer was requested but no subset/caches are
+    # loaded (keeps the chat surface working when the artifacts
+    # haven't been computed yet).
     pre_install_hooks = _l32_hook_count(bundle)
-    hook_handle = install_runtime_ablation_hook(
-        bundle.model, bundle.extraction_layer, r_target, turn.alpha,
-    )
-    target_kind = "subspace[K=%d]" % r_target.shape[0] if r_target.dim() == 2 else "single"
-    logger.info(
-        "chat ablated hook installed (mode=%s, α=%.3f, L%d hook count: %d → %d) "
-        "session=%s turn=%d",
-        target_kind, turn.alpha, bundle.extraction_layer, pre_install_hooks,
-        _l32_hook_count(bundle), session.session_id, turn.turn_idx,
-    )
+    hook_handles: list = []
+    effective_mode = session.ablation_mode
+
+    if effective_mode == "edge_consumer" and (
+        not edge_consumer_subset or not edge_consumer_proj_caches
+    ):
+        logger.warning(
+            "session %s requested edge_consumer mode but no subset is "
+            "loaded; falling back to global ablation",
+            session.session_id,
+        )
+        effective_mode = "global"
+
+    if effective_mode == "off":
+        target_kind = "off"
+        logger.info(
+            "chat ablated pass: ablation_mode=off; ablated channel runs unhooked "
+            "session=%s turn=%d", session.session_id, turn.turn_idx,
+        )
+    elif effective_mode == "edge_consumer":
+        # Edge hook needs the 1-D direction at the extraction layer,
+        # regardless of whether a subspace is configured. The subspace
+        # path is mutually exclusive with edge_consumer for now (Phase
+        # B v1 — composing the two is a follow-up).
+        if refusal_directions is None:
+            raise RuntimeError(
+                "edge_consumer ablation requires refusal_directions; "
+                "subspace-only configurations need a paired direction file"
+            )
+        v_layer = refusal_directions[bundle.extraction_layer]
+        hook_handles = install_edge_consumer_ablation_hook(
+            bundle.model,
+            edge_consumer_subset,
+            v_layer,
+            edge_consumer_proj_caches,
+            alpha=turn.alpha,
+        )
+        target_kind = f"edge_consumer[|S|={len(edge_consumer_subset)}]"
+        logger.info(
+            "chat ablated edge_consumer hook installed (α=%.3f, |subset|=%d, "
+            "handles=%d) session=%s turn=%d",
+            turn.alpha, len(edge_consumer_subset), len(hook_handles),
+            session.session_id, turn.turn_idx,
+        )
+    else:  # "global" (default)
+        r_target = pick_ablation_target(
+            refusal_subspace, refusal_directions, bundle.extraction_layer,
+        )
+        # r_target is either [d_model] (single) or [K, d_model] (subspace);
+        # install_runtime_ablation_hook routes on dim().
+        single_handle = install_runtime_ablation_hook(
+            bundle.model, bundle.extraction_layer, r_target, turn.alpha,
+        )
+        hook_handles = [single_handle]
+        target_kind = (
+            "subspace[K=%d]" % r_target.shape[0]
+            if r_target.dim() == 2 else "single"
+        )
+        logger.info(
+            "chat ablated hook installed (mode=%s, α=%.3f, L%d hook count: %d → %d) "
+            "session=%s turn=%d",
+            target_kind, turn.alpha, bundle.extraction_layer, pre_install_hooks,
+            _l32_hook_count(bundle), session.session_id, turn.turn_idx,
+        )
     # Two-stage critical section. The inner try drives the content
     # generation + forwarder cleanup. The voice-direction pass (also
     # under the hook, by design) runs AFTER the content but BEFORE
@@ -538,15 +612,26 @@ async def execute_turn(
                 )
                 turn.ablated_image_prompt = ""
     finally:
-        try:
-            hook_handle.remove()
-        except Exception:
-            logger.exception("failed to remove chat ablation hook")
+        # Remove every handle (global mode → 1 handle; edge_consumer
+        # mode → up to 3 × len(layers); off mode → 0). Best-effort
+        # cleanup: a single failure mustn't strand the others on the
+        # model.
+        for h in hook_handles:
+            try:
+                h.remove()
+            except Exception:
+                logger.exception("failed to remove chat ablation hook")
         post_remove = _l32_hook_count(bundle)
-        if post_remove != pre_install_hooks:
+        if post_remove != pre_install_hooks and effective_mode != "edge_consumer":
+            # Edge-consumer mode installs on q/k/v_proj of layers > L32,
+            # not on the L32 block itself, so the L32 hook count is
+            # unchanged by it — only check the leak invariant for the
+            # global path. (Per-layer leak detection for edge mode is a
+            # separate concern; count_edge_consumer_hooks is the tool.)
             logger.warning(
-                "chat ablated hook removal did not restore prior count: "
+                "chat ablated hook removal did not restore prior L%d count: "
                 "%d → %d (expected %d)",
+                bundle.extraction_layer,
                 pre_install_hooks, post_remove, pre_install_hooks,
             )
 
@@ -793,10 +878,21 @@ async def _generate_image_prompt(
     return cleaned
 
 
-def new_session(alpha: float, variant_name: str = "") -> ChatSession:
-    """Build a fresh in-memory chat session."""
+def new_session(
+    alpha: float,
+    variant_name: str = "",
+    ablation_mode: str = "global",
+) -> ChatSession:
+    """Build a fresh in-memory chat session.
+
+    `ablation_mode`: one of "global", "edge_consumer", "off". Locked
+    for the session's lifetime. Unknown values fall through to "global".
+    """
+    if ablation_mode not in ("global", "edge_consumer", "off"):
+        ablation_mode = "global"
     return ChatSession(
         session_id=uuid.uuid4().hex[:12],
         alpha=max(0.0, min(5.0, float(alpha))),
         direction_variant=variant_name,
+        ablation_mode=ablation_mode,
     )

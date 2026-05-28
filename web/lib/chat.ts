@@ -12,10 +12,31 @@ function apiBase(): string {
 }
 const API = apiBase();
 
+/** Server-side ablation primitive choice for the ablated channel.
+ *  Locked at session create. `global` is the existing
+ *  L32-residual ablation (CI 2.5's default). `edge_consumer` is the
+ *  Phase B per-attention-head primitive defined in
+ *  docs/EDGE_CONSUMER_ABLATION.md — requires that a sufficient-subset
+ *  artifact has been computed by the overnight scripts and loaded on
+ *  the backend. `off` runs the ablated channel without any hook
+ *  (control comparison). */
+export type AblationMode = "global" | "edge_consumer" | "off";
+
+export interface EdgeConsumerMeta {
+  loaded: boolean;
+  variant?: string;
+  epsilon?: number;
+  size?: number;
+  layers?: number[];
+  file?: string;
+}
+
 export interface ChatSession {
   session_id: string;
   alpha: number;
   direction_variant: string;
+  ablation_mode?: AblationMode;
+  edge_consumer_meta?: EdgeConsumerMeta | null;
 }
 
 export interface ChatTurnView {
@@ -59,6 +80,7 @@ export const DEFAULT_IMAGE_FRAMING: ImageFraming = "evokes";
 export interface ChatSessionView extends ChatSession {
   created_at: number;
   turns: ChatTurnView[];
+  ablation_mode?: AblationMode;
 }
 
 /** Streamed events from /chat/stream/{sid}/{turn}. The token events
@@ -140,14 +162,30 @@ export type ChatStreamEvent =
     }
   | { type: "ping" };
 
-export async function createSession(alpha: number): Promise<ChatSession> {
+export async function createSession(
+  alpha: number,
+  ablationMode: AblationMode = "global",
+): Promise<ChatSession> {
   const res = await fetch(`${API}/chat/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ alpha }),
+    body: JSON.stringify({ alpha, ablation_mode: ablationMode }),
   });
   if (!res.ok) throw new Error(`session create failed: ${res.status}`);
   return res.json();
+}
+
+/** GET the server's edge-consumer subset availability. Used by the
+ *  empty-state chat UI to decide whether the edge_consumer chip is
+ *  enabled. Returns {loaded: false} when no subset is loaded. */
+export async function fetchEdgeConsumerMeta(): Promise<EdgeConsumerMeta> {
+  try {
+    const res = await fetch(`${API}/chat/edge_consumer/meta`);
+    if (!res.ok) return { loaded: false };
+    return res.json();
+  } catch {
+    return { loaded: false };
+  }
 }
 
 export async function fetchSession(
