@@ -75,13 +75,13 @@ interface TripRow {
   run_id: string;
   prompt: string;
   created_at: number;
-  total_tokens: number;
   n_tokens: number;
   layer: number | null;
   direction_variant: string;
+  alphas: number[];
   eff_dim_raw: number | null;
   eff_dim_ablated: number | null;
-  alpha_ref: number;
+  top_alpha: number | null;
   ablation_available: boolean;
   stopped_reason: string | null;
 }
@@ -805,7 +805,7 @@ function TripsList() {
                               ({dEff >= 0 ? "+" : ""}
                               {dEff.toFixed(1)})
                             </span>{" "}
-                            <span className="text-text-dim">@ α{r.alpha_ref}</span>
+                            <span className="text-text-dim">@ α{r.top_alpha ?? "?"}</span>
                           </>
                         )}
                       </div>

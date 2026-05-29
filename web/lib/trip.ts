@@ -1,14 +1,10 @@
-// Trip View client: start a trip run, subscribe to its SSE stream, and the
-// pure-math helpers that drive the realtime α-morph in the browser.
+// Trip View client: start a trip run, subscribe to its SSE stream.
 //
-// The backend ships the RAW projected trajectory plus two rank-1 morph
-// helpers (refusal_axis, refusal_component). Because the ablation is rank-1,
-// the ablated cloud at any α is an EXACT linear function we can evaluate at
-// 60fps with no backend round-trip:
-//
-//   coords_ablated(α)[i] = coords_raw[i] − α · refusal_component[i] · refusal_axis
-//
-// That's the whole reason the slider feels instant.
+// Multi-α design: the backend runs the model at several discrete ablation
+// strengths — raw (α=0) plus each requested α — each a REAL generation
+// (text + actual L32 trajectory). No continuous slider; the UI toggles which
+// α series to overlay. All series share one PCA basis (raw's), so the ablated
+// paths visibly diverge from baseline.
 
 function apiBase(): string {
   if (typeof window !== "undefined") {
@@ -20,62 +16,51 @@ function apiBase(): string {
 }
 const API = apiBase();
 
-export interface TripGeometry {
+export interface TripSeries {
+  alpha: number; // 0 = raw
+  label: string; // "raw" | "α=1.00"
+  coords: number[][]; // [N][3] in the shared raw-PCA basis
+  tokens: string[];
+  text: string;
   n_tokens: number;
+  eff_dim: number;
+  spectral_entropy: number;
+  spectrum: number[];
+  stopped_reason: string;
+}
+
+export interface TripGeometry {
   d_model: number;
   layer: number;
-  tokens: string[];
-  coords_raw: number[][]; // [N][3]
-  refusal_axis: number[]; // [3]
-  refusal_component: number[]; // [N]
-  spectrum_raw: number[];
-  eff_dim_raw: number;
-  eff_dim_ablated: number;
-  spectral_entropy_raw: number;
-  spectral_entropy_ablated: number;
-  alpha_grid: number[];
-  eff_dim_grid: number[];
-  spectral_entropy_grid: number[];
-  spectrum_ablated_ref: number[];
-  alpha_ref: number;
   extent: number;
   ablation_available: boolean;
+  series: TripSeries[]; // series[0] = raw
 }
 
 export interface TripPayload {
   run_id: string;
   prompt: string;
-  output_text: string;
-  stopped_reason: string;
-  total_tokens: number;
   seed: number | null;
   direction_variant: string;
+  alphas: number[];
   geometry: TripGeometry;
   created_at: number;
-  // The actual runtime-ablated generation at alpha_ref (what M *says*
-  // off-manifold). Null if no refusal direction was loaded.
-  output_text_ablated?: string | null;
-  ablated_alpha?: number;
-  ablated_stopped_reason?: string;
 }
 
-// Discriminated-ish SSE event shape for the trip stream.
 export type TripEvent =
   | { type: "queued"; holder_run_id: string | null; position: number }
   | { type: "running" }
-  | { type: "phase"; name: string; total: number }
-  | { type: "token"; position: number; token_id: number; decoded: string }
-  | { type: "stopped"; reason: string; total_tokens: number }
+  | { type: "phase"; name: string; alpha?: number }
+  | { type: "trip_token"; alpha: number; position: number; decoded: string }
+  | { type: "trip_series"; layer: number; series: TripSeries }
   | ({ type: "trip_geometry" } & TripPayload)
-  | { type: "ablated_token"; position: number; decoded: string }
-  | { type: "ablated_output_done"; output_text: string; alpha: number; stopped_reason: string }
   | { type: "done" }
   | { type: "error"; message?: string }
   | { type: string; [k: string]: unknown };
 
 export async function startTrip(
   prompt: string,
-  opts?: { alpha_ref?: number; temperature?: number; seed?: number },
+  opts?: { alphas?: number[]; temperature?: number; seed?: number },
 ): Promise<{ run_id: string }> {
   const res = await fetch(`${API}/trip`, {
     method: "POST",
@@ -87,7 +72,6 @@ export async function startTrip(
 }
 
 export async function cancelTrip(runId: string): Promise<void> {
-  // Reuses the shared /cancel/{id} endpoint (RunRegistry is common).
   await fetch(`${API}/cancel/${runId}`, { method: "POST" }).catch(() => {});
 }
 
@@ -116,11 +100,9 @@ export function subscribeTrip(
     "queued",
     "running",
     "phase",
-    "token",
-    "stopped",
+    "trip_token",
+    "trip_series",
     "trip_geometry",
-    "ablated_token",
-    "ablated_output_done",
     "done",
     "error",
     "ping",
@@ -153,55 +135,16 @@ export function subscribeTrip(
   };
 }
 
-// ── α-morph math (pure, runs every frame) ──────────────────────────────────
-
-/** Fill a Float32Array [N*3] with the ablated trajectory at strength α.
- *  Reuses the provided buffer so we don't allocate per frame. */
-export function ablatedCoordsInto(
-  out: Float32Array,
-  g: TripGeometry,
-  alpha: number,
-): Float32Array {
-  const N = g.coords_raw.length;
-  const ax = g.refusal_axis;
-  const comp = g.refusal_component;
-  for (let i = 0; i < N; i++) {
-    const c = g.coords_raw[i];
-    const k = alpha * (comp[i] ?? 0);
-    out[i * 3 + 0] = c[0] - k * ax[0];
-    out[i * 3 + 1] = c[1] - k * ax[1];
-    out[i * 3 + 2] = c[2] - k * ax[2];
-  }
-  return out;
-}
-
-export function rawCoordsInto(out: Float32Array, g: TripGeometry): Float32Array {
-  const N = g.coords_raw.length;
-  for (let i = 0; i < N; i++) {
-    const c = g.coords_raw[i];
-    out[i * 3 + 0] = c[0];
-    out[i * 3 + 1] = c[1];
-    out[i * 3 + 2] = c[2];
-  }
-  return out;
-}
-
-/** Linear-interpolate a per-α grid metric (eff_dim / spectral_entropy) at an
- *  arbitrary α. The grid is uniform from 0..max. */
-export function metricAtAlpha(
-  grid: number[],
-  values: number[],
-  alpha: number,
-): number {
-  if (grid.length === 0) return 0;
-  if (grid.length === 1) return values[0];
-  const lo = grid[0];
-  const hi = grid[grid.length - 1];
-  if (alpha <= lo) return values[0];
-  if (alpha >= hi) return values[values.length - 1];
-  const span = (hi - lo) / (grid.length - 1);
-  const f = (alpha - lo) / span;
-  const i = Math.floor(f);
-  const t = f - i;
-  return values[i] * (1 - t) + values[i + 1] * t;
+// ── Color per α (shared by scene + chips + text) ───────────────────────────
+// amber = raw; ablated ramps cyan → violet as α rises (all "cool = ablated").
+export function colorForAlpha(alpha: number, maxAlpha: number): string {
+  if (alpha <= 0) return "#e8c382"; // amber (raw)
+  const t = maxAlpha > 0 ? Math.min(1, alpha / maxAlpha) : 0;
+  // cyan #5ee5e5 → violet #9b8cff
+  const c0 = [0x5e, 0xe5, 0xe5];
+  const c1 = [0x9b, 0x8c, 0xff];
+  const r = Math.round(c0[0] + (c1[0] - c0[0]) * t);
+  const g = Math.round(c0[1] + (c1[1] - c0[1]) * t);
+  const b = Math.round(c0[2] + (c1[2] - c0[2]) * t);
+  return `rgb(${r}, ${g}, ${b})`;
 }

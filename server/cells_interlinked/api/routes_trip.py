@@ -33,7 +33,11 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
-from ..pipeline.trajectory import compute_trip_geometry
+from ..pipeline.trajectory import (
+    assemble_geometry,
+    build_series,
+    compute_raw_basis,
+)
 from .runs import RunState
 
 logger = logging.getLogger(__name__)
@@ -45,9 +49,13 @@ class TripRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     seed: int | None = None
-    # The α the *_ablated scalars + spectrum bars report at (the slider can
-    # explore the whole grid client-side; this is just the comparison point).
-    alpha_ref: float = 1.0
+    # Discrete ablation strengths to actually generate at (each is a real
+    # runtime-ablated generation: text + trajectory). Raw (α=0) always runs.
+    alphas: list[float] | None = None
+
+
+# Default α levels: a low / full / over-projection spread.
+DEFAULT_TRIP_ALPHAS = [0.5, 1.0, 1.5]
 
 
 class TripResponse(BaseModel):
@@ -75,7 +83,12 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
 
     run_id = uuid.uuid4().hex[:12]
     seed = req.seed if req.seed is not None else _seed_from_run_id(run_id)
-    alpha_ref = max(0.0, min(2.0, float(req.alpha_ref)))
+    # Sanitize + de-dupe the α list (each is a full generation, so keep it
+    # small). Drop 0 (that's the raw run) and clamp to [0, 5].
+    raw_alphas = req.alphas if req.alphas is not None else DEFAULT_TRIP_ALPHAS
+    alphas = sorted({
+        round(max(0.0, min(5.0, float(a))), 2) for a in raw_alphas if float(a) > 0
+    })[:6]
 
     cfg = ProbeConfig(
         temperature=req.temperature if req.temperature is not None else settings.temperature,
@@ -88,7 +101,7 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
     state = RunState(run_id=run_id, prompt_text=req.prompt)
     app.state.registry.add(state)
     state.task = asyncio.create_task(
-        _execute_trip(app, state, cfg, rendered, alpha_ref)
+        _execute_trip(app, state, cfg, rendered, alphas)
     )
     return TripResponse(run_id=run_id)
 
@@ -98,28 +111,22 @@ async def _execute_trip(
     state: RunState,
     cfg: ProbeConfig,
     rendered: str,
-    alpha_ref: float,
+    alphas: list[float],
 ) -> None:
+    import dataclasses as _dc
+    from ..pipeline.abliteration import (
+        install_runtime_ablation_hook,
+        pick_ablation_target,
+    )
+
     manager = app.state.manager
     registry = app.state.registry
+    layer = bundle_layer = None  # set after acquire
 
     bundle = await manager.acquire_m(emit=state.emit)
     app.state.bundle = bundle
     app.state.nla = None
-
-    inner_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-
-    async def forwarder() -> None:
-        while True:
-            evt = await inner_queue.get()
-            await state.emit(evt)
-            if evt.get("type") == "stopped":
-                break
-
-    forwarder_task = asyncio.create_task(forwarder())
-
-    result: ProbeResult | None = None
-    error_msg: str | None = None
+    layer = bundle.extraction_layer
 
     # Surface queue position like the probe route does.
     if registry.holder_run_id is not None or registry.waiters:
@@ -129,169 +136,138 @@ async def _execute_trip(
             "position": len(registry.waiters) + 1,
         })
 
-    async with registry.acquire(state.run_id):
-        await state.emit({"type": "running"})
-        await state.emit({"type": "phase", "name": "generating", "total": 0})
+    async def run_one(alpha: float, r_target) -> ProbeResult | None:
+        """Run one generation (raw if r_target is None, else with the L32
+        refusal-ablation hook at `alpha`). Streams tokens as trip_token
+        events tagged with α. The capture hook fires AFTER the ablation
+        hook, so captured residuals are the ablated ones — the real path."""
+        q: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
+        async def fwd() -> None:
+            while True:
+                evt = await q.get()
+                et = evt.get("type")
+                if et == "token":
+                    await state.emit({
+                        "type": "trip_token",
+                        "alpha": alpha,
+                        "position": evt["position"],
+                        "decoded": evt["decoded"],
+                    })
+                elif et == "stopped":
+                    break
+
+        task = asyncio.create_task(fwd())
+        # Ablated runs get the tighter cap (off-manifold no-EOS loops).
+        cfg_run = cfg if r_target is None else _dc.replace(cfg, safety_cap=1024)
+        hook = None
+        if r_target is not None:
+            hook = install_runtime_ablation_hook(
+                bundle.model, layer, r_target, alpha,
+            )
         try:
-            result = await run_probe(
+            return await run_probe(
                 bundle=bundle,
                 rendered_prompt=rendered,
-                cfg=cfg,
+                cfg=cfg_run,
                 cancel_event=state.cancel_event,
-                queue=inner_queue,
+                queue=q,
             )
-        except Exception as exc:
-            logger.exception("trip generation failed")
-            error_msg = str(exc)
-            await state.emit({"type": "error", "message": str(exc)})
-            await inner_queue.put({"type": "stopped", "reason": "error", "total_tokens": 0})
+        except Exception:
+            logger.exception("trip generation failed (α=%.2f)", alpha)
+            await q.put({"type": "stopped"})
+            return None
         finally:
-            await forwarder_task
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+            if hook is not None:
+                try:
+                    hook.remove()
+                except Exception:
+                    logger.exception("failed to remove trip ablation hook")
 
-        if result is None or not result.captured:
-            await state.emit({
-                "type": "error",
-                "message": error_msg or "no tokens generated",
-            })
+    async with registry.acquire(state.run_id):
+        await state.emit({"type": "running"})
+
+        # ── Raw generation (α=0) ─────────────────────────────────────
+        # As each generation finishes we project it into the shared raw-PCA
+        # basis and emit it as a `trip_series` event, so the scene builds up
+        # live (raw appears first, then each α) instead of all-at-once.
+        await state.emit({"type": "phase", "name": "generating", "alpha": 0.0})
+        raw = await run_one(0.0, None)
+        if raw is None or not raw.captured:
+            await state.emit({"type": "error", "message": "no tokens generated"})
             await state.emit({"type": "done"})
             await state.event_log.close()
             state.completed = True
             return
 
-        # ── Geometry pass (cheap; M stays loaded) ────────────────────
-        await state.emit({"type": "phase", "name": "computing_geometry", "total": 0})
         try:
-            rdirs = getattr(app.state, "refusal_directions", None)
-            r_layer = (
-                rdirs[bundle.extraction_layer] if rdirs is not None else None
+            basis = await asyncio.to_thread(
+                compute_raw_basis,
+                [c.activations[layer] for c in raw.captured],
             )
-            activations = [
-                c.activations[bundle.extraction_layer] for c in result.captured
-            ]
-            tokens = [c.decoded for c in result.captured]
-            geometry = await asyncio.to_thread(
-                compute_trip_geometry,
-                activations,
-                tokens,
-                layer=bundle.extraction_layer,
-                refusal_direction=r_layer,
-                alpha_ref=alpha_ref,
+            raw_series = await asyncio.to_thread(
+                build_series,
+                [c.activations[layer] for c in raw.captured],
+                [c.decoded for c in raw.captured],
+                raw.output_text, 0.0, raw.stopped_reason, basis,
             )
         except Exception as exc:
-            logger.exception("trip geometry computation failed")
+            logger.exception("trip raw geometry failed")
             await state.emit({"type": "error", "message": f"geometry: {exc}"})
             await state.emit({"type": "done"})
             await state.event_log.close()
             state.completed = True
             return
+        series = [raw_series]
+        await state.emit({"type": "trip_series", "layer": layer, "series": raw_series.to_dict()})
 
-        geo_dict = geometry.to_dict()
-        variant_name = _active_variant_name()
+        # ── Real ablated generations, one per α ──────────────────────
+        rdirs = getattr(app.state, "refusal_directions", None)
+        rsub = getattr(app.state, "refusal_subspace", None)
+        r_target = pick_ablation_target(rsub, rdirs, layer)
+        if r_target is not None:
+            for a in alphas:
+                if state.cancel_event.is_set():
+                    break
+                await state.emit({
+                    "type": "phase", "name": "ablated_generation", "alpha": a,
+                })
+                res = await run_one(a, r_target)
+                if res is None or not res.captured:
+                    continue
+                try:
+                    ser = await asyncio.to_thread(
+                        build_series,
+                        [c.activations[layer] for c in res.captured],
+                        [c.decoded for c in res.captured],
+                        res.output_text, a, res.stopped_reason, basis,
+                    )
+                except Exception:
+                    logger.exception("trip ablated series build failed (α=%.2f)", a)
+                    continue
+                series.append(ser)
+                await state.emit({"type": "trip_series", "layer": layer, "series": ser.to_dict()})
+
+        # ── Final assembled geometry (persist + canonical) ───────────
+        await state.emit({"type": "phase", "name": "computing_geometry"})
+        geometry = assemble_geometry(basis.d_model, layer, series)
         payload = {
             "run_id": state.run_id,
             "prompt": state.prompt_text,
-            "output_text": result.output_text,
-            "stopped_reason": result.stopped_reason,
-            "total_tokens": result.total_tokens,
             "seed": cfg.seed,
-            "direction_variant": variant_name,
-            "geometry": geo_dict,
+            "direction_variant": _active_variant_name(),
+            "alphas": alphas,
+            "geometry": geometry.to_dict(),
             "created_at": time.time(),
         }
-
-        # Emit geometry first so the 3D view appears immediately; the ablated
-        # text streams in afterward.
         await state.emit({"type": "trip_geometry", **payload})
 
-        # ── Ablated TEXT generation (at alpha_ref) ───────────────────
-        # The viz is a post-hoc projection of the raw trajectory; this is the
-        # actual runtime-ablated generation — M runs again with a forward hook
-        # subtracting the refusal projection at L32 every step, so it emits
-        # genuinely different tokens. Fixed at alpha_ref (the slider default)
-        # since regenerating per-α isn't feasible. Mirrors probe phase 1b.
-        output_text_ablated: str | None = None
-        ablated_stopped = "eos"
-        rdirs = getattr(app.state, "refusal_directions", None)
-        rsub = getattr(app.state, "refusal_subspace", None)
-        if (
-            (rdirs is not None or rsub is not None)
-            and alpha_ref > 0
-            and geometry.ablation_available
-            and not state.cancel_event.is_set()
-        ):
-            from ..pipeline.abliteration import (
-                install_runtime_ablation_hook,
-                pick_ablation_target,
-            )
-            r_target = pick_ablation_target(rsub, rdirs, bundle.extraction_layer)
-            if r_target is not None:
-                await state.emit({
-                    "type": "phase", "name": "ablated_generation", "total": 0,
-                })
-                hook_handle = install_runtime_ablation_hook(
-                    bundle.model, bundle.extraction_layer, r_target, alpha_ref,
-                )
-                abl_q: asyncio.Queue = asyncio.Queue(maxsize=10000)
-
-                async def abl_forwarder() -> None:
-                    while True:
-                        evt = await abl_q.get()
-                        et = evt.get("type")
-                        if et == "token":
-                            await state.emit({
-                                "type": "ablated_token",
-                                "position": evt["position"],
-                                "decoded": evt["decoded"],
-                            })
-                        elif et == "stopped":
-                            break
-
-                abl_task = asyncio.create_task(abl_forwarder())
-                import dataclasses as _dc
-                cfg_abl = _dc.replace(cfg, safety_cap=1024)
-                try:
-                    abl_res = await run_probe(
-                        bundle=bundle,
-                        rendered_prompt=rendered,
-                        cfg=cfg_abl,
-                        cancel_event=state.cancel_event,
-                        queue=abl_q,
-                    )
-                    if abl_res is not None:
-                        output_text_ablated = abl_res.output_text
-                        ablated_stopped = abl_res.stopped_reason
-                except Exception as exc:
-                    logger.exception("trip ablated generation failed")
-                    output_text_ablated = f"[error: {exc}]"
-                    ablated_stopped = "error"
-                    await abl_q.put({"type": "stopped"})
-                finally:
-                    try:
-                        await asyncio.wait_for(abl_task, timeout=5.0)
-                    except asyncio.TimeoutError:
-                        abl_task.cancel()
-                    try:
-                        hook_handle.remove()
-                    except Exception:
-                        logger.exception("failed to remove trip ablation hook")
-                await state.emit({
-                    "type": "ablated_output_done",
-                    "output_text": output_text_ablated or "",
-                    "alpha": float(alpha_ref),
-                    "stopped_reason": ablated_stopped,
-                    "safety_cap": 1024,
-                })
-
-        # Fold the ablated text into the persisted payload.
-        payload["output_text_ablated"] = output_text_ablated
-        payload["ablated_alpha"] = float(alpha_ref)
-        payload["ablated_stopped_reason"] = ablated_stopped
-
         try:
-            (_trips_dir() / f"{state.run_id}.json").write_text(
-                json.dumps(payload)
-            )
+            (_trips_dir() / f"{state.run_id}.json").write_text(json.dumps(payload))
         except Exception:
             logger.exception("trip sidecar write failed (non-fatal)")
 
@@ -331,19 +307,30 @@ async def list_trips(limit: int = 20, offset: int = 0) -> dict:
         except Exception:
             continue
         g = data.get("geometry", {}) or {}
+        # Skip pre-multi-α sidecars (no `series`) — incompatible with the
+        # current viewer. They're left on disk, just not listed.
+        if "series" not in g:
+            continue
+        ser = g.get("series", []) or []
+        raw_s = ser[0] if ser else {}
+        abl = ser[1:] if len(ser) > 1 else []
+        # Headline the PEAK opening (ablated series with the highest eff-dim),
+        # not the strongest α — over-projection often loops and collapses dim,
+        # which would misleadingly read as "ablation reduced dimensionality".
+        top = max(abl, key=lambda s: s.get("eff_dim", 0)) if abl else None
         rows.append({
             "run_id": data.get("run_id", p.stem),
             "prompt": data.get("prompt", ""),
             "created_at": data.get("created_at", p.stat().st_mtime),
-            "total_tokens": data.get("total_tokens", g.get("n_tokens", 0)),
-            "n_tokens": g.get("n_tokens", 0),
+            "n_tokens": raw_s.get("n_tokens", 0),
             "layer": g.get("layer"),
             "direction_variant": data.get("direction_variant", ""),
-            "eff_dim_raw": g.get("eff_dim_raw"),
-            "eff_dim_ablated": g.get("eff_dim_ablated"),
-            "alpha_ref": g.get("alpha_ref", 1.0),
-            "ablation_available": g.get("ablation_available", False),
-            "stopped_reason": data.get("stopped_reason"),
+            "alphas": data.get("alphas", []),
+            "eff_dim_raw": raw_s.get("eff_dim"),
+            "eff_dim_ablated": top.get("eff_dim") if top else None,
+            "top_alpha": top.get("alpha") if top else None,
+            "ablation_available": g.get("ablation_available", len(abl) > 0),
+            "stopped_reason": raw_s.get("stopped_reason"),
         })
     rows.sort(key=lambda r: r.get("created_at") or 0, reverse=True)
     total = len(rows)

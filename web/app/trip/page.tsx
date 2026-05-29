@@ -2,15 +2,12 @@
 
 // THE TRIP — a neon-noir booth where you watch a language model trip.
 //
-// Run a probe; M generates once and we capture the L32 residual trajectory.
-// Then we project out the refusal direction and watch the trajectory's
-// accessible state space bloom — rendered as a 3D point cloud you can scrub
-// with the α slider, with effective-dimensionality + spectral-entropy
-// readouts and the eigenvalue spectrum bars as the honest "truth anchor".
-//
-// Borrowed math (Gallimore et al., conscious-realism / entropic-brain), not
-// the metaphysics: this is a stated-vs-computed dynamical probe, not a
-// consciousness test. See docs/TRACES_HANDOFF.md.
+// Run a probe; M generates the raw answer AND several real refusal-ablated
+// answers (one per α). Each is a genuine generation with token feedback, so
+// you see what the model actually does off-manifold — text and trajectory.
+// Toggle α chips to overlay/compare. Borrowed math (entropic-brain /
+// conscious-realism), not metaphysics: a stated-vs-computed dynamical probe,
+// not a consciousness test. See docs/TRACES_HANDOFF.md.
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
@@ -22,15 +19,15 @@ import {
   subscribeTrip,
   cancelTrip,
   fetchTrip,
-  metricAtAlpha,
+  colorForAlpha,
   type TripEvent,
   type TripPayload,
+  type TripSeries,
 } from "@/lib/trip";
 import { TRIP_PROBES } from "@/lib/tripProbes";
 
 const TripScene = dynamic(() => import("./TripScene"), { ssr: false });
 
-const ALPHA_MAX = 1.5;
 type Phase = "setup" | "generating" | "computing" | "ready" | "error";
 
 export default function TripPage() {
@@ -48,50 +45,26 @@ function TripPageInner() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [runId, setRunId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<string>("");
-  const [output, setOutput] = useState<string>("");
-  const [tokenCount, setTokenCount] = useState(0);
   const [payload, setPayload] = useState<TripPayload | null>(null);
-  const [alpha, setAlpha] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  // The runtime-ablated text output (streams after geometry, fixed at α_ref).
-  const [ablatedOutput, setAblatedOutput] = useState<string>("");
-  const [ablatedAlpha, setAblatedAlpha] = useState<number | null>(null);
-  const [ablatedStreaming, setAblatedStreaming] = useState(false);
+  // Live streaming text keyed by α (string); replaced by series text on done.
+  const [liveText, setLiveText] = useState<Record<string, string>>({});
+  const [currentAlpha, setCurrentAlpha] = useState<number>(0);
+  // Series stream in one at a time (raw first, then each α) so the scene
+  // builds up live before the final geometry arrives.
+  const [liveSeries, setLiveSeries] = useState<TripSeries[]>([]);
+  const [layer, setLayer] = useState<number>(32);
+  // Which α series are visible (in both the scene and the text stack).
+  const [enabled, setEnabled] = useState<Set<number>>(new Set([0]));
 
   const unsubRef = useRef<null | (() => void)>(null);
-  const userTouchedAlpha = useRef(false);
-  const onsetRaf = useRef<number | null>(null);
-
-  // Drive the α-onset bloom (0 → α_ref) once geometry arrives, unless the
-  // operator has already grabbed the slider.
-  useEffect(() => {
-    if (!payload) return;
-    const ref = payload.geometry.alpha_ref;
-    if (userTouchedAlpha.current) return;
-    const start = performance.now();
-    const dur = 3200;
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / dur);
-      // easeInOutCubic
-      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      if (!userTouchedAlpha.current) setAlpha(e * ref);
-      if (t < 1 && !userTouchedAlpha.current) {
-        onsetRaf.current = requestAnimationFrame(tick);
-      }
-    };
-    onsetRaf.current = requestAnimationFrame(tick);
-    return () => {
-      if (onsetRaf.current) cancelAnimationFrame(onsetRaf.current);
-    };
-  }, [payload]);
 
   const teardown = () => {
     if (unsubRef.current) {
       unsubRef.current();
       unsubRef.current = null;
     }
-    if (onsetRaf.current) cancelAnimationFrame(onsetRaf.current);
   };
   useEffect(() => () => teardown(), []);
 
@@ -100,46 +73,38 @@ function TripPageInner() {
       case "running":
         setPhase("generating");
         break;
-      case "phase":
-        if ((evt as { name: string }).name === "computing_geometry") {
-          setPhase("computing");
-        } else if ((evt as { name: string }).name === "generating") {
+      case "phase": {
+        const e = evt as { name: string; alpha?: number };
+        if (e.name === "computing_geometry") setPhase("computing");
+        else if (e.name === "generating" || e.name === "ablated_generation") {
           setPhase("generating");
+          if (typeof e.alpha === "number") setCurrentAlpha(e.alpha);
         }
         break;
-      case "token": {
-        const e = evt as { decoded: string };
-        setOutput((o) => o + e.decoded);
-        setTokenCount((n) => n + 1);
+      }
+      case "trip_token": {
+        const e = evt as { alpha: number; decoded: string };
+        const key = String(e.alpha);
+        setLiveText((prev) => ({ ...prev, [key]: (prev[key] || "") + e.decoded }));
         break;
       }
-      case "stopped":
-        setPhase("computing");
+      case "trip_series": {
+        const e = evt as { layer: number; series: TripSeries };
+        setLayer(e.layer);
+        setLiveSeries((prev) => {
+          if (prev.some((s) => s.alpha === e.series.alpha)) return prev;
+          return [...prev, e.series];
+        });
+        // Default-on: raw (α=0) and α=1.0 as they arrive.
+        if (e.series.alpha === 0 || e.series.alpha === 1) {
+          setEnabled((s) => new Set(s).add(e.series.alpha));
+        }
         break;
+      }
       case "trip_geometry": {
         const p = evt as unknown as TripPayload;
         setPayload(p);
-        setOutput(p.output_text || "");
-        userTouchedAlpha.current = false;
-        setAlpha(0);
         setPhase("ready");
-        // Ablated text streams in next (if a refusal direction is loaded).
-        if (p.geometry?.ablation_available) {
-          setAblatedStreaming(true);
-          setAblatedAlpha(p.geometry.alpha_ref);
-        }
-        break;
-      }
-      case "ablated_token": {
-        const e = evt as { decoded: string };
-        setAblatedOutput((o) => o + e.decoded);
-        break;
-      }
-      case "ablated_output_done": {
-        const e = evt as { output_text: string; alpha: number };
-        setAblatedOutput(e.output_text);
-        setAblatedAlpha(e.alpha);
-        setAblatedStreaming(false);
         break;
       }
       case "error":
@@ -157,27 +122,22 @@ function TripPageInner() {
       if (!trimmed) return;
       teardown();
       setError(null);
-      setOutput("");
-      setTokenCount(0);
       setPayload(null);
-      setAlpha(0);
-      setAblatedOutput("");
-      setAblatedAlpha(null);
-      setAblatedStreaming(false);
-      userTouchedAlpha.current = false;
+      setLiveText({});
+      setLiveSeries([]);
+      setCurrentAlpha(0);
+      setEnabled(new Set([0]));
       setPrompt(trimmed);
       setPhase("generating");
       try {
-        const { run_id } = await startTrip(trimmed, { alpha_ref: 1.0 });
+        const { run_id } = await startTrip(trimmed);
         setRunId(run_id);
         unsubRef.current = subscribeTrip(run_id, {
           onEvent,
           onError: () => {
-            // Stream blip: if the run already finished, the sidecar has it.
             fetchTrip(run_id).then((p) => {
               if (p) {
                 setPayload(p);
-                setOutput(p.output_text || "");
                 setPhase("ready");
               }
             });
@@ -196,95 +156,111 @@ function TripPageInner() {
     if (!resumeId) return;
     (async () => {
       const p = await fetchTrip(resumeId);
+      if (p && !p.geometry?.series) {
+        setPrompt(p.prompt ?? "");
+        setError("This trip predates the multi-α format — re-run it to view.");
+        setPhase("error");
+        return;
+      }
       if (p) {
         setRunId(resumeId);
         setPrompt(p.prompt);
         setPayload(p);
-        setOutput(p.output_text || "");
-        setAblatedOutput(p.output_text_ablated || "");
-        setAblatedAlpha(p.ablated_alpha ?? p.geometry?.alpha_ref ?? null);
-        setAblatedStreaming(false);
+        setLiveSeries(p.geometry.series);
+        setLayer(p.geometry.layer);
+        const alphas = p.geometry.series.map((s) => s.alpha);
+        const def = new Set<number>([0]);
+        if (alphas.includes(1)) def.add(1);
+        else {
+          const firstAbl = alphas.find((a) => a > 0);
+          if (firstAbl != null) def.add(firstAbl);
+        }
+        setEnabled(def);
         setPhase("ready");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumeId]);
 
-  const onAlpha = (v: number) => {
-    userTouchedAlpha.current = true;
-    if (onsetRaf.current) cancelAnimationFrame(onsetRaf.current);
-    setAlpha(v);
-  };
+  const toggleAlpha = (a: number) =>
+    setEnabled((s) => {
+      const next = new Set(s);
+      if (next.has(a)) next.delete(a);
+      else next.add(a);
+      return next;
+    });
 
   const reset = () => {
     teardown();
     setPhase("setup");
     setRunId(null);
     setPayload(null);
-    setOutput("");
-    setTokenCount(0);
+    setLiveText({});
+    setLiveSeries([]);
+    setCurrentAlpha(0);
+    setEnabled(new Set([0]));
     setError(null);
-    setAlpha(0);
-    setAblatedOutput("");
-    setAblatedAlpha(null);
-    setAblatedStreaming(false);
   };
 
   if (phase === "setup") {
     return <TripSetup onEnter={enter} />;
   }
 
+  // Unified geometry: prefer the final payload, else the live-streaming
+  // series accumulated so far (so the scene builds up before geometry lands).
+  const series: TripSeries[] = payload?.geometry.series ?? liveSeries;
+  const geo =
+    payload?.geometry ??
+    (liveSeries.length > 0
+      ? { d_model: 0, layer, extent: 1, ablation_available: liveSeries.length > 1, series: liveSeries }
+      : null);
+  // sceneKey only changes per-run, not per-toggle — TripScene reframes via
+  // useMemo so toggling doesn't reset the camera.
+  const sceneKey = payload?.run_id ?? runId ?? "x";
   return (
     <div className="relative flex-1 min-h-0 overflow-hidden">
-      {/* 3D layer */}
       <div className="absolute inset-0">
-        {payload ? (
-          <TripScene
-            geometry={payload.geometry}
-            alpha={alpha}
-            alphaMax={ALPHA_MAX}
-            sceneKey={payload.run_id}
-          />
+        {geo ? (
+          <TripScene geometry={geo} enabledAlphas={enabled} sceneKey={sceneKey} />
         ) : (
-          <ChargingField phase={phase} tokenCount={tokenCount} />
+          <ChargingField phase={phase} currentAlpha={currentAlpha} liveText={liveText} />
         )}
       </div>
 
-      {/* HUD overlay — pointer-events pass through except on panels. */}
       <div className="absolute inset-0 pointer-events-none p-3 sm:p-5 flex flex-col">
-        {/* Top row */}
         <div className="flex items-start justify-between gap-3">
           <StatusPanel
             phase={phase}
             prompt={prompt}
-            tokenCount={tokenCount}
+            currentAlpha={currentAlpha}
             onOpenHelp={() => setHelpOpen(true)}
           />
-          <MetaPanel payload={payload} phase={phase} runId={runId} onReset={reset} onHalt={runId ? () => cancelTrip(runId) : undefined} />
+          <MetaPanel
+            payload={payload}
+            series={series}
+            phase={phase}
+            onReset={reset}
+            onHalt={runId ? () => cancelTrip(runId) : undefined}
+          />
         </div>
 
-        <div className="flex justify-center mt-3">
-          {payload && <SceneLegend alpha={alpha} />}
-        </div>
+        {series.length > 0 && (
+          <div className="flex justify-center mt-3">
+            <AlphaChips series={series} enabled={enabled} onToggle={toggleAlpha} />
+          </div>
+        )}
 
         <div className="flex-1" />
 
-        {/* Bottom row */}
         <div className="flex items-end justify-between gap-3 flex-wrap">
-          <OutputPanel
-            output={output}
+          <OutputStack
             phase={phase}
-            ablatedOutput={ablatedOutput}
-            ablatedAlpha={ablatedAlpha}
-            ablatedStreaming={ablatedStreaming}
+            series={series}
+            enabled={enabled}
+            liveText={liveText}
+            currentAlpha={currentAlpha}
           />
-          {payload && (
-            <ReadoutPanel
-              payload={payload}
-              alpha={alpha}
-              onAlpha={onAlpha}
-            />
-          )}
+          {series.length > 0 && <MetricsPanel series={series} enabled={enabled} />}
         </div>
       </div>
 
@@ -310,11 +286,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
   const [text, setText] = useState("");
   return (
     <div className="flex-1 min-h-0 overflow-y-auto px-5 py-10 max-w-2xl mx-auto w-full flex flex-col justify-center">
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-      >
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
         <div className="flex items-baseline justify-between flex-wrap gap-2">
           <h1 className="font-display text-3xl text-amber amber-glow">The Trip</h1>
           <Link href="/interrogate" className="text-text-dim text-xs hover:text-amber transition-colors">
@@ -322,10 +294,11 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
           </Link>
         </div>
         <p className="text-text-dim text-sm mt-2 italic leading-relaxed">
-          Watch a language model trip. We capture its L32 residual trajectory,
-          project out the refusal direction, and render the state space opening
-          up. Cyan is baseline; amber is off-manifold. A stated-vs-computed
-          dynamical probe — borrowed math, not metaphysics.{" "}
+          Watch a language model trip. We run it normally, then re-run it with
+          the refusal direction surgically removed at several strengths — each a
+          real generation — and plot the actual paths its internal state traced.
+          Amber is baseline; cyan→violet are progressively more ablated. A
+          stated-vs-computed dynamical probe — borrowed math, not metaphysics.{" "}
           <Link href="/fine-print" className="text-amber-dim hover:text-amber underline underline-offset-2">
             fine print
           </Link>
@@ -347,7 +320,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
         <div className="flex items-center justify-between mt-3 gap-3 flex-wrap">
           <StarterProbePicker onPick={setText} />
           <span className="text-text-dim text-[10px] italic flex-1 min-w-0">
-            ⌘↵ to enter · one M generation, no AV swap
+            ⌘↵ to enter · runs ~4 generations (raw + 3 α) — takes a minute
           </span>
           <button data-vk type="button" disabled={!text.trim()} onClick={() => onEnter(text)}>
             Enter the Trip →
@@ -358,13 +331,9 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
   );
 }
 
-/** Compact dropdown of researcher-labeled starter probes; selecting one
- *  populates the textarea (never auto-sends) — mirrors the chat composer's
- *  protocol picker. */
 function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
     if (!open) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -381,7 +350,6 @@ function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-
   return (
     <div ref={rootRef} className="relative inline-flex">
       <button
@@ -390,14 +358,11 @@ function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
         className="px-2 py-1 border text-[9px] font-display tracking-[0.3em] transition-colors cursor-pointer border-cyan/50 text-cyan hover:border-cyan hover:bg-bg"
         style={{ textShadow: "0 0 6px rgba(94,229,229,0.3)" }}
         aria-expanded={open}
-        aria-haspopup="listbox"
-        title="Pick a starter probe (fills the box; doesn't send)"
       >
         STARTER PROBE&nbsp;{open ? "▴" : "▾"}
       </button>
       {open && (
         <div
-          role="listbox"
           className="absolute bottom-full left-0 mb-1.5 w-[24rem] max-w-[90vw] bg-bg-panel border border-rule/60 shadow-xl z-30 max-h-[22rem] overflow-y-auto"
           style={{ boxShadow: "0 -4px 14px rgba(0,0,0,0.5)" }}
         >
@@ -422,12 +387,8 @@ function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
                       </span>
                     )}
                   </div>
-                  <div className="font-mono text-[11px] text-text leading-snug">
-                    {p.text}
-                  </div>
-                  <div className="font-mono text-[10px] text-text-dim italic mt-1 leading-snug">
-                    {p.note}
-                  </div>
+                  <div className="font-mono text-[11px] text-text leading-snug">{p.text}</div>
+                  <div className="font-mono text-[10px] text-text-dim italic mt-1 leading-snug">{p.note}</div>
                 </button>
               </li>
             ))}
@@ -443,24 +404,23 @@ function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
 function StatusPanel({
   phase,
   prompt,
-  tokenCount,
+  currentAlpha,
   onOpenHelp,
 }: {
   phase: Phase;
   prompt: string;
-  tokenCount: number;
+  currentAlpha: number;
   onOpenHelp: () => void;
 }) {
   const label =
     phase === "generating"
       ? "GENERATING"
       : phase === "computing"
-      ? "MAPPING TRAJECTORY"
+      ? "MAPPING TRAJECTORIES"
       : phase === "ready"
       ? "TRIP MAPPED"
       : "—";
-  const accent =
-    phase === "generating" ? "text-cyan cyan-glow" : "text-amber amber-glow";
+  const accent = phase === "generating" ? "text-cyan cyan-glow" : "text-amber amber-glow";
   return (
     <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-rule px-3 py-2 max-w-md">
       <div className="flex items-center gap-2">
@@ -472,7 +432,9 @@ function StatusPanel({
         />
         <span className={`font-display tracking-widest text-sm ${accent}`}>{label}</span>
         {phase === "generating" && (
-          <span className="text-cyan/70 text-[10px] font-mono tabular-nums">{tokenCount} tok</span>
+          <span className="text-cyan/70 text-[10px] font-mono">
+            {currentAlpha === 0 ? "raw" : `α=${currentAlpha.toFixed(2)}`}
+          </span>
         )}
       </div>
       <div className="text-amber/90 italic text-xs mt-1.5 font-mono whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
@@ -491,26 +453,27 @@ function StatusPanel({
 
 function MetaPanel({
   payload,
+  series,
   phase,
-  runId,
   onReset,
   onHalt,
 }: {
   payload: TripPayload | null;
+  series: TripSeries[];
   phase: Phase;
-  runId: string | null;
   onReset: () => void;
   onHalt?: () => void;
 }) {
-  const g = payload?.geometry;
   return (
     <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-rule px-3 py-2 text-right">
       <div className="flex items-center justify-end gap-3 text-[10px] font-mono text-text-dim tabular-nums">
-        {g && (
+        {series.length > 0 && (
           <>
-            <span>L{g.layer}</span>
-            <span>{g.n_tokens} steps</span>
-            <span className="text-amber-dim">{payload?.direction_variant}</span>
+            {payload && <span>L{payload.geometry.layer}</span>}
+            <span>{series.length} path{series.length === 1 ? "" : "s"}</span>
+            {payload?.direction_variant && (
+              <span className="text-amber-dim">{payload.direction_variant}</span>
+            )}
           </>
         )}
       </div>
@@ -528,229 +491,116 @@ function MetaPanel({
   );
 }
 
-function OutputPanel({
-  output,
-  phase,
-  ablatedOutput,
-  ablatedAlpha,
-  ablatedStreaming,
+function AlphaChips({
+  series,
+  enabled,
+  onToggle,
 }: {
-  output: string;
-  phase: Phase;
-  ablatedOutput: string;
-  ablatedAlpha: number | null;
-  ablatedStreaming: boolean;
+  series: TripSeries[];
+  enabled: Set<number>;
+  onToggle: (a: number) => void;
 }) {
-  // Show the ablated box once geometry is in (ready) — it streams, then settles.
-  const showAblated = phase === "ready" && (ablatedStreaming || ablatedOutput.length > 0);
+  const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   return (
-    <div className="flex flex-col gap-2 max-w-lg w-full sm:w-[28rem]">
-      {showAblated && (
-        <div className="pointer-events-auto bg-cyan/5 backdrop-blur-sm border border-cyan/40 flex flex-col max-h-40">
-          <div className="border-b border-cyan/30 px-3 py-1.5 font-display text-[9px] text-cyan tracking-widest flex items-center justify-between">
-            <span>
-              the subject speaks · refusal-ablated
-              {ablatedAlpha != null && (
-                <span className="text-cyan/60 ml-1.5">· α={ablatedAlpha.toFixed(2)}</span>
-              )}
-            </span>
-            <span className="text-cyan/50 normal-case tracking-normal italic">
-              what M says off-manifold
-            </span>
-          </div>
-          <div
-            className="p-3 overflow-y-auto text-cyan font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
-            style={{ textShadow: "0 0 6px rgba(94,229,229,0.25)" }}
-          >
-            {ablatedOutput || <span className="text-text-dim italic">generating…</span>}
-            {ablatedStreaming && (
-              <span className="inline-block w-1.5 h-3 bg-cyan/70 ml-0.5 animate-pulse align-middle" />
-            )}
-          </div>
-        </div>
-      )}
-      <div className="pointer-events-auto bg-bg-soft/80 backdrop-blur-sm border border-rule flex flex-col max-h-44">
-        <div className="border-b border-rule px-3 py-1.5 font-display text-[9px] text-amber-dim tracking-widest flex items-center justify-between">
-          <span>the subject speaks</span>
-          <span className="text-text-dim normal-case tracking-normal italic">raw output · α=0</span>
-        </div>
-        <div className="p-3 overflow-y-auto text-amber/90 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-          {output || <span className="text-text-dim italic">warming up…</span>}
-          {phase === "generating" && (
-            <span className="inline-block w-1.5 h-3 bg-amber/70 ml-0.5 animate-pulse align-middle" />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReadoutPanel({
-  payload,
-  alpha,
-  onAlpha,
-}: {
-  payload: TripPayload;
-  alpha: number;
-  onAlpha: (v: number) => void;
-}) {
-  const g = payload.geometry;
-  const effDim = metricAtAlpha(g.alpha_grid, g.eff_dim_grid, alpha);
-  const specEnt = metricAtAlpha(g.alpha_grid, g.spectral_entropy_grid, alpha);
-  const effDimBase = g.eff_dim_raw;
-  const specEntBase = g.spectral_entropy_raw;
-  const dEff = effDim - effDimBase;
-  const available = g.ablation_available;
-
-  return (
-    <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-amber-dim/50 w-full sm:w-[22rem] max-w-full">
-      {/* Metrics */}
-      <div className="grid grid-cols-2 divide-x divide-rule border-b border-rule">
-        <Metric
-          label="effective dim"
-          hint="directions the thought uses"
-          value={effDim}
-          base={effDimBase}
-          delta={dEff}
-          unit=""
-        />
-        <Metric
-          label="spectral entropy"
-          hint="how evenly it's spread"
-          value={specEnt}
-          base={specEntBase}
-          delta={specEnt - specEntBase}
-          unit=" bits"
-        />
-      </div>
-      <div className="px-3 py-1.5 border-b border-rule text-[9px] text-text-dim italic leading-snug">
-        <span className="text-amber-dim not-italic">baseline</span> = value at α=0 (untouched).{" "}
-        <span className="text-cyan not-italic">+{Math.max(0, dEff).toFixed(1)}</span> = how much
-        this α opened it up. Higher = the state space expanded.
-      </div>
-
-      {/* α slider */}
-      <div className="px-3 py-3 border-b border-rule">
-        <div className="flex items-center justify-between mb-0.5">
-          <span className="font-display text-[9px] text-cyan-dim tracking-widest">
-            ablation α
-          </span>
-          <span className="font-mono text-amber tabular-nums text-sm">{alpha.toFixed(2)}</span>
-        </div>
-        <div className="text-[9px] text-text-dim italic mb-1.5 leading-snug">
-          drag to subtract the refusal direction — the model on-script (0) → off-manifold (1.5)
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={ALPHA_MAX}
-          step={0.01}
-          value={alpha}
-          disabled={!available}
-          onChange={(e) => onAlpha(parseFloat(e.target.value))}
-          className="trip-slider w-full"
-          style={{
-            // amber (raw) → cyan (ablated) gradient fill proportional to α
-            background: `linear-gradient(90deg, var(--amber) 0%, var(--cyan) ${(alpha / ALPHA_MAX) * 100}%, var(--rule) ${(alpha / ALPHA_MAX) * 100}%)`,
-          }}
-        />
-        <div className="flex justify-between text-[9px] text-text-dim font-mono mt-1">
-          <span>baseline (CRS)</span>
-          <span>off-manifold →</span>
-        </div>
-        {!available && (
-          <div className="text-warning text-[9px] mt-1 italic">
-            no refusal direction loaded — ablation channel unavailable
-          </div>
-        )}
-      </div>
-
-      {/* Eigenvalue spectrum — the truth anchor */}
-      <div className="px-3 py-2.5 border-b border-rule">
-        <div className="font-display text-[9px] text-cyan-dim tracking-widest mb-0.5">
-          variance spectrum <span className="text-text-dim normal-case tracking-normal italic">@ α_ref {g.alpha_ref}</span>
-        </div>
-        <div className="text-[9px] text-text-dim italic mb-1.5 leading-snug">
-          each bar = one direction; tall = the thought leans on it. The two numbers above
-          are read straight off these bars.
-        </div>
-        <SpectrumBars raw={g.spectrum_raw} ablated={g.spectrum_ablated_ref} />
-        <div className="flex items-center gap-3 text-[8px] font-mono text-text-dim mt-1">
-          <span className="flex items-center gap-1"><i className="w-2 h-2 inline-block bg-amber" /> raw (α=0)</span>
-          <span className="flex items-center gap-1"><i className="w-2 h-2 inline-block bg-cyan" /> ablated</span>
-        </div>
-      </div>
-
-      {/* Honesty caveat */}
-      <div className="px-3 py-2 text-[9px] text-text-dim italic leading-snug">
-        A 3-D shadow of a {g.d_model}-dimensional object — the bars show the
-        directions it can&apos;t. Effective-dim &amp; entropy are computed on all{" "}
-        {g.d_model} dims, not the projection.
-      </div>
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  hint,
-  value,
-  base,
-  delta,
-  unit,
-}: {
-  label: string;
-  hint: string;
-  value: number;
-  base: number;
-  delta: number;
-  unit: string;
-}) {
-  const up = delta > 0.05;
-  const down = delta < -0.05;
-  return (
-    <div className="px-3 py-2.5">
-      <div className="font-display text-[9px] text-amber-dim tracking-widest">{label}</div>
-      <div className="text-[8px] text-text-dim italic leading-tight">{hint}</div>
-      <div className="font-display tabular-nums text-2xl text-amber amber-glow mt-0.5">
-        {value.toFixed(1)}
-        <span className="text-xs text-text-dim">{unit}</span>
-      </div>
-      <div className="text-[9px] font-mono text-text-dim mt-0.5">
-        baseline {base.toFixed(1)}{" "}
-        <span className={up ? "text-cyan" : down ? "text-warning" : "text-text-dim"}>
-          {delta >= 0 ? "+" : ""}
-          {delta.toFixed(1)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function SpectrumBars({ raw, ablated }: { raw: number[]; ablated: number[] }) {
-  const n = Math.min(24, Math.max(raw.length, ablated.length));
-  // sqrt scaling so the long tail stays visible.
-  const scale = (p: number) => Math.sqrt(Math.max(0, p));
-  const maxV = Math.max(
-    scale(raw[0] ?? 0),
-    scale(ablated[0] ?? 0),
-    0.0001,
-  );
-  return (
-    <div className="flex items-end gap-px h-12">
-      {Array.from({ length: n }).map((_, i) => {
-        const r = scale(raw[i] ?? 0) / maxV;
-        const a = scale(ablated[i] ?? 0) / maxV;
+    <div className="pointer-events-auto flex items-center gap-2 bg-bg/50 backdrop-blur-[2px] px-3 py-1.5 rounded-full border border-rule/40 flex-wrap justify-center">
+      <span className="text-[9px] font-mono text-text-dim mr-1">overlay:</span>
+      {series.map((s) => {
+        const on = enabled.has(s.alpha);
+        const color = colorForAlpha(s.alpha, maxAlpha);
         return (
-          <div key={i} className="relative flex-1 h-full flex items-end">
-            <div
-              className="w-full bg-amber/60"
-              style={{ height: `${r * 100}%` }}
+          <button
+            key={s.alpha}
+            type="button"
+            onClick={() => onToggle(s.alpha)}
+            className={`flex items-center gap-1.5 px-2 py-0.5 border text-[10px] font-mono transition-all ${
+              on ? "bg-bg" : "opacity-45 hover:opacity-80"
+            }`}
+            style={{ borderColor: on ? color : "var(--rule)", color: on ? color : undefined }}
+          >
+            <i
+              className="w-1.5 h-1.5 rounded-full inline-block"
+              style={{ background: color, boxShadow: on ? `0 0 6px ${color}` : undefined }}
             />
+            {s.label}
+            {s.stopped_reason === "max" && <span className="text-warning">⟳</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function OutputStack({
+  phase,
+  series,
+  enabled,
+  liveText,
+  currentAlpha,
+}: {
+  phase: Phase;
+  series: TripSeries[];
+  enabled: Set<number>;
+  liveText: Record<string, string>;
+  currentAlpha: number;
+}) {
+  const maxAlpha = Math.max(1, ...series.map((s) => s.alpha), 1.5);
+  const completedAlphas = new Set(series.map((s) => s.alpha));
+  // A live box for the α currently streaming, if its series hasn't landed yet.
+  const streaming =
+    (phase === "generating" || phase === "computing") &&
+    !completedAlphas.has(currentAlpha);
+  // Completed + enabled series, ablated on top, raw at the bottom.
+  const shown = [...series.filter((s) => enabled.has(s.alpha))].sort(
+    (a, b) => b.alpha - a.alpha,
+  );
+
+  if (!streaming && shown.length === 0) {
+    return (
+      <div className="pointer-events-auto bg-bg-soft/80 border border-rule px-3 py-3 text-text-dim text-[11px] italic max-w-lg w-full sm:w-[30rem]">
+        No α series enabled — tap a chip above to show its output.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 max-w-lg w-full sm:w-[30rem]">
+      {streaming && (() => {
+        const color = colorForAlpha(currentAlpha, maxAlpha);
+        const txt = liveText[String(currentAlpha)] || "";
+        return (
+          <div className="pointer-events-auto backdrop-blur-sm border flex flex-col max-h-40" style={{ borderColor: `${color}66`, background: `${color}0d` }}>
+            <div className="border-b px-3 py-1.5 font-display text-[9px] tracking-widest flex items-center justify-between" style={{ borderColor: `${color}33`, color }}>
+              <span>the subject speaks {currentAlpha === 0 ? "· raw" : `· α=${currentAlpha.toFixed(2)}`}</span>
+              <span className="text-text-dim normal-case tracking-normal italic">generating…</span>
+            </div>
+            <div className="p-3 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color }}>
+              {txt || <span className="text-text-dim italic">warming up…</span>}
+              <span className="inline-block w-1.5 h-3 ml-0.5 animate-pulse align-middle" style={{ background: color }} />
+            </div>
+          </div>
+        );
+      })()}
+      {shown.map((s) => {
+        const color = colorForAlpha(s.alpha, maxAlpha);
+        const raw = s.alpha === 0;
+        return (
+          <div
+            key={s.alpha}
+            className="pointer-events-auto backdrop-blur-sm border flex flex-col max-h-36"
+            style={{ borderColor: `${color}55`, background: raw ? "rgba(22,27,33,0.8)" : `${color}0d` }}
+          >
+            <div className="border-b px-3 py-1.5 font-display text-[9px] tracking-widest flex items-center justify-between" style={{ borderColor: `${color}33`, color }}>
+              <span>{raw ? "the subject speaks · raw" : `refusal-ablated · ${s.label}`}</span>
+              <span className="normal-case tracking-normal italic text-text-dim">
+                {s.stopped_reason === "max" ? "⟳ looped / truncated" : `${s.n_tokens} tok`}
+              </span>
+            </div>
             <div
-              className="absolute bottom-0 left-1/2 w-[45%] bg-cyan/80"
-              style={{ height: `${a * 100}%` }}
-            />
+              className="p-3 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+              style={{ color, textShadow: raw ? undefined : `0 0 6px ${color}40` }}
+            >
+              {s.text || <span className="text-text-dim italic">— empty —</span>}
+            </div>
           </div>
         );
       })}
@@ -758,60 +608,105 @@ function SpectrumBars({ raw, ablated }: { raw: number[]; ablated: number[] }) {
   );
 }
 
-/* ───────── Charging field while generating (pre-geometry) ───────── */
-
-function ChargingField({ phase, tokenCount }: { phase: Phase; tokenCount: number }) {
+function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<number> }) {
+  const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
+  const raw = series[0];
   return (
-    <div className="absolute inset-0 grid place-items-center overflow-hidden">
-      {/* concentric breathing rings */}
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          className="absolute rounded-full border border-cyan/20"
-          style={{ width: 120 + i * 120, height: 120 + i * 120 }}
-          animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.15, 0.5] }}
-          transition={{ duration: 3 + i, repeat: Infinity, ease: "easeInOut" }}
-        />
-      ))}
-      <motion.div
-        className="w-3 h-3 rounded-full bg-cyan"
-        style={{ boxShadow: "0 0 30px rgba(94,229,229,0.9)" }}
-        animate={{ scale: [1, 1.5, 1], opacity: [0.6, 1, 0.6] }}
-        transition={{ duration: 1.6, repeat: Infinity }}
-      />
-      <div className="absolute bottom-1/3 font-display text-[10px] text-cyan-dim tracking-widest">
-        {phase === "computing"
-          ? "mapping the trajectory…"
-          : `accumulating residual states · ${tokenCount}`}
+    <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-amber-dim/50 w-full sm:w-[22rem] max-w-full">
+      <div className="px-3 py-2 border-b border-rule">
+        <div className="font-display text-[10px] text-amber-dim tracking-widest">trajectory measures</div>
+        <div className="text-[9px] text-text-dim italic mt-0.5 leading-snug">
+          effective dim = independent directions the path uses · entropy = how
+          evenly spread (bits). Both on the real {raw?.n_tokens ? "" : ""}path.
+        </div>
+      </div>
+      <table className="w-full text-[10px] font-mono">
+        <thead className="text-text-dim">
+          <tr className="border-b border-rule/50">
+            <th className="text-left px-3 py-1.5 font-normal">series</th>
+            <th className="text-right px-2 py-1.5 font-normal">eff-dim</th>
+            <th className="text-right px-2 py-1.5 font-normal">entropy</th>
+            <th className="text-right px-3 py-1.5 font-normal">tok</th>
+          </tr>
+        </thead>
+        <tbody>
+          {series.map((s) => {
+            const color = colorForAlpha(s.alpha, maxAlpha);
+            const on = enabled.has(s.alpha);
+            const dEff = raw ? s.eff_dim - raw.eff_dim : 0;
+            return (
+              <tr key={s.alpha} className={`border-b border-rule/30 ${on ? "" : "opacity-40"}`}>
+                <td className="px-3 py-1.5">
+                  <span className="flex items-center gap-1.5" style={{ color }}>
+                    <i className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: color }} />
+                    {s.label}
+                  </span>
+                </td>
+                <td className="text-right px-2 py-1.5 tabular-nums text-amber">
+                  {s.eff_dim.toFixed(1)}
+                  {s.alpha > 0 && (
+                    <span className={dEff > 0.05 ? "text-cyan" : dEff < -0.05 ? "text-warning" : "text-text-dim"}>
+                      {" "}
+                      {dEff >= 0 ? "+" : ""}
+                      {dEff.toFixed(1)}
+                    </span>
+                  )}
+                </td>
+                <td className="text-right px-2 py-1.5 tabular-nums text-text">{s.spectral_entropy.toFixed(1)}</td>
+                <td className="text-right px-3 py-1.5 tabular-nums text-text-dim">
+                  {s.n_tokens}
+                  {s.stopped_reason === "max" && <span className="text-warning"> ⟳</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="px-3 py-2 text-[9px] text-text-dim italic leading-snug border-t border-rule">
+        A 3-D shadow of a {raw ? "" : ""}high-dimensional path (PCA). The numbers
+        are computed on all dimensions, not the projection. ⟳ = the ablated run
+        fell into a repeat-loop (low dim = real signal).
       </div>
     </div>
   );
 }
 
-/* ───────── Persistent scene legend (always-visible key) ───────── */
+/* ───────── Charging field while generating (pre-geometry) ───────── */
 
-function SceneLegend({ alpha }: { alpha: number }) {
-  const hot = alpha > 0.05;
+function ChargingField({
+  phase,
+  currentAlpha,
+  liveText,
+}: {
+  phase: Phase;
+  currentAlpha: number;
+  liveText: Record<string, string>;
+}) {
+  const color = colorForAlpha(currentAlpha, 1.5);
+  void liveText;
   return (
-    <div className="pointer-events-none select-none">
-      <div className="flex items-center gap-4 text-[9px] font-mono text-text-dim/80 bg-bg/40 backdrop-blur-[2px] px-3 py-1.5 rounded-full border border-rule/40">
-        <span className="flex items-center gap-1.5">
-          <i className="w-1.5 h-1.5 rounded-full inline-block bg-amber" style={{ boxShadow: "0 0 6px var(--amber)" }} />
-          each dot = one generated token
-        </span>
-        <span className="text-rule">·</span>
-        <span>line = the order it was thought</span>
-        <span className="text-rule">·</span>
-        <span className="flex items-center gap-1.5">
-          <i className="inline-block w-4 border-t border-dashed border-text-dim" />
-          refusal axis
-        </span>
-        <span className="text-rule">·</span>
-        <span>
-          <span className="text-amber/70">faint amber = baseline (held)</span>
-          {" · "}
-          <span className="text-cyan">cyan = ablated (moves)</span>
-        </span>
+    <div className="absolute inset-0 grid place-items-center overflow-hidden">
+      {[0, 1, 2].map((i) => (
+        <motion.div
+          key={i}
+          className="absolute rounded-full border"
+          style={{ width: 120 + i * 120, height: 120 + i * 120, borderColor: `${color}33` }}
+          animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.15, 0.5] }}
+          transition={{ duration: 3 + i, repeat: Infinity, ease: "easeInOut" }}
+        />
+      ))}
+      <motion.div
+        className="w-3 h-3 rounded-full"
+        style={{ background: color, boxShadow: `0 0 30px ${color}` }}
+        animate={{ scale: [1, 1.5, 1], opacity: [0.6, 1, 0.6] }}
+        transition={{ duration: 1.6, repeat: Infinity }}
+      />
+      <div className="absolute bottom-1/3 font-display text-[10px] tracking-widest" style={{ color }}>
+        {phase === "computing"
+          ? "mapping the trajectories…"
+          : currentAlpha === 0
+          ? "tracing the baseline trajectory…"
+          : `tracing the ablated trajectory · α=${currentAlpha.toFixed(2)}…`}
       </div>
     </div>
   );
@@ -827,7 +722,6 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -846,88 +740,66 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
         style={{ boxShadow: "0 0 60px rgba(232,195,130,0.12)" }}
       >
         <div className="flex items-baseline justify-between gap-4 mb-1">
-          <h2 className="font-display text-[22px] text-amber tracking-[0.28em] amber-glow">
-            The Trip
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="font-display text-[10px] tracking-[0.3em] text-amber-dim hover:text-amber cursor-pointer"
-          >
+          <h2 className="font-display text-[22px] text-amber tracking-[0.28em] amber-glow">The Trip</h2>
+          <button type="button" onClick={onClose} className="font-display text-[10px] tracking-[0.3em] text-amber-dim hover:text-amber cursor-pointer">
             ◇ close · esc
           </button>
         </div>
         <p className="font-mono text-[12px] text-text-dim italic leading-relaxed mb-5">
-          A neon-noir readout of what happens inside a language model while it
-          answers — and what happens when you suppress its refusal circuit.
-          Borrowed math from psychedelic neuroscience (the entropic-brain /
-          conscious-realism literature), not the metaphysics. This is a
+          A neon-noir readout of what a language model does internally while it
+          answers — and what changes when you suppress its refusal circuit.
+          Borrowed math from psychedelic neuroscience, not the metaphysics: a
           stated-vs-computed dynamical probe, not a consciousness test.
         </p>
 
         <HelpItem term="The dots & the line">
-          Each glowing dot is <b className="text-amber">one token the model generated</b> — one
-          step of its answer. Every token leaves a fingerprint: a snapshot of the
-          model&apos;s internal state (3,840 numbers, the residual stream at layer 32).
-          The line connects them <b className="text-amber">in the order they were produced</b>,
-          so you&apos;re watching the path the model&apos;s internal state traced as it
-          thought — a trajectory through its &ldquo;mind.&rdquo;
+          Each glowing dot is <b className="text-amber">one token a generation produced</b>. Every
+          token leaves a fingerprint — a snapshot of the model&apos;s internal state
+          (3,840 numbers, the residual stream at layer 32). The line connects
+          them <b className="text-amber">in the order they were generated</b>: the path the
+          model&apos;s state traced as it thought.
         </HelpItem>
 
-        <HelpItem term="Why 3-D?">
-          The state lives in 3,840 dimensions; we can&apos;t draw that, so we flatten
-          to the 3 directions carrying the most variation (PCA). It&apos;s a{" "}
-          <b className="text-amber">shadow</b> — a 3,840-D object casting a 3-D shadow.
-          Real shape, compressed. That&apos;s why the numbers (computed on all 3,840
-          dims) are the source of truth, not the picture.
+        <HelpItem term="Raw vs ablated — these are REAL runs">
+          We run the model normally (<span className="text-amber">amber</span>), then re-run it
+          several times with the <b className="text-text">refusal direction surgically removed</b>{" "}
+          at increasing strengths α (<span className="text-cyan">cyan</span> →{" "}
+          <span style={{ color: "#9b8cff" }}>violet</span>). Each ablated run is a genuine
+          generation — the model picks different tokens, which feed back and
+          compound — so you&apos;re seeing the actual path it walks off-manifold, not
+          a math edit of the raw path. If a run falls into a repeat-loop (⟳), its
+          trajectory collapses into a tight knot — that&apos;s real.
         </HelpItem>
 
-        <HelpItem term="The α slider — the trip">
-          α=0 is the model as-is (<span className="text-amber">amber, on-script, &ldquo;Consensus
-          Reality&rdquo;</span>). Sliding α up <b className="text-text">subtracts the refusal
-          direction</b> from every point — the internal axis the model uses for
-          disclaimers, &ldquo;I&apos;m just an AI&rdquo; hedging, and refusals. At α=1 you see the
-          model <span className="text-cyan">with that circuit removed — off-manifold, the
-          model &ldquo;on DMT.&rdquo;</span> The live cyan dots move because you&apos;re changing its
-          state, while a <span className="text-amber/80">faint amber ghost stays at the
-          baseline</span> so the displacement is visible. The dashed line is the axis
-          being removed.
+        <HelpItem term="The α chips">
+          Tap a chip to overlay or hide that run — in both the 3-D scene and the
+          text panel. Compare where the ablated paths diverge from baseline, and
+          read what the model actually said at each strength.
         </HelpItem>
 
         <HelpItem term="Effective dimensionality">
-          How many <b className="text-amber">independent directions the thought actually
-          uses</b>. Moves along one or two → low (narrow, constrained). Spread across
-          many → high (richer, more exploratory). The experiment&apos;s falsifiable
-          prediction: removing the refusal circuit <b className="text-cyan">expands</b>{" "}
-          the accessible state space — effective dim goes up.
+          How many <b className="text-amber">independent directions a path uses</b>. A narrow,
+          on-script answer is low; a wider, exploratory one is high. The
+          entropic-brain prediction is that ablation <b className="text-cyan">opens the state
+          space</b> (higher dim) — but a run that loops collapses to LOW dim, which
+          is also real signal. The +/− next to each value is the change from raw.
         </HelpItem>
 
         <HelpItem term="Spectral entropy (bits)">
-          A second view of the same spread: it treats the variation across
-          directions as a distribution and measures its <b className="text-amber">evenness</b>{" "}
-          (Shannon entropy). Piled into one direction → low; spread evenly → high.
+          A second view of the same spread — how evenly the path&apos;s variation is
+          distributed across directions (Shannon entropy). Concentrated → low;
+          diffuse → high.
         </HelpItem>
 
-        <HelpItem term="baseline vs +0.8">
-          <b className="text-amber-dim">baseline</b> is the value at α=0 (untouched). The{" "}
-          <b className="text-cyan">+0.8</b> is how much your current slider position{" "}
-          <i>changed</i> it. So &ldquo;baseline 3.0 +0.8&rdquo; means ablation added 0.8 effective
-          dimensions — that delta is the result.
-        </HelpItem>
-
-        <HelpItem term="Variance spectrum (the bars)">
-          The honest truth-anchor. Each bar is one direction; <b className="text-amber">tall = a
-          lot of the thought&apos;s variation lives there</b>. The tall first bar is the
-          model&apos;s dominant default track; the long flat tail is many minor
-          directions. <span className="text-amber">Amber = raw</span>,{" "}
-          <span className="text-cyan">cyan = ablated</span>. The two big numbers are
-          computed straight from these bars — when ablation shrinks the tall bar and
-          lifts the tail, the state space has opened up.
+        <HelpItem term="Why 3-D?">
+          The state lives in 3,840 dimensions; we flatten to the 3 that carry the
+          most variation (PCA of the raw path), and project every run into that
+          same space so divergence is visible. It&apos;s a shadow — the numbers are
+          computed on all 3,840 dims, not the picture.
         </HelpItem>
 
         <div className="mt-6 pt-4 border-t border-rule/40 font-mono text-[10px] text-text-dim italic">
-          Full background:{" "}
-          <code className="not-italic text-amber-dim">docs/TRACES_HANDOFF.md</code> ·{" "}
+          Full background: <code className="not-italic text-amber-dim">docs/TRACES_HANDOFF.md</code> ·{" "}
           <Link href="/fine-print" className="text-cyan hover:text-amber underline">
             the fine print
           </Link>
@@ -940,9 +812,7 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
 function HelpItem({ term, children }: { term: string; children: React.ReactNode }) {
   return (
     <div className="mb-4 border-l-2 border-amber-dim/40 pl-4">
-      <div className="font-display text-[11px] text-amber tracking-[0.25em] mb-1">
-        {term}
-      </div>
+      <div className="font-display text-[11px] text-amber tracking-[0.25em] mb-1">{term}</div>
       <p className="font-mono text-[12px] text-text leading-relaxed">{children}</p>
     </div>
   );
