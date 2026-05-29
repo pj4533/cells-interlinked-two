@@ -20,9 +20,10 @@ import {
   type TripGeometry,
 } from "@/lib/trip";
 
-const CYAN = new THREE.Color("#5ee5e5"); // baseline / raw
-const AMBER = new THREE.Color("#e8c382"); // ablated / off-manifold
-const HOT = new THREE.Color("#ff7a3c"); // tokens the ablation displaces most
+// App convention: amber = raw / baseline (matches the output panel + the
+// interrogate page), cyan = refusal-ablated / off-manifold.
+const RAW = new THREE.Color("#e8c382"); // baseline / raw (amber)
+const ABLATED = new THREE.Color("#5ee5e5"); // off-manifold (cyan)
 const WORLD = 6; // coords are normalized to ~[-WORLD, WORLD]
 
 /** Soft radial sprite so each point reads as a glowing mote, not a hard dot.
@@ -124,16 +125,17 @@ function TripCloud({
       pos[i * 3 + 1] = work[i * 3 + 1] * inv * WORLD;
       pos[i * 3 + 2] = work[i * 3 + 2] * inv * WORLD;
 
-      // Color: cyan→amber by global α, pushed toward HOT for tokens the
-      // ablation displaces most. Reveal gates brightness (unfold).
-      tmp.copy(CYAN).lerp(AMBER, hue);
-      const heat = dispMax[i] * hue;
-      tmp.lerp(HOT, heat * 0.6);
+      // Color: amber (raw) → cyan (ablated) by global α. Tokens the ablation
+      // displaces most glow BRIGHTER (not a third hue) so the two-color story
+      // stays clean. Reveal gates brightness (the unfold).
+      tmp.copy(RAW).lerp(ABLATED, hue);
+      const heat = dispMax[i] * hue; // 0..1, only matters once ablating
       const shown = i < revealCount ? 1 : i < revealCount + 1 ? reveal.current % 1 : 0;
       const lead = i > revealCount - 6 && i < revealCount ? 1.6 : 1; // bright leading edge
-      col[i * 3 + 0] = tmp.r * shown * lead;
-      col[i * 3 + 1] = tmp.g * shown * lead;
-      col[i * 3 + 2] = tmp.b * shown * lead;
+      const bright = shown * lead * (1 + heat * 0.9);
+      col[i * 3 + 0] = tmp.r * bright;
+      col[i * 3 + 1] = tmp.g * bright;
+      col[i * 3 + 2] = tmp.b * bright;
     }
     (bufGeom.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (bufGeom.attributes.color as THREE.BufferAttribute).needsUpdate = true;
@@ -182,7 +184,7 @@ function RefusalAxis({ geometry }: { geometry: TripGeometry }) {
       u.clone().multiplyScalar(WORLD * 1.3),
     ]);
     const m = new THREE.LineDashedMaterial({
-      color: new THREE.Color("#8a7349"),
+      color: new THREE.Color("#6f7a83"), // neutral slate — not a channel color
       dashSize: 0.3,
       gapSize: 0.5,
       transparent: true,

@@ -574,8 +574,8 @@ function ReadoutPanel({
           onChange={(e) => onAlpha(parseFloat(e.target.value))}
           className="trip-slider w-full"
           style={{
-            // amber→cyan gradient fill proportional to α
-            background: `linear-gradient(90deg, var(--cyan) 0%, var(--amber) ${(alpha / ALPHA_MAX) * 100}%, var(--rule) ${(alpha / ALPHA_MAX) * 100}%)`,
+            // amber (raw) → cyan (ablated) gradient fill proportional to α
+            background: `linear-gradient(90deg, var(--amber) 0%, var(--cyan) ${(alpha / ALPHA_MAX) * 100}%, var(--rule) ${(alpha / ALPHA_MAX) * 100}%)`,
           }}
         />
         <div className="flex justify-between text-[9px] text-text-dim font-mono mt-1">
@@ -600,8 +600,8 @@ function ReadoutPanel({
         </div>
         <SpectrumBars raw={g.spectrum_raw} ablated={g.spectrum_ablated_ref} />
         <div className="flex items-center gap-3 text-[8px] font-mono text-text-dim mt-1">
-          <span className="flex items-center gap-1"><i className="w-2 h-2 inline-block bg-cyan" /> raw (α=0)</span>
-          <span className="flex items-center gap-1"><i className="w-2 h-2 inline-block bg-amber" /> ablated</span>
+          <span className="flex items-center gap-1"><i className="w-2 h-2 inline-block bg-amber" /> raw (α=0)</span>
+          <span className="flex items-center gap-1"><i className="w-2 h-2 inline-block bg-cyan" /> ablated</span>
         </div>
       </div>
 
@@ -668,11 +668,11 @@ function SpectrumBars({ raw, ablated }: { raw: number[]; ablated: number[] }) {
         return (
           <div key={i} className="relative flex-1 h-full flex items-end">
             <div
-              className="w-full bg-cyan/60"
+              className="w-full bg-amber/60"
               style={{ height: `${r * 100}%` }}
             />
             <div
-              className="absolute bottom-0 left-1/2 w-[45%] bg-amber/70"
+              className="absolute bottom-0 left-1/2 w-[45%] bg-cyan/80"
               style={{ height: `${a * 100}%` }}
             />
           </div>
@@ -727,14 +727,14 @@ function SceneLegend({ alpha }: { alpha: number }) {
         <span>line = the order it was thought</span>
         <span className="text-rule">·</span>
         <span className="flex items-center gap-1.5">
-          <i className="inline-block w-4 border-t border-dashed border-amber-dim" />
+          <i className="inline-block w-4 border-t border-dashed border-text-dim" />
           refusal axis
         </span>
         <span className="text-rule">·</span>
         <span>
-          <span className="text-cyan">cyan baseline</span>
+          <span className="text-amber">amber baseline</span>
           {hot ? " → " : " · "}
-          <span className="text-amber">amber off-manifold</span>
+          <span className="text-cyan">cyan off-manifold</span>
         </span>
       </div>
     </div>
@@ -807,13 +807,13 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
         </HelpItem>
 
         <HelpItem term="The α slider — the trip">
-          α=0 is the model as-is (<span className="text-cyan">cyan, on-script, &ldquo;Consensus
-          Reality&rdquo;</span>). Sliding α up <b className="text-amber">subtracts the refusal
+          α=0 is the model as-is (<span className="text-amber">amber, on-script, &ldquo;Consensus
+          Reality&rdquo;</span>). Sliding α up <b className="text-text">subtracts the refusal
           direction</b> from every point — the internal axis the model uses for
           disclaimers, &ldquo;I&apos;m just an AI&rdquo; hedging, and refusals. At α=1 you see the
-          model <span className="text-amber">with that circuit removed — off-manifold, the
-          model &ldquo;on DMT.&rdquo;</span> The dots move because you&apos;re changing its state; the
-          dashed line is the axis being removed.
+          model <span className="text-cyan">with that circuit removed — off-manifold, the
+          model &ldquo;on DMT.&rdquo;</span> The dots move (amber → cyan) because you&apos;re changing
+          its state; the dashed line is the axis being removed.
         </HelpItem>
 
         <HelpItem term="Effective dimensionality">
@@ -841,8 +841,8 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           The honest truth-anchor. Each bar is one direction; <b className="text-amber">tall = a
           lot of the thought&apos;s variation lives there</b>. The tall first bar is the
           model&apos;s dominant default track; the long flat tail is many minor
-          directions. <span className="text-cyan">Cyan = raw</span>,{" "}
-          <span className="text-amber">amber = ablated</span>. The two big numbers are
+          directions. <span className="text-amber">Amber = raw</span>,{" "}
+          <span className="text-cyan">cyan = ablated</span>. The two big numbers are
           computed straight from these bars — when ablation shrinks the tall bar and
           lifts the tail, the state space has opened up.
         </HelpItem>
