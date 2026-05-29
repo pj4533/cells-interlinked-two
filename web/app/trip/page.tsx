@@ -95,10 +95,8 @@ function TripPageInner() {
           if (prev.some((s) => s.alpha === e.series.alpha)) return prev;
           return [...prev, e.series];
         });
-        // Default-on: raw (α=0) and α=1.0 as they arrive.
-        if (e.series.alpha === 0 || e.series.alpha === 1) {
-          setEnabled((s) => new Set(s).add(e.series.alpha));
-        }
+        // Default-on: every series as it arrives (user toggles off as wanted).
+        setEnabled((s) => new Set(s).add(e.series.alpha));
         break;
       }
       case "trip_geometry": {
@@ -168,14 +166,8 @@ function TripPageInner() {
         setPayload(p);
         setLiveSeries(p.geometry.series);
         setLayer(p.geometry.layer);
-        const alphas = p.geometry.series.map((s) => s.alpha);
-        const def = new Set<number>([0]);
-        if (alphas.includes(1)) def.add(1);
-        else {
-          const firstAbl = alphas.find((a) => a > 0);
-          if (firstAbl != null) def.add(firstAbl);
-        }
-        setEnabled(def);
+        // All series on by default; user toggles off as wanted.
+        setEnabled(new Set(p.geometry.series.map((s) => s.alpha)));
         setPhase("ready");
       }
     })();

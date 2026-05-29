@@ -6,13 +6,14 @@
 // so a degenerate repeat-loop shows up as a tight collapsed knot, not a clean
 // shifted copy. Neon-noir palette, additive glow, slow parallax rotation.
 //
-// Framing is ROBUST + enabled-aware: we center on the centroid of the visible
-// series and scale to their 90th-percentile spread, so the bulk of the dots
-// fills the view and a runaway (over-projected/looped) path just streaks off
-// the edge instead of squishing everything else into a dot.
+// Each series unfolds token-by-token when it appears (the dots "stream in").
+// Framing is applied as a parent group transform (centroid + 90th-percentile
+// spread of the visible series) so the bulk fills the view and a runaway path
+// streaks off-frame — and toggling/reframing never rebuilds the per-series
+// geometry, so the unfold state survives.
 
-import { useMemo } from "react";
-import { Canvas } from "@react-three/fiber";
+import { useMemo, useRef } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
 import * as THREE from "three";
 import { colorForAlpha, type TripGeometry } from "@/lib/trip";
@@ -36,20 +37,17 @@ function makeGlow(): THREE.Texture {
   return tex;
 }
 
-type Frame = { cx: number; cy: number; cz: number; scale: number };
-
-/** One trajectory, positioned by the shared frame (centroid + scale). */
+/** One trajectory in raw PCA coords (framing is the parent group's job).
+ *  Unfolds token-by-token via drawRange when it appears. */
 function TripPath({
   coords,
   color,
-  frame,
   glow,
   pointSize,
   raw,
 }: {
   coords: number[][];
   color: string;
-  frame: Frame;
   glow: THREE.Texture;
   pointSize: number;
   raw: boolean;
@@ -57,26 +55,40 @@ function TripPath({
   const positions = useMemo(() => {
     const a = new Float32Array(coords.length * 3);
     for (let i = 0; i < coords.length; i++) {
-      a[i * 3 + 0] = (coords[i][0] - frame.cx) * frame.scale;
-      a[i * 3 + 1] = (coords[i][1] - frame.cy) * frame.scale;
-      a[i * 3 + 2] = (coords[i][2] - frame.cz) * frame.scale;
+      a[i * 3 + 0] = coords[i][0];
+      a[i * 3 + 1] = coords[i][1];
+      a[i * 3 + 2] = coords[i][2];
     }
     return a;
-  }, [coords, frame]);
+  }, [coords]);
   const pointsGeom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    g.setDrawRange(0, 0); // start hidden; the unfold grows it
     return g;
   }, [positions]);
   const lineGeom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    g.setDrawRange(0, 0);
     return g;
   }, [positions]);
   const col = useMemo(() => new THREE.Color(color), [color]);
-  // Many overlapping points (a loop) sum under additive blending → keep
-  // opacity low so dense clusters stay colored instead of clipping to white.
   const opacity = coords.length > 200 ? 0.32 : raw ? 0.6 : 0.8;
+
+  // Token-by-token unfold (~2.5s regardless of length). reveal is keyed to
+  // the geometry so a new series re-unfolds; toggling another series only
+  // moves the parent transform, leaving these positions (and reveal) intact.
+  const reveal = useRef(0);
+  useFrame((_state, dt) => {
+    const n = coords.length;
+    if (reveal.current >= n) return;
+    reveal.current = Math.min(n, reveal.current + (n / 2.5) * Math.min(dt, 0.05));
+    const c = Math.max(0, Math.floor(reveal.current));
+    pointsGeom.setDrawRange(0, c);
+    lineGeom.setDrawRange(0, c);
+  });
+
   return (
     <group>
       <points geometry={pointsGeom}>
@@ -124,23 +136,40 @@ export default function TripScene({
     [geometry, enabledAlphas],
   );
 
-  // Robust, enabled-aware framing: centroid + 90th-percentile radius of the
-  // visible points. Recomputes when the selection changes (no remount).
-  const frame = useMemo<Frame>(() => {
+  // Robust, enabled-aware framing as a parent-group transform. PER-AXIS
+  // scaling: the residual trajectory's variance is dominated by PC1, so a
+  // uniform scale leaves a thin 1-D streak. We scale each axis by its own
+  // 90th-percentile spread so the cloud fills the view in all 3 dims — an
+  // anisotropic "stretch the shadow to fill the box" choice for legibility.
+  // A floor caps the stretch so a near-flat noise axis can't blow up into
+  // fake structure (≤ ~5.5× the dominant axis). Never touches per-series
+  // geometry, so unfolds aren't disturbed.
+  const xform = useMemo(() => {
     const pts: number[][] = [];
     for (const s of shown) for (const c of s.coords) pts.push(c);
-    if (pts.length === 0) return { cx: 0, cy: 0, cz: 0, scale: 1 };
+    const ONE: [number, number, number] = [1, 1, 1];
+    if (pts.length === 0) return { scale: ONE, pos: [0, 0, 0] as [number, number, number] };
     let cx = 0, cy = 0, cz = 0;
     for (const p of pts) {
       cx += p[0]; cy += p[1]; cz += p[2];
     }
     cx /= pts.length; cy /= pts.length; cz /= pts.length;
-    const dists = pts
-      .map((p) => Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz))
-      .sort((a, b) => a - b);
-    // 90th percentile so a runaway tail doesn't dominate the scale.
-    const r = dists[Math.min(dists.length - 1, Math.floor(dists.length * 0.9))] || 1;
-    return { cx, cy, cz, scale: (WORLD * 0.62) / Math.max(r, 1e-6) };
+    const c = [cx, cy, cz];
+    const pct = (axis: number) => {
+      const d = pts.map((p) => Math.abs(p[axis] - c[axis])).sort((a, b) => a - b);
+      return d[Math.min(d.length - 1, Math.floor(d.length * 0.9))] || 1e-6;
+    };
+    const rx = pct(0), ry = pct(1), rz = pct(2);
+    const maxR = Math.max(rx, ry, rz, 1e-6);
+    const floor = maxR * 0.18; // cap anisotropy at ~5.5×
+    const target = WORLD * 0.6;
+    const sx = target / Math.max(rx, floor);
+    const sy = target / Math.max(ry, floor);
+    const sz = target / Math.max(rz, floor);
+    return {
+      scale: [sx, sy, sz] as [number, number, number],
+      pos: [-cx * sx, -cy * sy, -cz * sz] as [number, number, number],
+    };
   }, [shown]);
 
   return (
@@ -154,13 +183,12 @@ export default function TripScene({
       <fog attach="fog" args={["#070a0d", 18, 40]} />
       <Stars radius={70} depth={45} count={1200} factor={3} saturation={0} fade speed={0.5} />
       <ambientLight intensity={0.4} />
-      <group key={sceneKey}>
+      <group key={sceneKey} scale={xform.scale} position={xform.pos}>{/* per-axis stretch */}
         {shown.map((s) => (
           <TripPath
             key={s.alpha}
             coords={s.coords}
             color={colorForAlpha(s.alpha, maxAlpha)}
-            frame={frame}
             glow={glow}
             pointSize={s.alpha === 0 ? 0.34 : 0.44}
             raw={s.alpha === 0}
