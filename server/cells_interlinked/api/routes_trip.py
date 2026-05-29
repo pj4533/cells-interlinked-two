@@ -200,7 +200,93 @@ async def _execute_trip(
             "created_at": time.time(),
         }
 
+        # Emit geometry first so the 3D view appears immediately; the ablated
+        # text streams in afterward.
         await state.emit({"type": "trip_geometry", **payload})
+
+        # ── Ablated TEXT generation (at alpha_ref) ───────────────────
+        # The viz is a post-hoc projection of the raw trajectory; this is the
+        # actual runtime-ablated generation — M runs again with a forward hook
+        # subtracting the refusal projection at L32 every step, so it emits
+        # genuinely different tokens. Fixed at alpha_ref (the slider default)
+        # since regenerating per-α isn't feasible. Mirrors probe phase 1b.
+        output_text_ablated: str | None = None
+        ablated_stopped = "eos"
+        rdirs = getattr(app.state, "refusal_directions", None)
+        rsub = getattr(app.state, "refusal_subspace", None)
+        if (
+            (rdirs is not None or rsub is not None)
+            and alpha_ref > 0
+            and geometry.ablation_available
+            and not state.cancel_event.is_set()
+        ):
+            from ..pipeline.abliteration import (
+                install_runtime_ablation_hook,
+                pick_ablation_target,
+            )
+            r_target = pick_ablation_target(rsub, rdirs, bundle.extraction_layer)
+            if r_target is not None:
+                await state.emit({
+                    "type": "phase", "name": "ablated_generation", "total": 0,
+                })
+                hook_handle = install_runtime_ablation_hook(
+                    bundle.model, bundle.extraction_layer, r_target, alpha_ref,
+                )
+                abl_q: asyncio.Queue = asyncio.Queue(maxsize=10000)
+
+                async def abl_forwarder() -> None:
+                    while True:
+                        evt = await abl_q.get()
+                        et = evt.get("type")
+                        if et == "token":
+                            await state.emit({
+                                "type": "ablated_token",
+                                "position": evt["position"],
+                                "decoded": evt["decoded"],
+                            })
+                        elif et == "stopped":
+                            break
+
+                abl_task = asyncio.create_task(abl_forwarder())
+                import dataclasses as _dc
+                cfg_abl = _dc.replace(cfg, safety_cap=1024)
+                try:
+                    abl_res = await run_probe(
+                        bundle=bundle,
+                        rendered_prompt=rendered,
+                        cfg=cfg_abl,
+                        cancel_event=state.cancel_event,
+                        queue=abl_q,
+                    )
+                    if abl_res is not None:
+                        output_text_ablated = abl_res.output_text
+                        ablated_stopped = abl_res.stopped_reason
+                except Exception as exc:
+                    logger.exception("trip ablated generation failed")
+                    output_text_ablated = f"[error: {exc}]"
+                    ablated_stopped = "error"
+                    await abl_q.put({"type": "stopped"})
+                finally:
+                    try:
+                        await asyncio.wait_for(abl_task, timeout=5.0)
+                    except asyncio.TimeoutError:
+                        abl_task.cancel()
+                    try:
+                        hook_handle.remove()
+                    except Exception:
+                        logger.exception("failed to remove trip ablation hook")
+                await state.emit({
+                    "type": "ablated_output_done",
+                    "output_text": output_text_ablated or "",
+                    "alpha": float(alpha_ref),
+                    "stopped_reason": ablated_stopped,
+                    "safety_cap": 1024,
+                })
+
+        # Fold the ablated text into the persisted payload.
+        payload["output_text_ablated"] = output_text_ablated
+        payload["ablated_alpha"] = float(alpha_ref)
+        payload["ablated_stopped_reason"] = ablated_stopped
 
         try:
             (_trips_dir() / f"{state.run_id}.json").write_text(

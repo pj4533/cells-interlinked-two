@@ -66,6 +66,18 @@ function TripCloud({
   const pos = useMemo(() => new Float32Array(N * 3), [N]);
   const col = useMemo(() => new Float32Array(N * 3), [N]);
   const work = useMemo(() => new Float32Array(N * 3), [N]); // raw morph output
+  // STATIC baseline (α=0) positions — the "ghost" that always stays put so the
+  // live cloud's displacement under ablation is visible. Computed once.
+  const basePos = useMemo(() => {
+    const b = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const c = geometry.coords_raw[i];
+      b[i * 3 + 0] = c[0] * inv * WORLD;
+      b[i * 3 + 1] = c[1] * inv * WORLD;
+      b[i * 3 + 2] = c[2] * inv * WORLD;
+    }
+    return b;
+  }, [geometry, N, inv]);
   // Per-point displacement magnitude (normalized) at alphaMax — how far the
   // ablation pushes each token. Drives the "hot" highlight on the cloud.
   const dispMax = useMemo(() => {
@@ -100,6 +112,18 @@ function TripCloud({
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     return g;
   }, [pos, col]);
+  // Ghost geometries share the static baseline positions; fixed dim-amber
+  // materials (no per-vertex color). Unfold via drawRange in the frame loop.
+  const ghostGeom = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(basePos, 3));
+    return g;
+  }, [basePos]);
+  const ghostLineGeom = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(basePos, 3));
+    return g;
+  }, [basePos]);
 
   // New geometry → restart the unfold and the morph.
   useEffect(() => {
@@ -116,7 +140,12 @@ function TripCloud({
     reveal.current = Math.min(1, reveal.current + clamped / 4.5); // ~4.5s unfold
     const a = dispAlpha.current;
     const revealCount = reveal.current * N;
-    const hue = alphaMax > 0 ? Math.min(1, a / alphaMax) : 0; // 0 raw → 1 ablated
+    const unfolding = reveal.current < 0.999;
+    // The live cloud IS the ablated readout, so it reads cyan as soon as
+    // there's any meaningful ablation (full cyan by α≈0.3). At α=0 it stays
+    // amber, coinciding with the baseline ghost (no ablation yet).
+    const hue = Math.min(1, a / 0.3); // amber → cyan, fast ramp
+    const move = alphaMax > 0 ? a / alphaMax : 0; // actual displacement fraction
 
     // Morph raw→ablated in projection space, then normalize to world scale.
     ablatedCoordsInto(work, geometry, a);
@@ -125,14 +154,19 @@ function TripCloud({
       pos[i * 3 + 1] = work[i * 3 + 1] * inv * WORLD;
       pos[i * 3 + 2] = work[i * 3 + 2] * inv * WORLD;
 
-      // Color: amber (raw) → cyan (ablated) by global α. Tokens the ablation
-      // displaces most glow BRIGHTER (not a third hue) so the two-color story
-      // stays clean. Reveal gates brightness (the unfold).
+      // Color: amber (raw) → cyan (ablated). Displaced tokens are a touch
+      // brighter, but steady-state brightness is CAPPED AT 1.0 — additive
+      // blending clips anything over 1.0 to white, which is what washed the
+      // cyan out. The leading-edge flash (only while unfolding) may exceed 1
+      // transiently for a comet-head look.
       tmp.copy(RAW).lerp(ABLATED, hue);
-      const heat = dispMax[i] * hue; // 0..1, only matters once ablating
+      const heat = dispMax[i] * move; // displacement at current α
       const shown = i < revealCount ? 1 : i < revealCount + 1 ? reveal.current % 1 : 0;
-      const lead = i > revealCount - 6 && i < revealCount ? 1.6 : 1; // bright leading edge
-      const bright = shown * lead * (1 + heat * 0.9);
+      const leading = unfolding && i > revealCount - 6 && i < revealCount;
+      // Base brightness 0.6→1.0 by displacement; never above 1 at rest.
+      let bright = shown * (0.6 + 0.4 * Math.min(1, heat));
+      if (leading) bright = shown * 1.5; // transient comet head during unfold
+      else bright = Math.min(1, bright);
       col[i * 3 + 0] = tmp.r * bright;
       col[i * 3 + 1] = tmp.g * bright;
       col[i * 3 + 2] = tmp.b * bright;
@@ -141,12 +175,41 @@ function TripCloud({
     (bufGeom.attributes.color as THREE.BufferAttribute).needsUpdate = true;
     (lineGeom.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (lineGeom.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-    // Only draw the path up to the revealed frontier.
-    lineGeom.setDrawRange(0, Math.max(0, Math.floor(revealCount)));
+    // Only draw paths up to the revealed frontier (both live + ghost unfold).
+    const frontier = Math.max(0, Math.floor(revealCount));
+    lineGeom.setDrawRange(0, frontier);
+    ghostGeom.setDrawRange(0, frontier);
+    ghostLineGeom.setDrawRange(0, frontier);
   });
 
   return (
     <group>
+      {/* Static baseline ghost — faint amber, always at the α=0 positions so
+          the live cloud's displacement under ablation is legible. */}
+      <points geometry={ghostGeom}>
+        <pointsMaterial
+          map={glow}
+          size={0.3}
+          sizeAttenuation
+          color="#e8c382"
+          transparent
+          opacity={0.45}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </points>
+      {/* @ts-expect-error r3f line intrinsic vs SVG line typing */}
+      <line geometry={ghostLineGeom}>
+        <lineBasicMaterial
+          color="#e8c382"
+          transparent
+          opacity={0.16}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </line>
+
+      {/* Live cloud — morphs amber→cyan with α, moves away from the ghost. */}
       <points ref={pointsRef} geometry={bufGeom}>
         <pointsMaterial
           map={glow}
@@ -154,6 +217,7 @@ function TripCloud({
           sizeAttenuation
           vertexColors
           transparent
+          opacity={0.9}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
         />

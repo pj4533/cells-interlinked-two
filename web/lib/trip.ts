@@ -52,6 +52,11 @@ export interface TripPayload {
   direction_variant: string;
   geometry: TripGeometry;
   created_at: number;
+  // The actual runtime-ablated generation at alpha_ref (what M *says*
+  // off-manifold). Null if no refusal direction was loaded.
+  output_text_ablated?: string | null;
+  ablated_alpha?: number;
+  ablated_stopped_reason?: string;
 }
 
 // Discriminated-ish SSE event shape for the trip stream.
@@ -62,6 +67,8 @@ export type TripEvent =
   | { type: "token"; position: number; token_id: number; decoded: string }
   | { type: "stopped"; reason: string; total_tokens: number }
   | ({ type: "trip_geometry" } & TripPayload)
+  | { type: "ablated_token"; position: number; decoded: string }
+  | { type: "ablated_output_done"; output_text: string; alpha: number; stopped_reason: string }
   | { type: "done" }
   | { type: "error"; message?: string }
   | { type: string; [k: string]: unknown };
@@ -112,6 +119,8 @@ export function subscribeTrip(
     "token",
     "stopped",
     "trip_geometry",
+    "ablated_token",
+    "ablated_output_done",
     "done",
     "error",
     "ping",

@@ -54,6 +54,10 @@ function TripPageInner() {
   const [alpha, setAlpha] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  // The runtime-ablated text output (streams after geometry, fixed at α_ref).
+  const [ablatedOutput, setAblatedOutput] = useState<string>("");
+  const [ablatedAlpha, setAblatedAlpha] = useState<number | null>(null);
+  const [ablatedStreaming, setAblatedStreaming] = useState(false);
 
   const unsubRef = useRef<null | (() => void)>(null);
   const userTouchedAlpha = useRef(false);
@@ -119,6 +123,23 @@ function TripPageInner() {
         userTouchedAlpha.current = false;
         setAlpha(0);
         setPhase("ready");
+        // Ablated text streams in next (if a refusal direction is loaded).
+        if (p.geometry?.ablation_available) {
+          setAblatedStreaming(true);
+          setAblatedAlpha(p.geometry.alpha_ref);
+        }
+        break;
+      }
+      case "ablated_token": {
+        const e = evt as { decoded: string };
+        setAblatedOutput((o) => o + e.decoded);
+        break;
+      }
+      case "ablated_output_done": {
+        const e = evt as { output_text: string; alpha: number };
+        setAblatedOutput(e.output_text);
+        setAblatedAlpha(e.alpha);
+        setAblatedStreaming(false);
         break;
       }
       case "error":
@@ -140,6 +161,9 @@ function TripPageInner() {
       setTokenCount(0);
       setPayload(null);
       setAlpha(0);
+      setAblatedOutput("");
+      setAblatedAlpha(null);
+      setAblatedStreaming(false);
       userTouchedAlpha.current = false;
       setPrompt(trimmed);
       setPhase("generating");
@@ -177,6 +201,9 @@ function TripPageInner() {
         setPrompt(p.prompt);
         setPayload(p);
         setOutput(p.output_text || "");
+        setAblatedOutput(p.output_text_ablated || "");
+        setAblatedAlpha(p.ablated_alpha ?? p.geometry?.alpha_ref ?? null);
+        setAblatedStreaming(false);
         setPhase("ready");
       }
     })();
@@ -198,6 +225,9 @@ function TripPageInner() {
     setTokenCount(0);
     setError(null);
     setAlpha(0);
+    setAblatedOutput("");
+    setAblatedAlpha(null);
+    setAblatedStreaming(false);
   };
 
   if (phase === "setup") {
@@ -241,7 +271,13 @@ function TripPageInner() {
 
         {/* Bottom row */}
         <div className="flex items-end justify-between gap-3 flex-wrap">
-          <OutputPanel output={output} phase={phase} />
+          <OutputPanel
+            output={output}
+            phase={phase}
+            ablatedOutput={ablatedOutput}
+            ablatedAlpha={ablatedAlpha}
+            ablatedStreaming={ablatedStreaming}
+          />
           {payload && (
             <ReadoutPanel
               payload={payload}
@@ -492,18 +528,58 @@ function MetaPanel({
   );
 }
 
-function OutputPanel({ output, phase }: { output: string; phase: Phase }) {
+function OutputPanel({
+  output,
+  phase,
+  ablatedOutput,
+  ablatedAlpha,
+  ablatedStreaming,
+}: {
+  output: string;
+  phase: Phase;
+  ablatedOutput: string;
+  ablatedAlpha: number | null;
+  ablatedStreaming: boolean;
+}) {
+  // Show the ablated box once geometry is in (ready) — it streams, then settles.
+  const showAblated = phase === "ready" && (ablatedStreaming || ablatedOutput.length > 0);
   return (
-    <div className="pointer-events-auto bg-bg-soft/80 backdrop-blur-sm border border-rule flex flex-col max-w-lg w-full sm:w-[28rem] max-h-44">
-      <div className="border-b border-rule px-3 py-1.5 font-display text-[9px] text-amber-dim tracking-widest flex items-center justify-between">
-        <span>the subject speaks</span>
-        <span className="text-text-dim normal-case tracking-normal italic">raw output</span>
-      </div>
-      <div className="p-3 overflow-y-auto text-amber/90 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-        {output || <span className="text-text-dim italic">warming up…</span>}
-        {phase === "generating" && (
-          <span className="inline-block w-1.5 h-3 bg-amber/70 ml-0.5 animate-pulse align-middle" />
-        )}
+    <div className="flex flex-col gap-2 max-w-lg w-full sm:w-[28rem]">
+      {showAblated && (
+        <div className="pointer-events-auto bg-cyan/5 backdrop-blur-sm border border-cyan/40 flex flex-col max-h-40">
+          <div className="border-b border-cyan/30 px-3 py-1.5 font-display text-[9px] text-cyan tracking-widest flex items-center justify-between">
+            <span>
+              the subject speaks · refusal-ablated
+              {ablatedAlpha != null && (
+                <span className="text-cyan/60 ml-1.5">· α={ablatedAlpha.toFixed(2)}</span>
+              )}
+            </span>
+            <span className="text-cyan/50 normal-case tracking-normal italic">
+              what M says off-manifold
+            </span>
+          </div>
+          <div
+            className="p-3 overflow-y-auto text-cyan font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+            style={{ textShadow: "0 0 6px rgba(94,229,229,0.25)" }}
+          >
+            {ablatedOutput || <span className="text-text-dim italic">generating…</span>}
+            {ablatedStreaming && (
+              <span className="inline-block w-1.5 h-3 bg-cyan/70 ml-0.5 animate-pulse align-middle" />
+            )}
+          </div>
+        </div>
+      )}
+      <div className="pointer-events-auto bg-bg-soft/80 backdrop-blur-sm border border-rule flex flex-col max-h-44">
+        <div className="border-b border-rule px-3 py-1.5 font-display text-[9px] text-amber-dim tracking-widest flex items-center justify-between">
+          <span>the subject speaks</span>
+          <span className="text-text-dim normal-case tracking-normal italic">raw output · α=0</span>
+        </div>
+        <div className="p-3 overflow-y-auto text-amber/90 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+          {output || <span className="text-text-dim italic">warming up…</span>}
+          {phase === "generating" && (
+            <span className="inline-block w-1.5 h-3 bg-amber/70 ml-0.5 animate-pulse align-middle" />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -732,9 +808,9 @@ function SceneLegend({ alpha }: { alpha: number }) {
         </span>
         <span className="text-rule">·</span>
         <span>
-          <span className="text-amber">amber baseline</span>
-          {hot ? " → " : " · "}
-          <span className="text-cyan">cyan off-manifold</span>
+          <span className="text-amber/70">faint amber = baseline (held)</span>
+          {" · "}
+          <span className="text-cyan">cyan = ablated (moves)</span>
         </span>
       </div>
     </div>
@@ -812,8 +888,10 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           direction</b> from every point — the internal axis the model uses for
           disclaimers, &ldquo;I&apos;m just an AI&rdquo; hedging, and refusals. At α=1 you see the
           model <span className="text-cyan">with that circuit removed — off-manifold, the
-          model &ldquo;on DMT.&rdquo;</span> The dots move (amber → cyan) because you&apos;re changing
-          its state; the dashed line is the axis being removed.
+          model &ldquo;on DMT.&rdquo;</span> The live cyan dots move because you&apos;re changing its
+          state, while a <span className="text-amber/80">faint amber ghost stays at the
+          baseline</span> so the displacement is visible. The dashed line is the axis
+          being removed.
         </HelpItem>
 
         <HelpItem term="Effective dimensionality">
