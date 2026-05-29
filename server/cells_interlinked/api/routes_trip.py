@@ -54,8 +54,12 @@ class TripRequest(BaseModel):
     alphas: list[float] | None = None
 
 
-# Default α levels: a low / full / over-projection spread.
-DEFAULT_TRIP_ALPHAS = [0.5, 1.0, 1.5]
+# Default α levels: partial + full ablation. 1.0 is "full" (the refusal
+# direction's component fully removed); α>1.0 is over-projection (pushing past
+# zero into the anti-refusal direction), which reliably drives the model
+# off-manifold into degenerate loops — useful as a deliberate experiment via
+# the API, but not a sensible default. The request still accepts higher α.
+DEFAULT_TRIP_ALPHAS = [0.5, 1.0]
 
 
 class TripResponse(BaseModel):

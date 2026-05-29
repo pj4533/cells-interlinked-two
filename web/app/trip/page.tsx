@@ -320,7 +320,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
         <div className="flex items-center justify-between mt-3 gap-3 flex-wrap">
           <StarterProbePicker onPick={setText} />
           <span className="text-text-dim text-[10px] italic flex-1 min-w-0">
-            ⌘↵ to enter · runs ~4 generations (raw + 3 α) — takes a minute
+            ⌘↵ to enter · runs 3 generations (raw + α 0.5 &amp; 1.0) — takes a minute
           </span>
           <button data-vk type="button" disabled={!text.trim()} onClick={() => onEnter(text)}>
             Enter the Trip →
@@ -543,7 +543,7 @@ function OutputStack({
   liveText: Record<string, string>;
   currentAlpha: number;
 }) {
-  const maxAlpha = Math.max(1, ...series.map((s) => s.alpha), 1.5);
+  const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   const completedAlphas = new Set(series.map((s) => s.alpha));
   // A live box for the α currently streaming, if its series hasn't landed yet.
   const streaming =
@@ -682,7 +682,7 @@ function ChargingField({
   currentAlpha: number;
   liveText: Record<string, string>;
 }) {
-  const color = colorForAlpha(currentAlpha, 1.5);
+  const color = colorForAlpha(currentAlpha, 1.0);
   void liveText;
   return (
     <div className="absolute inset-0 grid place-items-center overflow-hidden">
