@@ -74,6 +74,9 @@ server/data/chat_images/
 # Local ablation-sweep result dumps (jsonl + md), produced by
 # scripts/sweep_ablation_variants.py. Kept on disk, not in repo.
 server/data/_sweep_results/
+# /trip residual-trajectory geometry sidecars (one JSON per trip) —
+# generated at runtime by routes_trip; the archive lists them from disk.
+server/data/trips/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal

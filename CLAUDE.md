@@ -3,6 +3,16 @@
 > **Authoritative plan: [`docs/CI_2_5_PLAN.md`](docs/CI_2_5_PLAN.md).**
 > If anything in this file contradicts that one, the plan doc wins.
 
+> **Research first, every session: Drift's knowledge base.** Before web-searching
+> or reasoning from scratch about ablation, introspection, NLA, refusal
+> directions, consciousness, or psychedelic-neuroscience analogues, **grep the
+> wiki** at `/Users/pj4533/Developer/driftbot/knowledge/wiki/` — Drift has likely
+> already done the research (~866 cross-linked articles). How and when to use it:
+> [`docs/DRIFT_KNOWLEDGE_BASE.md`](docs/DRIFT_KNOWLEDGE_BASE.md). It's read-only.
+> Current research direction (DMT / conscious-realism → CI): seed node
+> `[[ci-gallimore-traces-of-the-other-dmt]]`, handoff
+> [`docs/TRACES_HANDOFF.md`](docs/TRACES_HANDOFF.md).
+
 A local Voight-Kampff interrogation interface. CI 2.5 extends the CI 2.0
 instrument with a refusal-direction ablation channel: for every output
 position, the AV decodes the residual twice — raw and with its
@@ -215,6 +225,22 @@ piece:
   list surfaces them under "dual-channel dialogues"; read-only
   transcript review at `/chat/[sessionId]`.
 - Riley starter probes with matched neutrals.
+- `/trip` — **Trip View** (Experiment A from `docs/TRACES_HANDOFF.md`):
+  trajectory-level geometry of the L32 residual stream. One M generation
+  (no AV swap — M stays loaded, fast); we treat the captured per-token
+  residuals as a path through activation space and compute **effective
+  dimensionality** (participation ratio) + **spectral entropy** for the raw
+  trajectory and the refusal-ablated trajectory `R − α·(R·r̂)·r̂`. Rendered
+  as an animated 3D point cloud (react-three-fiber) with a realtime α-morph
+  slider — the ablated cloud is an exact rank-1 linear function of α, so the
+  browser morphs raw→off-manifold at 60fps with no backend round-trip.
+  Eigenvalue-spectrum bars are the honest "truth anchor" (the 3D view is a
+  declared 3-of-3840-dim shadow). Researcher-labeled starter probes
+  (`web/lib/tripProbes.ts`, drawn from the probe library + protocols) plus
+  free-text input. Geometry math in `pipeline/trajectory.py`; route +
+  executor in `api/routes_trip.py` (`POST /trip`, `GET /trip/{id}`, sidecar
+  at `data/trips/{id}.json` — NOT the probes DB). Falsifiable prediction
+  confirmed live: ablation *increases* effective dimensionality.
 
 ## Removed in CI 2.5
 
@@ -305,6 +331,7 @@ server/cells_interlinked/
     routes_probe.py        POST /probe, POST /cancel/{id}, GET /probes/{recent,id}
     routes_stream.py       GET /stream/{id} — SSE drain (asyncio.wait, not wait_for)
     routes_chat.py         /chat/sessions, /chat/sessions/{sid}/turn, /chat/stream/{sid}/{turn}
+    routes_trip.py         POST /trip + GET /trip/{id} — Trip View (Experiment A)
     routes_autorun.py      autorun control + state
     routes_journal.py      journal CRM endpoints
     runs.py                RunRegistry + per-run asyncio queues + EventLog
@@ -320,6 +347,7 @@ server/cells_interlinked/
     abliteration.py        refusal-direction extract + project_out + runtime hook
     refusal_prompts.py     HARMFUL_PROMPTS + HARMLESS_PROMPTS
     chat_loop.py           ChatSession / ChatTurn + execute_turn (dual M generation)
+    trajectory.py          Trip View geometry: PCA coords + participation ratio + spectral entropy, raw vs refusal-ablated
     probes_library.py      curated probe library (Riley starters)
     probe_controls.py      BASELINE_CONTROLS, control_for(probe_text)
     probe_queue.py         meta-sets (both, agent-both, matched-controls)
@@ -336,6 +364,7 @@ web/
     verdict/[runId]/       per-token NLA table + SynthesisPanel + DualTranscript
     chat/                  live dual-channel dialogue
     chat/[sessionId]/      read-only transcript review
+    trip/                  Trip View — 3D residual-trajectory visualization (page.tsx + TripScene.tsx, r3f)
     archive/               past probes + chat sessions
     components/            ProbePicker, SynthesisPanel, JudgePanel, etc.
   lib/                     sse.ts, store.ts, types.ts, probes.ts, chat.ts
@@ -345,6 +374,8 @@ journal/                   separate Next.js app, deployed to cells-interlinked.v
 
 docs/
   CI_2_5_PLAN.md           original phase plan
+  DRIFT_KNOWLEDGE_BASE.md  how/when to read Drift's wiki (research first)
+  TRACES_HANDOFF.md        DMT / conscious-realism → CI design+research handoff
   REFUSAL_VECTORS.md       per-variant explanation of v1..v4
   PROTOCOLS.md             chat interrogation protocols (BERG, LINDSEY,
                            ELEOS, SCHNEIDER, CHALMERS, JANUS, BUTLIN).

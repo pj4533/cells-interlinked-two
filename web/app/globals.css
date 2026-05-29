@@ -128,6 +128,36 @@ input[data-vk]:focus, textarea[data-vk]:focus {
   color: var(--bg);
 }
 
+/* ---------------- Trip α slider ----------------
+   Thin neon track (gradient set inline per-α) with a glowing amber thumb. */
+input.trip-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+input.trip-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+input.trip-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 12px rgba(232, 195, 130, 0.9);
+  border: none;
+}
+input.trip-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 12px rgba(232, 195, 130, 0.9);
+  border: none;
+}
+
 /* ---------------- GitHub corner hover ----------------
    Three things on hover:
      1. The amber triangle pulses brighter via drop-shadow

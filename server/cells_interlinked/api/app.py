@@ -26,6 +26,7 @@ from .routes_chat import router as chat_router
 from .routes_journal import router as journal_router
 from .routes_probe import router as probe_router
 from .routes_stream import router as stream_router
+from .routes_trip import router as trip_router
 from .routes_tts import router as tts_router
 from .runs import RunRegistry
 
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
 
     app.include_router(probe_router)
     app.include_router(stream_router)
+    app.include_router(trip_router)
     app.include_router(autorun_router)
     app.include_router(journal_router)
     app.include_router(chat_router)
