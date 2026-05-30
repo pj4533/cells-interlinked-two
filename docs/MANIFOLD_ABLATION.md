@@ -69,17 +69,38 @@ information, naturally [0,1] for a color ramp, non-monotonicity *is* the
 signal). kNN saturates (1.41 at both α=1.0 and 1.5). Mahalanobis is flat
 (3.2–3.9 across all series) — effectively dead; kept in the sidecar only.
 
+### Manifold-shell rendering (shipped 2026-05-30)
+
+The manifold is now rendered as a **shape**, not just dots: a translucent
+amber **wireframe isosurface** wrapping the raw cloud — the "Consensus Reality
+Space" envelope. Ablated paths that stay inside moved *along* the manifold;
+ones that pierce the shell went *off* it.
+
+- **Pure frontend, no backend / no deps.** Uses three.js `MarchingCubes`
+  (metaball isosurface): one ball per raw token in the existing 3-D PCA coords,
+  marching-cubed once into a wireframe mesh, placed in the same framing group
+  as the dots so it reframes with everything. `TripScene.tsx`:
+  `ManifoldShell` + `SHELL_*` tuning constants; `manifold shell` toggle in
+  `page.tsx` (default on).
+- **Honesty caveat (in the modal):** the shell is a 3-D *shadow* (same 3 PCA
+  axes as the dots), so a dot can be off-manifold in full-D yet sit inside the
+  shell's projection. The `off_ortho` % is the full-dimensional truth; the
+  shell is the picture. Both are shown.
+- The "true 2-D surface like the paper torus" version (a dense multi-generation
+  *manifold atlas*) remains the bigger future project; see the assessment
+  below.
+
 ---
 
 ## Future work on the table (not started)
 
 Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
 
-1. **3D manifold-surface rendering on the Trip View** — render the manifold as
-   a *shape* (translucent wireframe shell), not just dots, so the ablated path
-   visibly stays inside (along) or breaks out (off). See the dedicated
-   assessment below — this is the most striking next step and directly
-   visualizes the off-manifold metric we just shipped.
+1. **Manifold *atlas* — the true 2-D surface render.** The isosurface shell
+   (shipped, above) is the envelope of *one* run. To get the paper's smooth
+   parameterized surfaces you'd aggregate residuals across *many* generations
+   into a dense 2-D chart of the manifold, then mesh that. Bigger offline
+   project; the shell gets most of the wow for far less work.
 
 2. **SOM rank-16 multi-direction refusal subspace** (Piras, AAAI-26) — an
    *afternoon* compute script: cache ~1k harmful/harmless L32 residuals, train

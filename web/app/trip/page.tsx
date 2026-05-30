@@ -62,6 +62,9 @@ function TripPageInner() {
   // How the 3-D dots are colored: by series hue, or by per-token off-manifold
   // drift (the truth anchor that tells expansion-along from drift-off).
   const [colorMode, setColorMode] = useState<ColorMode>("series");
+  // The manifold shell: a translucent wireframe envelope of the raw cloud
+  // (the "Consensus Reality Space") the ablated paths stay inside or pierce.
+  const [showShell, setShowShell] = useState(true);
 
   const unsubRef = useRef<null | (() => void)>(null);
 
@@ -218,7 +221,7 @@ function TripPageInner() {
     <div className="relative flex-1 min-h-0 overflow-hidden">
       <div className="absolute inset-0">
         {geo ? (
-          <TripScene geometry={geo} enabledAlphas={enabled} sceneKey={sceneKey} colorMode={colorMode} />
+          <TripScene geometry={geo} enabledAlphas={enabled} sceneKey={sceneKey} colorMode={colorMode} showShell={showShell} />
         ) : (
           <ChargingField phase={phase} currentAlpha={currentAlpha} liveText={liveText} />
         )}
@@ -244,7 +247,10 @@ function TripPageInner() {
         {series.length > 0 && (
           <div className="flex flex-col items-center gap-2 mt-3">
             <AlphaChips series={series} enabled={enabled} onToggle={toggleAlpha} />
-            <ColorModeToggle mode={colorMode} onChange={setColorMode} />
+            <div className="flex items-center gap-3 flex-wrap justify-center">
+              <ColorModeToggle mode={colorMode} onChange={setColorMode} />
+              <ShellToggle on={showShell} onChange={setShowShell} />
+            </div>
           </div>
         )}
 
@@ -684,6 +690,23 @@ function ColorModeToggle({
   );
 }
 
+function ShellToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      className={`pointer-events-auto flex items-center gap-1.5 px-2.5 py-1 border font-display text-[9px] tracking-widest transition-colors cursor-pointer ${
+        on
+          ? "border-amber-dim/50 text-amber bg-amber-dim/10"
+          : "border-rule text-text-dim hover:text-amber-dim"
+      }`}
+    >
+      <span className="text-[11px] leading-none">◯</span>
+      manifold shell
+    </button>
+  );
+}
+
 function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<number> }) {
   const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   const raw = series[0];
@@ -927,6 +950,20 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           measure the psychedelic-manifold work (Goodfire) says single-direction
           ablation gets wrong — so we show it, rather than over-claim the eff-dim
           rise.
+        </HelpItem>
+
+        <HelpItem term="The manifold shell">
+          The translucent <b className="text-amber">amber wireframe</b> is a
+          density envelope of the raw run — a marching-cubes isosurface wrapped
+          around where the model&apos;s state normally lives (its{" "}
+          <b className="text-amber">Consensus Reality Space</b>). Watch the
+          ablated paths: ones that stay <b className="text-cyan">inside</b> moved
+          along the manifold; ones that <b style={{ color: "#ff4d9d" }}>punch
+          through</b> the shell went off it. Toggle it with{" "}
+          <b className="text-amber">manifold shell</b>. Honest caveat: the shell
+          is a 3-D shadow (built from the same 3 PCA axes as the dots), so the
+          off-mfld % is the real full-dimensional truth — the shell is the
+          picture, the number is the measurement.
         </HelpItem>
 
         <HelpItem term="Why 3-D?">

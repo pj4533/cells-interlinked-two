@@ -16,10 +16,21 @@ import { useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
 import * as THREE from "three";
+import { MarchingCubes } from "three/examples/jsm/objects/MarchingCubes.js";
 import { colorForAlpha, offManifoldRGB, type TripGeometry } from "@/lib/trip";
 
 const WORLD = 6;
 export type ColorMode = "series" | "offmanifold";
+
+// Manifold-shell isosurface tuning. The shell is a metaball isosurface of the
+// RAW cloud — one ball per raw token — marching-cubed into a translucent
+// wireframe "Consensus Reality Space" envelope. Built once (the raw cloud is
+// static); the ablated paths then visibly stay inside (along the manifold) or
+// pierce it (off). These constants are tuned for legibility, not physics.
+const SHELL_RES = 48; // marching-cubes grid resolution
+const SHELL_ISO = 60; // isosurface threshold
+const SHELL_STRENGTH = 0.9; // per-ball field strength
+const SHELL_SUBTRACT = 12; // per-ball falloff (radius ≈ res·√(strength/subtract))
 
 function makeGlow(): THREE.Texture {
   const size = 64;
@@ -144,18 +155,75 @@ function TripPath({
   );
 }
 
+/** The manifold shell: a metaball isosurface of the RAW cloud, rendered as a
+ *  translucent wireframe envelope. Built once from the raw 3-D coords and
+ *  placed in the same coord space as the dots (it lives inside the parent
+ *  framing group, so it reframes with everything). */
+function ManifoldShell({ rawCoords, color }: { rawCoords: number[][]; color: string }) {
+  const mc = useMemo(() => {
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(color),
+      wireframe: true,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const m = new MarchingCubes(SHELL_RES, mat, false, false, 200000);
+    // Bounding box of the raw cloud in PCA coords.
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (const p of rawCoords) {
+      for (let k = 0; k < 3; k++) {
+        if (p[k] < lo[k]) lo[k] = p[k];
+        if (p[k] > hi[k]) hi[k] = p[k];
+      }
+    }
+    const ctr = [0, 0, 0];
+    const half = [1, 1, 1];
+    for (let k = 0; k < 3; k++) {
+      ctr[k] = (lo[k] + hi[k]) / 2;
+      half[k] = Math.max((hi[k] - lo[k]) / 2, 1e-6);
+    }
+    // One ball per token, mapped into the field's [0.1,0.9] interior so the
+    // surface isn't clipped at the grid edge.
+    m.isolation = SHELL_ISO;
+    m.reset();
+    for (const p of rawCoords) {
+      const fx = 0.5 + 0.4 * ((p[0] - ctr[0]) / half[0]);
+      const fy = 0.5 + 0.4 * ((p[1] - ctr[1]) / half[1]);
+      const fz = 0.5 + 0.4 * ((p[2] - ctr[2]) / half[2]);
+      m.addBall(fx, fy, fz, SHELL_STRENGTH, SHELL_SUBTRACT);
+    }
+    m.update();
+    // Map the object's local [-1,1] space back onto the PCA coords: a local
+    // vertex L corresponds to field f=(L+1)/2, and f=0.5±0.4 ↔ p=ctr±half, so
+    // p = ctr + L·half/0.8.
+    m.position.set(ctr[0], ctr[1], ctr[2]);
+    m.scale.set(half[0] / 0.8, half[1] / 0.8, half[2] / 0.8);
+    return m;
+  }, [rawCoords, color]);
+  return <primitive object={mc} />;
+}
+
 export default function TripScene({
   geometry,
   enabledAlphas,
   sceneKey,
   colorMode = "series",
+  showShell = true,
 }: {
   geometry: TripGeometry;
   enabledAlphas: Set<number>;
   sceneKey: string;
   colorMode?: ColorMode;
+  showShell?: boolean;
 }) {
   const glow = useMemo(() => makeGlow(), []);
+  const rawCoords = useMemo(
+    () => geometry.series.find((s) => s.alpha === 0)?.coords ?? null,
+    [geometry],
+  );
   const maxAlpha = useMemo(
     () => Math.max(1, ...geometry.series.map((s) => s.alpha)),
     [geometry],
@@ -213,6 +281,9 @@ export default function TripScene({
       <Stars radius={70} depth={45} count={1200} factor={3} saturation={0} fade speed={0.5} />
       <ambientLight intensity={0.4} />
       <group key={sceneKey} scale={xform.scale} position={xform.pos}>{/* per-axis stretch */}
+        {showShell && rawCoords && rawCoords.length >= 8 && (
+          <ManifoldShell rawCoords={rawCoords} color="#e8c382" />
+        )}
         {shown.map((s) => (
           <TripPath
             key={s.alpha}
