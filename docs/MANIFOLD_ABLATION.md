@@ -4,9 +4,12 @@
 > *"Do SAEs Capture Concept Manifolds?"* paper (Bhalla, Fel et al.,
 > arXiv:2604.28119) landing in Drift's wiki, read alongside the SOM
 > multi-direction (Piras, AAAI-26) and Zhao/Bau refusal–harmfulness
-> decoupling papers. This doc is the authoritative log for the
-> manifold-ablation thread; it extends Experiment A from
-> [`TRACES_HANDOFF.md`](TRACES_HANDOFF.md) (the Trip View) and the refusal
+> decoupling papers. The manifold-ablation **method** comes from a trio:
+> diagnosis (Goodfire) + method (MP-SAE, Fel/Costa, arXiv:2506.03093) +
+> scoreboard (Bhalla "Unifying Interpretability and Control",
+> arXiv:2411.04430) — see "Manifold-BASED ablation" below. This doc is the
+> authoritative log for the manifold-ablation thread; it extends Experiment A
+> from [`TRACES_HANDOFF.md`](TRACES_HANDOFF.md) (the Trip View) and the refusal
 > registry in [`REFUSAL_VECTORS.md`](REFUSAL_VECTORS.md).
 
 ---
@@ -123,15 +126,89 @@ something quantitative; constants live at the top of `TripScene.tsx`):**
 
 ---
 
+## Manifold-BASED ablation — the method (not just the measurement)
+
+> Everything shipped so far is manifold-aware **measurement + visualization**.
+> The ablation operation itself is unchanged: flat projection-subtraction of
+> the v4v6 refusal subspace at L32 (`h − Σₖ αₖ(h·ûₖ)ûₖ`) — exactly the "flat
+> tile of a curved manifold" operation Goodfire critiques. This section is the
+> path to making the **ablation** manifold-based.
+
+The Goodfire concept-manifolds paper is **diagnosis only** — it names why
+single-direction ablation is wrong (pushes off the curved manifold) but gives
+no steering recipe. The method comes from two adjacent papers Drift compiled
+2026-05-30; together they form a trio:
+
+| role | paper | what it gives |
+| --- | --- | --- |
+| **diagnosis** | [[sae-concept-manifolds]] Goodfire, arXiv:2604.28119 | concept = curved object; single direction = flat tile; ablation shoves *off* the manifold |
+| **method** | **MP-SAE**, Fel/Costa, arXiv:2506.03093 | **Matching Pursuit**: extract/ablate a curved object as an *ordered, residual-guided* sequence of conditionally-orthogonal directions |
+| **scoreboard** | Bhalla "Unifying Interpretability and Control", arXiv:2411.04430 | the **intervention-success × coherence-Pareto** metrics any ablation must win on |
+
+### Matching Pursuit Ablation (MPA) — the proposed CI experiment
+
+Instead of projecting out the whole refusal subspace at once, ablate
+**sequentially**:
+
+1. Pick the basis direction most correlated with the **current** refusal
+   residual.
+2. Project it out; **recompute** the activation in the forward pass.
+3. Pick the next direction relative to the *updated* residual. Repeat T steps.
+
+Each step is conditionally-orthogonal to the last and chosen *after* removing
+the previous one — so it traces the curved manifold instead of overshooting
+off it. This is the principled form of the "re-project onto the manifold"
+hunch; `φ(r^(t))` being nonlinear-in-x is the formal statement that the t-th
+slice isn't linearly reachable from the raw activation.
+
+**The cheap, SAE-free first step (important):** run Matching Pursuit on the
+**diff-of-means refusal basis** — pure linear algebra over cached activations +
+forward passes. **No SAE, no Gemma Scope, no 64 GB problem** (the wall that
+deferred the Ising route). Seed the basis from the existing v1–v6 vectors or a
+PCA of the harmful cluster.
+
+**Claim to falsify:** sequential (MP) ablation achieves a given refusal-
+suppression at *lower coherence cost and lower off-manifold distance* than
+single-direction or flat simultaneous-projection ablation.
+
+**Baselines (isolate what matters):** (a) single-direction Arditi; (b) flat
+simultaneous projection of all T directions — isolates whether *sequencing*
+helps vs just dimensionality; (c) **plain prompting** — Bhalla's embarrassingly
+strong baseline; MPA must beat it or the honest verdict is "interesting
+mechanism, not yet useful for control."
+
+**Metrics:** intervention-success (refusal-suppression rate) × coherence
+(Llama-judge + LanguageTool grammar + perplexity) Pareto curve, **plus our
+already-shipped `off_ortho`** as the on-manifold check (MPA should keep the
+trajectory inside the shell where flat ablation pierces it). The Trip View is
+the natural place to show MPA-vs-flat trajectories side by side.
+
+**Why the pieces fit CI unusually well:** the on-manifold metric is already
+built (`off_ortho` / the shell); the cheap version needs no SAE; it reuses the
+existing refusal vectors; and MP only matters with enough directions — so it
+**pairs naturally with the SOM rank-16 basis** (the real experiment is then
+MP-sequential vs flat-simultaneous ablation of that rank-16 basis).
+
+**Honest caveats:** MP-SAE is vision-validated, LM preliminary (the cheap
+diff-of-means version sidesteps this); MP is greedy/non-optimal and might grab
+the harmfulness axis before the refusal axis (interaction with the Zhao
+two-direction structure is an open question); a null result is still
+publishable ("refusal is effectively flat").
+
+Full cross-paper experiment spec: Drift's synthesis note
+`[[fel-bhalla-ci-manifold-ablation]]` (in compilation as of 2026-05-30).
+
+---
+
 ## Future work on the table (not started)
 
 Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
 
-1. **Manifold *atlas* — the true 2-D surface render.** The isosurface shell
-   (shipped, above) is the envelope of *one* run. To get the paper's smooth
-   parameterized surfaces you'd aggregate residuals across *many* generations
-   into a dense 2-D chart of the manifold, then mesh that. Bigger offline
-   project; the shell gets most of the wow for far less work.
+1. **Matching Pursuit Ablation (MPA)** — the headline next step; the
+   manifold-*based* ablation method (see the section above). Start with the
+   cheap SAE-free version: MP on the diff-of-means refusal basis, sequential
+   vs flat, scored on `off_ortho` + Bhalla's coherence×suppression Pareto +
+   the prompting baseline. A clean falsifier either way.
 
 2. **SOM rank-16 multi-direction refusal subspace** (Piras, AAAI-26) — an
    *afternoon* compute script: cache ~1k harmful/harmless L32 residuals, train
@@ -140,7 +217,9 @@ Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
    with a systematic family; benefits **every** ablation channel (trip / probe
    1b / chat) since they all route through `pick_ablation_target`. Provably
    reduces to current behavior at k=1. On Gemma2-9B-it (closest substrate) MD
-   ablation hit 96% vs 90% single-direction. See `REFUSAL_VECTORS.md`.
+   ablation hit 96% vs 90% single-direction. **Pairs with MPA** — the rank-16
+   basis is what makes sequencing (MP) vs simultaneous (flat) a real contrast.
+   See `REFUSAL_VECTORS.md`.
 
 3. **Zhao/Bau two-direction channels** — harmfulness@`t_inst` vs
    refusal@`t_post-inst` are ~orthogonal (cos ≈ 0.1). Mainly a **verdict /
@@ -152,10 +231,21 @@ Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
    per token next to the existing raw-vs-ablated NLA divergence: flag tokens
    where the ablated read is off-manifold (and so suspect).
 
-5. **Ising-community / manifold discovery** — the Goodfire paper's actual
-   method (pairwise Ising over binarized SAE codes). **Deferred / probably
-   not**: needs Gemma Scope 2 (~6 GB) on the hot path, which is exactly what
-   CI 2.5 removed. At most an offline research script.
+5. **Shell → quantitative** — one of the three queued shell tweaks above
+   (density-quantile / Mahalanobis / `off_ortho`-driven) so inside/outside the
+   shell becomes a measurement, not just a picture.
+
+6. **Manifold *atlas* — the true 2-D surface render.** The isosurface shell
+   (shipped) is the envelope of *one* run. To get the paper's smooth
+   parameterized surfaces you'd aggregate residuals across *many* generations
+   into a dense 2-D chart, then mesh that. Bigger offline project; the shell
+   gets most of the wow for far less work.
+
+7. **Ising-community / manifold discovery** — the Goodfire paper's actual
+   *discovery* method (pairwise Ising over binarized SAE codes). **Deferred /
+   probably not**: needs Gemma Scope 2 (~6 GB) on the hot path, which is
+   exactly what CI 2.5 removed. At most an offline research script. (MPA's
+   cheap diff-of-means route gets manifold-based ablation *without* this.)
 
 Pre-ablation diagnostics from the wiki (HSV controllability, FDT linear-
 response regime) are overnight research scripts, not UI features — noted for
