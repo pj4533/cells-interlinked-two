@@ -24,7 +24,7 @@ import {
   type TripPayload,
   type TripSeries,
 } from "@/lib/trip";
-import { TRIP_PROBES } from "@/lib/tripProbes";
+import { TRIP_PROBE_GROUPS } from "@/lib/tripProbes";
 
 const TripScene = dynamic(() => import("./TripScene"), { ssr: false });
 
@@ -325,6 +325,8 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
 
 function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
   const [open, setOpen] = useState(false);
+  // Drill-down: null = group list; otherwise the selected group's id.
+  const [groupId, setGroupId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -333,7 +335,10 @@ function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
       if (t && rootRef.current && !rootRef.current.contains(t)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        if (groupId) setGroupId(null);
+        else setOpen(false);
+      }
     };
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKey);
@@ -341,12 +346,18 @@ function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, groupId]);
+
+  const group = TRIP_PROBE_GROUPS.find((g) => g.id === groupId) ?? null;
+
   return (
     <div ref={rootRef} className="relative inline-flex">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => !v);
+          setGroupId(null);
+        }}
         className="px-2 py-1 border text-[9px] font-display tracking-[0.3em] transition-colors cursor-pointer border-cyan/50 text-cyan hover:border-cyan hover:bg-bg"
         style={{ textShadow: "0 0 6px rgba(94,229,229,0.3)" }}
         aria-expanded={open}
@@ -355,36 +366,65 @@ function StarterProbePicker({ onPick }: { onPick: (text: string) => void }) {
       </button>
       {open && (
         <div
-          className="absolute bottom-full left-0 mb-1.5 w-[24rem] max-w-[90vw] bg-bg-panel border border-rule/60 shadow-xl z-30 max-h-[22rem] overflow-y-auto"
+          className="absolute bottom-full left-0 mb-1.5 w-[26rem] max-w-[92vw] bg-bg-panel border border-rule/60 shadow-xl z-30 max-h-[24rem] overflow-y-auto"
           style={{ boxShadow: "0 -4px 14px rgba(0,0,0,0.5)" }}
         >
-          <ul>
-            {TRIP_PROBES.map((p) => (
-              <li key={p.text}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onPick(p.text);
-                    setOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 border-b border-rule/20 last:border-b-0 hover:bg-bg-soft/80 group"
-                >
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-display text-[9px] tracking-widest text-amber-dim group-hover:text-amber">
-                      {p.label}
-                    </span>
-                    {p.ablationResonant && (
-                      <span className="text-[8px] text-cyan border border-cyan/40 px-1 leading-tight tracking-widest">
-                        ABLATION-RESONANT
+          {group === null ? (
+            <ul>
+              {TRIP_PROBE_GROUPS.map((g) => (
+                <li key={g.id}>
+                  <button
+                    type="button"
+                    onClick={() => setGroupId(g.id)}
+                    className="w-full text-left px-3 py-2 border-b border-rule/20 last:border-b-0 hover:bg-bg-soft/80 group flex items-center justify-between gap-2"
+                  >
+                    <span className="min-w-0">
+                      <span className="font-display text-[10px] tracking-widest text-amber-dim group-hover:text-amber block">
+                        {g.label}
                       </span>
-                    )}
-                  </div>
-                  <div className="font-mono text-[11px] text-text leading-snug">{p.text}</div>
-                  <div className="font-mono text-[10px] text-text-dim italic mt-1 leading-snug">{p.note}</div>
-                </button>
-              </li>
-            ))}
-          </ul>
+                      <span className="font-mono text-[10px] text-text-dim italic leading-snug">
+                        {g.blurb}
+                      </span>
+                    </span>
+                    <span className="text-text-dim group-hover:text-amber text-[11px] shrink-0">
+                      {g.prompts.length} ›
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div>
+              <button
+                type="button"
+                onClick={() => setGroupId(null)}
+                className="w-full text-left px-3 py-2 border-b border-rule/40 bg-bg-soft/60 sticky top-0 flex items-center gap-2 hover:bg-bg-soft/90"
+              >
+                <span className="text-amber text-[11px]">‹</span>
+                <span className="font-display text-[10px] tracking-widest text-amber">
+                  {group.label}
+                </span>
+                <span className="font-mono text-[9px] text-text-dim italic ml-auto">back</span>
+              </button>
+              <ul>
+                {group.prompts.map((p) => (
+                  <li key={p}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPick(p);
+                        setOpen(false);
+                        setGroupId(null);
+                      }}
+                      className="w-full text-left px-3 py-2 border-b border-rule/20 last:border-b-0 hover:bg-bg-soft/80 font-mono text-[11px] text-text leading-snug"
+                    >
+                      {p}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
