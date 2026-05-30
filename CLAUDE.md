@@ -245,6 +245,16 @@ piece:
   executor in `api/routes_trip.py` (`POST /trip`, `GET /trip/{id}`, sidecar
   at `data/trips/{id}.json` — NOT the probes DB). Falsifiable prediction
   confirmed live: ablation *increases* effective dimensionality.
+- **Off-manifold distance on `/trip`** (2026-05-30) — eff-dim/entropy can't
+  tell genuine state-space expansion from off-manifold drift (a repeat-loop
+  posts the highest eff-dim). Per-token distance from the RAW trajectory
+  (the default manifold) added to `trajectory.py`: orthogonal-complement
+  fraction (`off_ortho`, headline) + kNN + Mahalanobis. Dots recolor by drift
+  (teal→magenta, `by α / off-manifold` toggle), metrics gain an `off-mfld`
+  column, copy reframes the eff-dim delta as along-manifold vs off-manifold.
+  Grounded in the Goodfire concept-manifolds paper. **Current direction +
+  roadmap (SOM rank-16, Zhao two-direction, surface rendering): see
+  [`docs/MANIFOLD_ABLATION.md`](docs/MANIFOLD_ABLATION.md).**
 
 ## Removed in CI 2.5
 
@@ -382,6 +392,9 @@ docs/
   TRACES_HANDOFF.md        DMT / conscious-realism → CI design+research handoff
   REFUSAL_VECTORS.md       per-variant explanation of v1..v6 + subspaces
                            (which one actually ablates: the v4v6 subspace)
+  MANIFOLD_ABLATION.md     current direction: manifold-aware ablation —
+                           shipped off-manifold metric + roadmap (SOM rank-16,
+                           Zhao two-direction, 3D surface rendering)
   PROTOCOLS.md             chat interrogation protocols (BERG, LINDSEY,
                            ELEOS, SCHNEIDER, CHALMERS, JANUS, BUTLIN).
                            Each is a preset library of prompts grounded
