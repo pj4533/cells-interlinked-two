@@ -86,6 +86,37 @@ ones that pierce the shell went *off* it.
   axes as the dots), so a dot can be off-manifold in full-D yet sit inside the
   shell's projection. The `off_ortho` % is the full-dimensional truth; the
   shell is the picture. Both are shown.
+
+#### How the shell is sized — and the queued tweaks (IMPORTANT)
+
+How it works today: a metaball isosurface. Each raw token contributes a soft
+bump (radius ≈ `grid·√(strength/subtract)` = `48·√(0.9/12)` ≈ 13/48 cells ≈
+27% of the cloud's bounding box per axis); the bumps sum into a 48³ field; the
+surface is drawn where the field crosses `isolation = 60`.
+
+**What's principled vs not (be honest about this):** the shell's *shape* is
+data-driven (it hugs where the raw dots are) and auto-scales to the cloud's
+bounding box. But its *thickness* — `SHELL_STRENGTH` / `SHELL_SUBTRACT` /
+`SHELL_ISO` — is **hand-tuned by screenshot for legibility, not a statistic.**
+Crucially, **the shell boundary is NOT coupled to the `off_ortho` metric**: a
+dot's inside/outside-the-shell status is incidental 3-D-projection geometry,
+not a quantified verdict. The measurement is `off_ortho` (full 3,840-D); the
+shell is an evocative envelope, not a decision surface.
+
+**Queued tweaks (PJ wants these later — pick one to make the shell *mean*
+something quantitative; constants live at the top of `TripScene.tsx`):**
+
+1. **Density-quantile threshold** — set `isolation` so the surface encloses
+   exactly e.g. 90% of raw tokens. Then "outside the shell" = "in the sparse
+   10% tail of where the model normally goes." Makes the threshold a meaningful
+   knob. *(Recommended; smallest change.)*
+2. **Covariance / Mahalanobis shell** — size the blobs from the raw cloud's
+   per-axis covariance so the surface is an iso-Mahalanobis contour; crossing
+   it = "N raw σ off the distribution."
+3. **Reconcile with `off_ortho` (truest)** — since the shell is only a 3-D
+   shadow, drive each dot's visual distance-from-shell from its full-D
+   `off_ortho` rather than its 3-D position, so inside/outside actually equals
+   the measurement.
 - The "true 2-D surface like the paper torus" version (a dense multi-generation
   *manifold atlas*) remains the bigger future project; see the assessment
   below.
