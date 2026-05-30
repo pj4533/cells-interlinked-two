@@ -16,9 +16,10 @@ import { useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
 import * as THREE from "three";
-import { colorForAlpha, type TripGeometry } from "@/lib/trip";
+import { colorForAlpha, offManifoldRGB, type TripGeometry } from "@/lib/trip";
 
 const WORLD = 6;
+export type ColorMode = "series" | "offmanifold";
 
 function makeGlow(): THREE.Texture {
   const size = 64;
@@ -42,12 +43,16 @@ function makeGlow(): THREE.Texture {
 function TripPath({
   coords,
   color,
+  off,
+  colorMode,
   glow,
   pointSize,
   raw,
 }: {
   coords: number[][];
   color: string;
+  off: number[];
+  colorMode: ColorMode;
   glow: THREE.Texture;
   pointSize: number;
   raw: boolean;
@@ -61,12 +66,32 @@ function TripPath({
     }
     return a;
   }, [coords]);
+  // Per-vertex colors. In "series" mode every dot wears the series hue; in
+  // "offmanifold" mode each dot is tinted by its own off-manifold fraction —
+  // calm teal on-manifold, flaring hot magenta as the token drifts off into
+  // directions the raw path never used. The line stays series-colored so
+  // series identity survives either way.
+  const colors = useMemo(() => {
+    const base = new THREE.Color(color);
+    const a = new Float32Array(coords.length * 3);
+    for (let i = 0; i < coords.length; i++) {
+      let r = base.r, g = base.g, b = base.b;
+      if (colorMode === "offmanifold" && off[i] !== undefined) {
+        [r, g, b] = offManifoldRGB(off[i]);
+      }
+      a[i * 3 + 0] = r;
+      a[i * 3 + 1] = g;
+      a[i * 3 + 2] = b;
+    }
+    return a;
+  }, [coords, color, off, colorMode]);
   const pointsGeom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     g.setDrawRange(0, 0); // start hidden; the unfold grows it
     return g;
-  }, [positions]);
+  }, [positions, colors]);
   const lineGeom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -76,14 +101,16 @@ function TripPath({
   const col = useMemo(() => new THREE.Color(color), [color]);
   const opacity = coords.length > 200 ? 0.32 : raw ? 0.6 : 0.8;
 
-  // Token-by-token unfold (~2.5s regardless of length). reveal is keyed to
-  // the geometry so a new series re-unfolds; toggling another series only
-  // moves the parent transform, leaving these positions (and reveal) intact.
+  // Token-by-token unfold (~2.5s regardless of length). reveal lives in a ref
+  // so a new series unfolds from 0; toggling a chip or the color mode only
+  // moves the transform / recolors, leaving the revealed count intact (we
+  // always re-apply drawRange, so a recolor rebuild doesn't blank the dots).
   const reveal = useRef(0);
   useFrame((_state, dt) => {
     const n = coords.length;
-    if (reveal.current >= n) return;
-    reveal.current = Math.min(n, reveal.current + (n / 2.5) * Math.min(dt, 0.05));
+    if (reveal.current < n) {
+      reveal.current = Math.min(n, reveal.current + (n / 2.5) * Math.min(dt, 0.05));
+    }
     const c = Math.max(0, Math.floor(reveal.current));
     pointsGeom.setDrawRange(0, c);
     lineGeom.setDrawRange(0, c);
@@ -96,7 +123,7 @@ function TripPath({
           map={glow}
           size={pointSize}
           sizeAttenuation
-          color={col}
+          vertexColors
           transparent
           opacity={opacity}
           depthWrite={false}
@@ -121,10 +148,12 @@ export default function TripScene({
   geometry,
   enabledAlphas,
   sceneKey,
+  colorMode = "series",
 }: {
   geometry: TripGeometry;
   enabledAlphas: Set<number>;
   sceneKey: string;
+  colorMode?: ColorMode;
 }) {
   const glow = useMemo(() => makeGlow(), []);
   const maxAlpha = useMemo(
@@ -189,6 +218,8 @@ export default function TripScene({
             key={s.alpha}
             coords={s.coords}
             color={colorForAlpha(s.alpha, maxAlpha)}
+            off={s.off_ortho ?? []}
+            colorMode={colorMode}
             glow={glow}
             pointSize={s.alpha === 0 ? 0.34 : 0.44}
             raw={s.alpha === 0}

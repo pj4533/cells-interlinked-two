@@ -33,6 +33,17 @@ import torch
 _SPECTRUM_BARS = 40
 _VIEW_DIMS = 3
 
+# Off-manifold distance: how far each token's residual sits from the RAW
+# trajectory (the model's "default activation manifold" / Consensus Reality
+# Space). The Goodfire concept-manifolds result warns that subspace ablation
+# can push residuals *off* the curved default manifold rather than exploring
+# *along* it — and both raise effective dimensionality identically. These
+# measures let the Trip View tell the two apart: a high eff-dim delta with LOW
+# off-manifold distance is genuine state-space expansion; with HIGH distance
+# it is off-manifold drift (the repeat-loop / incoherence register).
+_MANIFOLD_PCS = 16        # raw PCs that define the modeled manifold subspace
+_KNN_K = 5                # neighbors averaged for the kNN-to-raw-cloud distance
+
 
 @dataclass
 class TrajectorySeries:
@@ -46,6 +57,17 @@ class TrajectorySeries:
     spectral_entropy: float          # bits
     spectrum: list[float]            # normalized leading eigenvalues
     stopped_reason: str
+    # Off-manifold distance from the RAW trajectory, per token + aggregates.
+    # Three candidate measures (we keep all three until one is chosen as the
+    # headline): Mahalanobis in the raw-PCA subspace, normalized kNN distance
+    # to the raw cloud, and the orthogonal-complement fraction (share of the
+    # displacement living in directions the raw trajectory never used).
+    off_maha: list[float] = field(default_factory=list)
+    off_knn: list[float] = field(default_factory=list)
+    off_ortho: list[float] = field(default_factory=list)
+    off_maha_mean: float = 0.0
+    off_knn_mean: float = 0.0
+    off_ortho_mean: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -59,6 +81,12 @@ class TrajectorySeries:
             "spectral_entropy": self.spectral_entropy,
             "spectrum": self.spectrum,
             "stopped_reason": self.stopped_reason,
+            "off_maha": self.off_maha,
+            "off_knn": self.off_knn,
+            "off_ortho": self.off_ortho,
+            "off_maha_mean": self.off_maha_mean,
+            "off_knn_mean": self.off_knn_mean,
+            "off_ortho_mean": self.off_ortho_mean,
         }
 
 
@@ -127,30 +155,103 @@ def _stack(acts: Sequence[torch.Tensor]) -> torch.Tensor:
 
 @dataclass
 class RawBasis:
-    """The shared display basis: top-3 PCs of the RAW trajectory + its mean.
-    Computed once after the raw generation; every series is projected into it
-    so the ablated paths visibly diverge from baseline."""
-    mean: torch.Tensor   # [1, D]
-    V3: torch.Tensor     # [3, D]
+    """The shared reference frame derived from the RAW trajectory (the model's
+    default activation manifold). Holds the top-3 display PCs, plus everything
+    the off-manifold distances need: the raw mean, the top-r PC subspace and
+    its eigenvalues (Mahalanobis), the raw residual cloud (kNN), and the raw
+    cloud's own characteristic kNN spacing (so kNN distance is scale-free)."""
+    mean: torch.Tensor      # [1, D]
+    V3: torch.Tensor        # [3, D] display basis
     d_model: int
+    Vr: torch.Tensor        # [r, D] manifold-subspace PCs (r ≤ _MANIFOLD_PCS)
+    eigvals: torch.Tensor   # [r] covariance eigenvalues for those PCs
+    cloud: torch.Tensor     # [N, D] the raw residuals themselves (kNN target)
+    knn_scale: float        # median intra-raw kNN distance (normalizer)
+
+
+def _mean_knn(query: torch.Tensor, cloud: torch.Tensor, k: int,
+              exclude_self: bool) -> torch.Tensor:
+    """Mean distance from each query row to its k nearest cloud rows. When
+    `exclude_self` (the query IS the cloud), drop the zero self-distance."""
+    d = torch.cdist(query, cloud)                       # [Nq, Nc]
+    kk = k + (1 if exclude_self else 0)
+    kk = min(kk, d.shape[1])
+    vals, _ = torch.topk(d, kk, dim=1, largest=False)   # [Nq, kk]
+    if exclude_self and kk > 1:
+        vals = vals[:, 1:]                               # drop self (dist 0)
+    return vals.mean(dim=1)
 
 
 def compute_raw_basis(raw_activations: Sequence[torch.Tensor]) -> RawBasis:
     if len(raw_activations) == 0:
         raise ValueError("no raw activations — nothing to analyze")
     R = _stack(raw_activations)
-    d = R.shape[1]
+    n, d = R.shape
     mean_R = R.mean(dim=0, keepdim=True)
     Rc = R - mean_R
+    r = max(1, min(_MANIFOLD_PCS, n - 1, d))
     try:
-        _U, _S, Vh = torch.linalg.svd(Rc, full_matrices=False)
-        V3 = Vh[:_VIEW_DIMS]
+        _U, S, Vh = torch.linalg.svd(Rc, full_matrices=False)
+        Vr = Vh[:r]
+        eigvals = (S[:r] ** 2) / max(n - 1, 1)
     except Exception:
-        V3 = torch.eye(_VIEW_DIMS, d, dtype=torch.float32)
+        Vr = torch.eye(r, d, dtype=torch.float32)
+        eigvals = torch.ones(r, dtype=torch.float32)
+    V3 = Vr[:_VIEW_DIMS]
     if V3.shape[0] < _VIEW_DIMS:
         pad = torch.zeros(_VIEW_DIMS - V3.shape[0], d, dtype=torch.float32)
         V3 = torch.cat([V3, pad], dim=0)
-    return RawBasis(mean=mean_R, V3=V3, d_model=d)
+    # Characteristic spacing of the raw cloud: median of each raw point's
+    # mean-kNN distance to the rest of the cloud. Normalizes off_knn so the
+    # raw series reads ≈ 1.0 and ablated drift reads as a multiple of it.
+    if n >= _KNN_K + 2:
+        intra = _mean_knn(R, R, _KNN_K, exclude_self=True)
+        knn_scale = float(intra.median())
+    else:
+        knn_scale = 1.0
+    knn_scale = max(knn_scale, 1e-6)
+    return RawBasis(
+        mean=mean_R, V3=V3, d_model=d,
+        Vr=Vr, eigvals=eigvals, cloud=R, knn_scale=knn_scale,
+    )
+
+
+def _off_manifold(A: torch.Tensor, basis: RawBasis, is_raw: bool
+                  ) -> tuple[list[float], list[float], list[float]]:
+    """Per-token off-manifold distance of trajectory `A` from the raw cloud,
+    by three measures. Returns (mahalanobis, knn, ortho_fraction) lists.
+
+    - Mahalanobis: displacement from the raw mean, projected onto the raw-PCA
+      subspace and scaled by each PC's std — "how many raw σ off the default
+      distribution," along modeled directions.
+    - kNN: mean distance to the k nearest raw residuals, divided by the raw
+      cloud's own characteristic spacing (raw series ≈ 1.0).
+    - ortho fraction ∈ [0,1]: share of the displacement living OUTSIDE the
+      raw-PCA subspace — energy in directions the raw trajectory never used.
+      This is the most direct "genuinely off the manifold" reading.
+    """
+    delta = A - basis.mean                              # [N, D]
+    proj = delta @ basis.Vr.transpose(0, 1)             # [N, r] on-subspace
+    # Mahalanobis along the modeled subspace.
+    eps = float(basis.eigvals.mean()) * 1e-3 + 1e-8
+    inv_std = 1.0 / torch.sqrt(basis.eigvals + eps)     # [r]
+    maha = torch.sqrt(((proj * inv_std) ** 2).sum(dim=1))
+    # Orthogonal-complement fraction (Pythagoras: total² = on² + off²).
+    total_sq = (delta * delta).sum(dim=1)
+    on_sq = (proj * proj).sum(dim=1)
+    off_sq = (total_sq - on_sq).clamp_min(0.0)
+    ortho = torch.sqrt(off_sq / total_sq.clamp_min(1e-12))
+    # kNN to the raw cloud, normalized by the raw cloud's own spacing.
+    knn = _mean_knn(A, basis.cloud, _KNN_K, exclude_self=is_raw) / basis.knn_scale
+    return (
+        [float(x) for x in maha.tolist()],
+        [float(x) for x in knn.tolist()],
+        [float(x) for x in ortho.tolist()],
+    )
+
+
+def _mean(xs: list[float]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
 
 
 def build_series(
@@ -163,12 +264,14 @@ def build_series(
 ) -> TrajectorySeries:
     """Project one generation's residuals into the shared basis and measure
     it. Effective-dim / entropy are computed on the series' OWN covariance, so
-    a collapsed repeat-loop correctly reads as LOW dimensionality."""
+    a collapsed repeat-loop correctly reads as LOW dimensionality. Off-manifold
+    distances are measured against the RAW trajectory carried in `basis`."""
     A = _stack(activations)
     coords = (A - basis.mean) @ basis.V3.transpose(0, 1)
     centered = A - A.mean(dim=0, keepdim=True)
     evals = _covariance_eigenvalues(centered)
     label = "raw" if alpha <= 0 else f"α={alpha:.2f}"
+    off_maha, off_knn, off_ortho = _off_manifold(A, basis, is_raw=alpha <= 0)
     return TrajectorySeries(
         alpha=float(alpha),
         label=label,
@@ -180,6 +283,12 @@ def build_series(
         spectral_entropy=_spectral_entropy_bits(evals),
         spectrum=_normalized_spectrum(evals, _SPECTRUM_BARS),
         stopped_reason=stopped_reason,
+        off_maha=off_maha,
+        off_knn=off_knn,
+        off_ortho=off_ortho,
+        off_maha_mean=_mean(off_maha),
+        off_knn_mean=_mean(off_knn),
+        off_ortho_mean=_mean(off_ortho),
     )
 
 

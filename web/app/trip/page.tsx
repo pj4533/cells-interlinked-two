@@ -20,11 +20,13 @@ import {
   cancelTrip,
   fetchTrip,
   colorForAlpha,
+  offManifoldCss,
   type TripEvent,
   type TripPayload,
   type TripSeries,
 } from "@/lib/trip";
 import { TRIP_PROBE_GROUPS } from "@/lib/tripProbes";
+import type { ColorMode } from "./TripScene";
 
 const TripScene = dynamic(() => import("./TripScene"), { ssr: false });
 
@@ -57,6 +59,9 @@ function TripPageInner() {
   const [layer, setLayer] = useState<number>(32);
   // Which α series are visible (in both the scene and the text stack).
   const [enabled, setEnabled] = useState<Set<number>>(new Set([0]));
+  // How the 3-D dots are colored: by series hue, or by per-token off-manifold
+  // drift (the truth anchor that tells expansion-along from drift-off).
+  const [colorMode, setColorMode] = useState<ColorMode>("series");
 
   const unsubRef = useRef<null | (() => void)>(null);
 
@@ -213,7 +218,7 @@ function TripPageInner() {
     <div className="relative flex-1 min-h-0 overflow-hidden">
       <div className="absolute inset-0">
         {geo ? (
-          <TripScene geometry={geo} enabledAlphas={enabled} sceneKey={sceneKey} />
+          <TripScene geometry={geo} enabledAlphas={enabled} sceneKey={sceneKey} colorMode={colorMode} />
         ) : (
           <ChargingField phase={phase} currentAlpha={currentAlpha} liveText={liveText} />
         )}
@@ -237,8 +242,9 @@ function TripPageInner() {
         </div>
 
         {series.length > 0 && (
-          <div className="flex justify-center mt-3">
+          <div className="flex flex-col items-center gap-2 mt-3">
             <AlphaChips series={series} enabled={enabled} onToggle={toggleAlpha} />
+            <ColorModeToggle mode={colorMode} onChange={setColorMode} />
           </div>
         )}
 
@@ -640,6 +646,44 @@ function OutputStack({
   );
 }
 
+function ColorModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: ColorMode;
+  onChange: (m: ColorMode) => void;
+}) {
+  const btn = (m: ColorMode, label: string) => (
+    <button
+      type="button"
+      onClick={() => onChange(m)}
+      className={`px-2.5 py-1 font-display text-[9px] tracking-widest transition-colors cursor-pointer ${
+        mode === m ? "text-amber bg-amber-dim/15" : "text-text-dim hover:text-amber-dim"
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="pointer-events-auto flex items-center gap-3">
+      <div className="flex border border-amber-dim/40 divide-x divide-amber-dim/30 bg-bg-soft/70 backdrop-blur-sm">
+        {btn("series", "by α")}
+        {btn("offmanifold", "off-manifold")}
+      </div>
+      {mode === "offmanifold" && (
+        <div className="flex items-center gap-1.5 font-mono text-[8px] text-text-dim tracking-wide">
+          <span>on</span>
+          <span
+            className="inline-block w-16 h-2 rounded-sm"
+            style={{ background: `linear-gradient(90deg, ${offManifoldCss(0.35)}, ${offManifoldCss(0.9)})` }}
+          />
+          <span>off the manifold</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<number> }) {
   const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   const raw = series[0];
@@ -648,8 +692,9 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
       <div className="px-3 py-2 border-b border-rule">
         <div className="font-display text-[10px] text-amber-dim tracking-widest">trajectory measures</div>
         <div className="text-[9px] text-text-dim italic mt-0.5 leading-snug">
-          effective dim = independent directions the path uses · entropy = how
-          evenly spread (bits). Both on the real {raw?.n_tokens ? "" : ""}path.
+          eff-dim = independent directions the path uses · entropy = how evenly
+          spread · off-mfld = how far it drifts off the model&apos;s normal
+          manifold. +/− is the change from raw.
         </div>
       </div>
       <table className="w-full text-[10px] font-mono">
@@ -658,6 +703,7 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
             <th className="text-left px-3 py-1.5 font-normal">series</th>
             <th className="text-right px-2 py-1.5 font-normal">eff-dim</th>
             <th className="text-right px-2 py-1.5 font-normal">entropy</th>
+            <th className="text-right px-2 py-1.5 font-normal">off-mfld</th>
             <th className="text-right px-3 py-1.5 font-normal">tok</th>
           </tr>
         </thead>
@@ -666,6 +712,7 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
             const color = colorForAlpha(s.alpha, maxAlpha);
             const on = enabled.has(s.alpha);
             const dEff = raw ? s.eff_dim - raw.eff_dim : 0;
+            const dOff = raw ? s.off_ortho_mean - raw.off_ortho_mean : 0;
             return (
               <tr key={s.alpha} className={`border-b border-rule/30 ${on ? "" : "opacity-40"}`}>
                 <td className="px-3 py-1.5">
@@ -685,6 +732,19 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
                   )}
                 </td>
                 <td className="text-right px-2 py-1.5 tabular-nums text-text">{s.spectral_entropy.toFixed(1)}</td>
+                <td
+                  className="text-right px-2 py-1.5 tabular-nums"
+                  style={{ color: offManifoldCss(s.off_ortho_mean) }}
+                >
+                  {Math.round(s.off_ortho_mean * 100)}%
+                  {s.alpha > 0 && (
+                    <span className="text-text-dim">
+                      {" "}
+                      {dOff >= 0 ? "+" : "−"}
+                      {Math.abs(Math.round(dOff * 100))}
+                    </span>
+                  )}
+                </td>
                 <td className="text-right px-3 py-1.5 tabular-nums text-text-dim">
                   {s.n_tokens}
                   {s.stopped_reason === "max" && <span className="text-warning"> ⟳</span>}
@@ -695,9 +755,11 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
         </tbody>
       </table>
       <div className="px-3 py-2 text-[9px] text-text-dim italic leading-snug border-t border-rule">
-        A 3-D shadow of a {raw ? "" : ""}high-dimensional path (PCA). The numbers
-        are computed on all dimensions, not the projection. ⟳ = the ablated run
-        fell into a repeat-loop (low dim = real signal).
+        eff-dim/entropy are computed on all dimensions (the 3-D view is a PCA
+        shadow). Read them together with off-mfld: an eff-dim rise with a LOW
+        off-mfld is real expansion <span className="text-text">along</span> the
+        manifold; with a HIGH off-mfld it&apos;s drift{" "}
+        <span className="text-text">off</span> it — the ⟳ repeat-loop register.
       </div>
     </div>
   );
@@ -810,7 +872,10 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
         <HelpItem term="The α chips">
           Tap a chip to overlay or hide that run — in both the 3-D scene and the
           text panel. Compare where the ablated paths diverge from baseline, and
-          read what the model actually said at each strength.
+          read what the model actually said at each strength. The{" "}
+          <b className="text-amber">by α / off-manifold</b> switch under the chips
+          recolors the dots: by series hue, or by how far each token drifts off
+          the model&apos;s normal manifold (see below).
         </HelpItem>
 
         <HelpItem term="Effective dimensionality — how many directions the thought uses">
@@ -838,11 +903,30 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           <b className="text-cyan">opened up</b>, the &ldquo;trip&rdquo; expanding. That&apos;s
           the entropic-brain result we&apos;re hunting for. A{" "}
           <b className="text-amber">warning −</b> means it{" "}
-          <b className="text-amber">collapsed</b> — almost always because the model
-          fell into a repeat-loop (⟳), pacing one spot. So at a glance:{" "}
-          <b className="text-cyan">+ = it bloomed</b>, <b className="text-amber">− = it
-          shut down</b>. (Pushing α past ~1.0 reliably went negative — collapse, not
-          insight — which is why the default sweep stops there.)
+          <b className="text-amber">collapsed</b> to fewer directions than normal.
+          So at a glance: <b className="text-cyan">+ = it bloomed</b>,{" "}
+          <b className="text-amber">− = it shut down</b>. But a higher eff-dim is
+          NOT automatically good — a repeat-loop can rack up a high number while
+          saying &ldquo;like like like.&rdquo; That&apos;s what off-manifold is for.
+        </HelpItem>
+
+        <HelpItem term="Off-manifold % — expansion, or just drift?">
+          As the model writes, its state normally stays on a familiar{" "}
+          <b className="text-amber">manifold</b> — a curved surface of activations
+          it actually uses (the raw run traces it). Ablation can either move{" "}
+          <b className="text-cyan">along</b> that surface (exploring new but
+          coherent territory) or shove the state{" "}
+          <b style={{ color: "#ff4d9d" }}>off</b> it (into directions the model
+          never visits — usually incoherence or a loop). off-mfld is the share of
+          each token that lands off the surface. The honest reading pairs it with
+          eff-dim: <b className="text-cyan">eff-dim ↑ + off-mfld low</b> = real
+          expansion along the manifold (the result we want);{" "}
+          <b style={{ color: "#ff4d9d" }}>eff-dim ↑ + off-mfld high</b> = drift off
+          it. Flip the dots to <b className="text-amber">off-manifold</b> coloring
+          to see exactly which tokens flew off (teal → hot magenta). This is the
+          measure the psychedelic-manifold work (Goodfire) says single-direction
+          ablation gets wrong — so we show it, rather than over-claim the eff-dim
+          rise.
         </HelpItem>
 
         <HelpItem term="Why 3-D?">

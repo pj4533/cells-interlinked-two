@@ -27,6 +27,17 @@ export interface TripSeries {
   spectral_entropy: number;
   spectrum: number[];
   stopped_reason: string;
+  // Off-manifold distance from the RAW trajectory (the default manifold),
+  // per token + per-series means. off_ortho ∈ [0,1] is the headline: the
+  // share of each residual's displacement living OUTSIDE the raw-PCA
+  // subspace — directions the model doesn't normally use. High = pushed off
+  // the manifold; low = moved along it. maha/knn kept for reference.
+  off_ortho: number[];
+  off_knn: number[];
+  off_maha: number[];
+  off_ortho_mean: number;
+  off_knn_mean: number;
+  off_maha_mean: number;
 }
 
 export interface TripGeometry {
@@ -147,4 +158,33 @@ export function colorForAlpha(alpha: number, maxAlpha: number): string {
   const g = Math.round(c0[1] + (c1[1] - c0[1]) * t);
   const b = Math.round(c0[2] + (c1[2] - c0[2]) * t);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+// ── Off-manifold color ramp (shared by scene dots + legend) ────────────────
+// Maps a token's off-manifold fraction (ortho ∈ [0,1]) to a color: calm teal
+// when the token sits ON the model's default manifold, flaring to hot magenta
+// as it drifts OFF into directions the raw path never used. The meaningful
+// band sits around the raw baseline (~0.4) up to near-saturation (~0.9), so we
+// stretch [LO,HI] across the ramp rather than the raw [0,1].
+const OFF_LO = 0.35;
+const OFF_HI = 0.9;
+export function offManifoldT(ortho: number): number {
+  return Math.max(0, Math.min(1, (ortho - OFF_LO) / (OFF_HI - OFF_LO)));
+}
+// teal #34c8d6 (on-manifold) → hot magenta #ff4d9d (off-manifold)
+const OFF_C0 = [0x34, 0xc8, 0xd6];
+const OFF_C1 = [0xff, 0x4d, 0x9d];
+/** [r,g,b] in 0..1 floats — for three.js vertex colors. */
+export function offManifoldRGB(ortho: number): [number, number, number] {
+  const t = offManifoldT(ortho);
+  return [
+    (OFF_C0[0] + (OFF_C1[0] - OFF_C0[0]) * t) / 255,
+    (OFF_C0[1] + (OFF_C1[1] - OFF_C0[1]) * t) / 255,
+    (OFF_C0[2] + (OFF_C1[2] - OFF_C0[2]) * t) / 255,
+  ];
+}
+/** css rgb() — for legend swatches / DOM. */
+export function offManifoldCss(ortho: number): string {
+  const [r, g, b] = offManifoldRGB(ortho);
+  return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
 }
