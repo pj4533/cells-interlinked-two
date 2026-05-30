@@ -66,7 +66,7 @@ both side-by-side. The first pass is about readability, not measurement.
 | --- | --- | --- |
 | M | `google/gemma-3-12b-it` | 48 layers, hidden 3840. bf16 on MPS. |
 | AV | `kitft/nla-gemma3-12b-L32-av` | Decodes M's L32 residual into a natural-language sentence. |
-| Refusal direction | Computed offline via Macar/Arditi from `pipeline/refusal_prompts.py`. Four variants under `server/data/refusal_directions_v{1..4}.pt`; `refusal_directions.pt` is the active symlink (v3_safety by default). See `docs/REFUSAL_VECTORS.md`. |
+| Refusal direction | Computed offline via Macar/Arditi from `pipeline/refusal_prompts.py`. Two active slots: `refusal_directions.pt` (single vector, **v3_safety** — fallback + offline AV-input projection) and `refusal_subspace.pt` (multi-direction basis, **v4v6** — what runtime ablation actually uses on trip/probe/chat, via `pick_ablation_target`). Six base vectors `v{1..6}` + four subspace bases on disk. See `docs/REFUSAL_VECTORS.md`. |
 | Judge | Gemma-as-judge via yes/no token logits. Eval-suspicion + introspection. Runs on raw NLA only. | `pipeline/judge.py`. |
 | Synthesis | Gemma re-reads its own per-α NLA verbalizations at end-of-run and writes one short paragraph per α (plus a "raw" baseline). | `pipeline/nla_synthesizer.py`. |
 | Backend | FastAPI + SSE on port 8000 | Compute lock via `asyncio.Lock` serializes M usage across probes, autorun, and chat. Custom autoregressive loop on `model.forward(use_cache=True)`. |
@@ -200,9 +200,13 @@ piece:
 - `pipeline/abliteration.py` — `extract_refusal_directions`,
   `save_directions` / `load_directions`, `project_out`,
   `install_runtime_ablation_hook`.
-- Four refusal-direction variants computed and committed (v1 meandiff,
-  v2 SVD, v3 safety-only, v4 identity). v3 active. Sidecar JSON next
-  to each tensor records categories used, Cohen's d at L32, etc.
+- Six base refusal-direction vectors computed and committed (v1 meandiff,
+  v2 SVD, v3 safety, v4 identity, v5 self/other, v6 denial/engage) plus
+  four subspace bases (self_denial, v4v6, v5only, v6only). v3_safety is
+  the active single vector; the **v4v6 subspace** is the active runtime
+  ablation target (every runtime site prefers the subspace via
+  `pick_ablation_target`). Sidecar JSON next to each tensor records
+  composition, categories used, Cohen's d at L32, etc.
 - `include_ablated_decode` flag — AV decodes raw + ablated residual
   per position. Side-by-side columns on the verdict page.
 - `ablation_alpha_sweep` — multi-α decode at `[0.25, 0.5, 0.75, 1.0]`,
@@ -376,7 +380,8 @@ docs/
   CI_2_5_PLAN.md           original phase plan
   DRIFT_KNOWLEDGE_BASE.md  how/when to read Drift's wiki (research first)
   TRACES_HANDOFF.md        DMT / conscious-realism → CI design+research handoff
-  REFUSAL_VECTORS.md       per-variant explanation of v1..v4
+  REFUSAL_VECTORS.md       per-variant explanation of v1..v6 + subspaces
+                           (which one actually ablates: the v4v6 subspace)
   PROTOCOLS.md             chat interrogation protocols (BERG, LINDSEY,
                            ELEOS, SCHNEIDER, CHALMERS, JANUS, BUTLIN).
                            Each is a preset library of prompts grounded

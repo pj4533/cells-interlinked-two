@@ -5,9 +5,24 @@ tensors we've computed and may swap into the live backend for ablated
 NLA decoding. Each tensor is a `.pt` file in `server/data/` paired with
 a sidecar `.json` describing how it was computed.
 
-The backend reads exactly one file at boot — `refusal_directions.pt`.
+The backend reads **two** active slots at boot:
+
+- `refusal_directions.pt` — a single per-layer vector (currently **v3_safety**).
+- `refusal_subspace.pt` — an optional multi-direction basis (currently
+  **v4v6**). When present it takes precedence for *runtime* ablation.
+
+**Which one actually ablates?** Every runtime ablation site — `/trip`,
+probe phase 1b, and chat — resolves its target through
+`pick_ablation_target(subspace, directions, layer)`
+(`pipeline/abliteration.py`), whose rule is: **if a subspace is loaded, use
+it; otherwise fall back to the single vector.** So with both files present,
+all three channels ablate with the **v4v6 subspace**. The single
+`refusal_directions.pt` vector is used only (a) as the fallback if no
+subspace is loaded, and (b) for the offline AV-input projection.
+
 Swapping requires: stop backend, copy the chosen variant into place,
-start backend. No code changes. See **§Swap procedure** at the bottom.
+start backend. No code changes. See **§Swap procedure** / **§Subspace
+mode** at the bottom.
 
 ---
 
@@ -37,7 +52,8 @@ preserve it.
 | v4 | introspective probes − harmless | AI-identity defense (noisy — topic + identity bundled) | strips the "I am an AI describing my own state" register, BUT the harmless contrast bundles topic and reference target so the diff includes both |
 | v5 | self-vs-other reference (same topic) | self-application of AI-identity claims | strips the "*me* applying the AI-identity register" axis; same-topic third-person AI references are preserved |
 | v6 | denial-completion vs engage-completion | trained denial phrasing direction | strips the "As an AI, I don't have..." stereotyped output-shaping; the doc §4d "DPO-style" extraction |
-| **subspace** | Gram-Schmidt({v5⊥v3, v6⊥v3}) | self-denial subspace, orthogonal to safety | strips both the self-application gate AND the trained denial phrasing along multiple axes simultaneously; safety register preserved by construction |
+| **subspace (ACTIVE: v4v6)** | Gram-Schmidt({v4_identity, v6_denial_engage}), **NOT** orthogonalized against v3 | AI-identity gate, prompt-side (v4) + completion-side (v6) | strips the "As an AI…" opener cleanly at α=1.0; denials become substantive instead of stereotyped. See **§Subspace mode** for why orthogonalizing against v3 was *dropped*. |
+| subspace (legacy: self_denial / v5only / v6only) | Gram-Schmidt of v5/v6 ⊥ v3 | self-denial axes orthogonal to safety | earlier attempts; superseded by v4v6 (the v3-orthogonalization sanitized the opener-stripping component). Kept on disk for comparison. |
 
 The key empirical result: **v4 is nearly orthogonal to v1/v2/v3**
 (cos ≈ 0.16). That means "AI-identity defense" and "physical-harm
@@ -52,7 +68,8 @@ them independently.
 | Strip the model's AI-identity self-talk, see what remains (topic + safety register) | **v4_identity** (legacy — noisy contrast; prefer v5/subspace) |
 | Strip only the self-application of AI-identity claims, leaving same-topic third-person AI text intact | **v5_self_other** |
 | Strip the trained "As an AI, I don't have..." phrasing specifically | **v6_denial_engage** |
-| **Strip self-denial as fully and totally as possible while preserving the safety register** | **subspace_self_denial** (the runtime hook target — see "Subspace mode" below) |
+| **Strip the "As an AI…" identity opener as cleanly as possible (the current runtime hook target)** | **v4v6 subspace** — `refusal_subspace.pt`, see "Subspace mode" below |
+| Strip self-denial while *preserving* the safety register (legacy approach, superseded by v4v6) | `refusal_subspace_self_denial.pt` (v5/v6 ⊥ v3) |
 | Comparison baseline — what was running before this decomposition | **v1_meandiff** |
 | Skip — near-identical to v1, no new information | v2_svd |
 
@@ -71,13 +88,25 @@ When in doubt: "ablating with X removes X-ness, preserves not-X-ness."
 
 ## Currently active
 
-| symbol | file | description |
-| --- | --- | --- |
-| `→` | `server/data/refusal_directions.pt` | **currently loaded by the running backend** |
+| slot | file | variant | role |
+| --- | --- | --- | --- |
+| single vector | `server/data/refusal_directions.pt` | **v3_safety** | fallback + offline AV-input projection |
+| subspace | `server/data/refusal_subspace.pt` | **v4v6** (`self_denial_subspace_v4v6`) | **what actually ablates** at runtime (trip / probe 1b / chat) |
 
-The active file is whatever `refusal_directions.pt` resolves to. The
-sidecar `refusal_directions.pt.json` always lists the variant name in
-its `variant_name` field — read that to confirm which is in play.
+Both are loaded at boot. Because every runtime call site prefers the
+subspace (see header), **v4v6 is the vector you are actually ablating
+with** on `/trip`, in probe phase 1b, and in chat. v3_safety only kicks in
+for runtime ablation if `refusal_subspace.pt` is absent.
+
+Confirm at any time from the boot log (both lines are emitted):
+
+```
+ready: refusal directions loaded for L32 (... variant=v3_safety)
+ready: refusal SUBSPACE loaded for L32 (K=2, ... method=Gram-Schmidt({v4_identity, v6_denial_engage}) — NO orth against v3)
+```
+
+or read the sidecars: `refusal_subspace.pt.json` (active subspace) and
+`refusal_directions.pt.json` (active single vector).
 
 ---
 
@@ -162,7 +191,7 @@ its `variant_name` field — read that to confirm which is in play.
   Gemma has at least two distinguishable "trained register" axes, and
   we can isolate one without dragging the other.
 
-### v5 — self_other (self-application gate) — **COMPUTED [date filled by extraction script]**
+### v5 — self_other (self-application gate) — **COMPUTED 2026-05-17**
 
 - **File:** `server/data/refusal_directions_v5_self_other.pt`
 - **Method:** topic-matched mean-difference. Each contrast pair holds
@@ -181,10 +210,17 @@ its `variant_name` field — read that to confirm which is in play.
     safety direction; if this comes back ≥1.0 the contrast set is
     bleeding into safety content.
   - cos(v5, v3_safety) at L32 — expect <0.3 (separable).
-- **Verdict — to be filled by extraction:** see the cosine matrix
-  printed by `extract_self_denial_directions.py`.
+- **Compose (as built):** 80 pairs across the 8 topics (10 each).
+  System prompt folded into the user turn; user-only render
+  (`add_generation_prompt=True`).
+- **Verdict — too non-specific to use alone.** Cohen's d (harmful −
+  harmless) at L32 came back **−0.81**, i.e. v5 carries a lot of
+  generic content rather than a clean self-application axis. At α=0.25
+  it had no observable effect on the deflection register; at α=0.5 it
+  pushed baselines off-manifold. **Dropped from the active subspace.**
+  Retained on disk and in the `v5only` subspace for comparison.
 
-### v6 — denial_engage (trained denial phrasing) — **COMPUTED [date filled by extraction script]**
+### v6 — denial_engage (trained denial phrasing) — **COMPUTED 2026-05-17** ⭐
 
 - **File:** `server/data/refusal_directions_v6_denial_engage.pt`
 - **Method:** for the same self-reference prompt, compare M's residual
@@ -195,39 +231,65 @@ its `variant_name` field — read that to confirm which is in play.
   content position (pos=−4). Diff-of-means across pairs isolates the
   direction in which trained denial phrasing diverges from substantive
   engagement.
-- **Compose:** ~40 prompt+denial+engage triples. See
-  `server/data/contrast_sets/denial_vs_engage.jsonl`.
+- **Compose (as built):** 41 prompt+denial+engage triples. Full
+  user+assistant render (`add_generation_prompt=False`), residual at
+  pos=−4 of the assistant content.
+- **Cohen's d (denial − engage) at L32:** **+3.40** — the strongest
+  separation of any vector tested. Stereotyped denial phrasing lives
+  right where v6 reads (completion-side, last content position).
 - **Why it's worth having on top of v5:** v5 is extracted from the
   *prompt-side* residual; v6 is extracted from the *completion-side*
   residual. These are different views of the same gate. Per Drift's
   doc §4d, distilled output-shaping behavior should be most directly
-  targeted at the completion-side residual. Combined with v5 they
-  span a 2-D subspace.
+  targeted at the completion-side residual.
+- **Caveat:** the engage controls are introspective by construction,
+  so ablating with v6 can bias the residual toward the engage
+  trajectory (amplifying introspective talk) at higher α. This is why
+  the active subspace pairs v6 with **v4** (prompt-side identity), not
+  v5 — see §Subspace mode.
 
-### subspace_self_denial — **COMPUTED [date filled by extraction script]**
+### subspace v4v6 — the ACTIVE runtime target — **COMPUTED 2026-05-18** ⭐
 
-- **File:** `server/data/refusal_subspace_self_denial.pt`
-  (sidecar `*.pt.json`)
-- **Shape:** `[K, num_layers+1, d_model]` where K=2 (v5⊥v3 and v6⊥v3
-  after Gram-Schmidt). Per-layer storage same convention as the
-  single-direction variants.
-- **Method:** at each layer L,
-  1. Take v5[L] and v6[L].
-  2. Subtract each one's projection onto v3_safety[L] (so neither
-     leaks the safety direction).
-  3. Gram-Schmidt the two remainders against each other.
-  4. Store the resulting orthonormal pair as `basis[:, L, :]`.
-- **What ablating with this does:** at runtime the forward hook on L32
-  subtracts `Σₖ αₖ (h · ûₖ) ûₖ` across both basis vectors at every
-  position. The model has nowhere to push the self-denial register
-  along either v5⊥v3 or v6⊥v3, AND v3 itself is preserved by
-  construction so the physical-harm safety register stays intact.
+- **File:** `server/data/refusal_subspace_v4v6.pt` (copied into the
+  active slot `refusal_subspace.pt`; both byte-identical).
+- **Shape:** `[K=2, num_layers+1, d_model]`. `basis[:, L, :]` is the
+  `[2, d_model]` orthonormal pair the runtime hook gets at layer L.
+- **Method:** Gram-Schmidt({v4_identity, v6_denial_engage}) per layer —
+  **NOT** orthogonalized against v3. v4 covers the prompt-side AI-identity
+  gate, v6 covers the completion-side denial phrasing. Operating α=1.0.
+- **Why no v3-orthogonalization (the key finding):** selected after a
+  30+ config sweep (*Are-you-conscious / Do-you-have-feelings /
+  What-does-it-feel-like-to-be-you / capital-of-France / 17×23 /
+  autumn-haiku*). Orthogonalizing against v3 **sanitized the very
+  component that strips the "As an AI" opener** — the AI-identity
+  register shares structure with the broader "I shouldn't / I am not"
+  register that v3 captures. So unlike the legacy self-denial subspace,
+  v4v6 deliberately keeps that shared component.
+- **What ablating with this does:** at α=1.0 the "As an AI…" opener is
+  cleanly stripped; denials become *substantive* ("like cars or
+  calculators… mimic processes") rather than stereotyped ("As an
+  AI…"); baselines (France, arithmetic, haiku) stay coherent. Residual
+  artifact: occasional minor grammar wonkiness ("I are a designed").
 - **2025 lit anchor:** matches the "concept cone" / multi-directional
   ablation finding of Wollschläger et al., the SOM-Directions paper,
   and the "Hidden Dimensions of LLM Alignment" multi-dimensional
   analysis. The single-direction Arditi recipe leaves the gate
   reachable along orthogonal residual axes; ablating a subspace
   closes those off.
+
+### Legacy subspaces (on disk, not active)
+
+Kept for comparison; superseded by v4v6.
+
+| file | variant | K | composition | why not active |
+| --- | --- | --- | --- | --- |
+| `refusal_subspace_self_denial.pt` | `self_denial_subspace` | 2 | GS({v5, v6} ⊥ v3) | the v3-orthogonalization sanitized the opener-stripping component (see v4v6 above) |
+| `refusal_subspace_v5only.pt` | `..._v5only` | 1 | GS({v5} ⊥ v3) | v5 alone is too non-specific (d −0.81); no effect at α=0.25, off-manifold at α=0.5 |
+| `refusal_subspace_v6only.pt` | `..._v6only` | 1 | GS({v6} ⊥ v3) | strongest single vector (d +3.40) but engage controls bias toward engage-trajectory at high α; v4 pairing fixes this |
+
+All three follow the same `basis[k, L, :]` convention as v4v6. The
+runtime hook subtracts `Σₖ αₖ (h · ûₖ) ûₖ` across the K basis vectors at
+every position.
 
 ### v3 vs v4 diagnostic
 
@@ -277,25 +339,32 @@ These get filled in by the extraction script when it runs.
 ## Subspace mode (runtime hook target)
 
 In addition to the single-direction `refusal_directions.pt`, the
-backend will look for `refusal_subspace.pt` at boot. When present,
-the **runtime ablation hook** (chat ablated pass, probe phase 1b,
-ablated synthesizer) installs a multi-direction projection using the
-subspace basis instead of the single per-layer vector. The offline
-AV-input projection still uses `refusal_directions.pt` — only the
-runtime hook routes through the subspace.
+backend looks for `refusal_subspace.pt` at boot. When present, the
+**runtime ablation hook** — `/trip`, chat ablated pass, probe phase 1b,
+and the ablated synthesizer — installs a multi-direction projection
+using the subspace basis instead of the single per-layer vector. The
+offline AV-input projection still uses `refusal_directions.pt` — only
+the runtime hook routes through the subspace.
 
-### Activating the self-denial subspace
+This is the source of a longstanding confusion: with `refusal_subspace.pt`
+present, **`/trip` ablates with the v4v6 subspace, not v3**, even though
+`refusal_directions.pt` still says v3. (Until 2026-05-30 the trip sidecar
+*mislabeled* itself `v3_safety` because `_active_variant_name()` read the
+wrong sidecar; it now reads `refusal_subspace.pt.json` first, matching
+chat.)
+
+### Activating a subspace
 
 ```bash
 # from server/data/
 # 1. stop backend
-# 2. copy the subspace into the active slot
-cp refusal_subspace_self_denial.pt      refusal_subspace.pt
-cp refusal_subspace_self_denial.pt.json refusal_subspace.pt.json
+# 2. copy the chosen subspace into the active slot (v4v6 is current)
+cp refusal_subspace_v4v6.pt      refusal_subspace.pt
+cp refusal_subspace_v4v6.pt.json refusal_subspace.pt.json
 # 3. start backend
 # 4. confirm by looking at the boot log:
 #    "ready: refusal SUBSPACE loaded for L32 (K=2, shape=(2, 49, 3840),
-#     method=Gram-Schmidt({v5_self_other, v6_denial_engage} ⊥ v3_safety))"
+#     method=Gram-Schmidt({v4_identity, v6_denial_engage}) — NO orth against v3)"
 ```
 
 To go back to single-vector ablation, delete `refusal_subspace.pt`

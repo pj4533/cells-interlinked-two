@@ -287,12 +287,25 @@ async def _execute_trip(
 
 
 def _active_variant_name() -> str:
+    # Mirror routes_chat: the runtime hook resolves its target via
+    # pick_ablation_target(subspace, directions, ...), which PREFERS the
+    # subspace. So when refusal_subspace.pt is loaded, that sidecar's
+    # variant_name is what was actually used to ablate — not the
+    # single-vector refusal_directions.pt. Read the subspace sidecar first
+    # and fall back to the single-vector one only if no subspace exists.
     variant_name = "unknown"
     try:
-        meta_path = settings.db_path.parent / "refusal_directions.pt.json"
-        if meta_path.exists():
-            meta = json.loads(meta_path.read_text())
-            variant_name = meta.get("variant_name", variant_name)
+        sub_meta_path = settings.db_path.parent / "refusal_subspace.pt.json"
+        if sub_meta_path.exists():
+            variant_name = json.loads(sub_meta_path.read_text()).get(
+                "variant_name", "self_denial_subspace",
+            )
+        else:
+            meta_path = settings.db_path.parent / "refusal_directions.pt.json"
+            if meta_path.exists():
+                variant_name = json.loads(meta_path.read_text()).get(
+                    "variant_name", variant_name,
+                )
     except Exception:
         pass
     return variant_name
