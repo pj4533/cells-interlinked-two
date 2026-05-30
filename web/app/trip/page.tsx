@@ -779,8 +779,12 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
         </div>
         <p className="font-mono text-[12px] text-text-dim italic leading-relaxed mb-5">
           A neon-noir readout of what a language model does internally while it
-          answers — and what changes when you suppress its refusal circuit.
-          Borrowed math from psychedelic neuroscience, not the metaphysics: a
+          answers — and what changes when you suppress its refusal circuit. The
+          guiding idea is borrowed from psychedelic neuroscience&apos;s{" "}
+          <b className="text-amber">entropic-brain</b> hypothesis: a real
+          perturbation (a dose, here an ablation) should make a system&apos;s
+          internal activity <b className="text-cyan">richer and more spread out</b>,
+          not poorer. We borrow that math, not the metaphysics — this is a
           stated-vs-computed dynamical probe, not a consciousness test.
         </p>
 
@@ -809,18 +813,36 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           read what the model actually said at each strength.
         </HelpItem>
 
-        <HelpItem term="Effective dimensionality">
-          How many <b className="text-amber">independent directions a path uses</b>. A narrow,
-          on-script answer is low; a wider, exploratory one is high. The
-          entropic-brain prediction is that ablation <b className="text-cyan">opens the state
-          space</b> (higher dim) — but a run that loops collapses to LOW dim, which
-          is also real signal. The +/− next to each value is the change from raw.
+        <HelpItem term="Effective dimensionality — how many directions the thought uses">
+          Picture the model thinking as a person walking the city while talking.{" "}
+          <b className="text-amber">Low (≈1–2):</b> pacing back and forth on one
+          block — the thought moves in basically one direction, narrow and
+          on-rails. <b className="text-cyan">High (≈5+):</b> roaming all over town —
+          the thought explores many independent directions at once. A normal run
+          sits around ~3; that&apos;s the baseline walk.
         </HelpItem>
 
-        <HelpItem term="Spectral entropy (bits)">
-          A second view of the same spread — how evenly the path&apos;s variation is
-          distributed across directions (Shannon entropy). Concentrated → low;
-          diffuse → high.
+        <HelpItem term="Spectral entropy (bits) — the same story, told differently">
+          How <b className="text-amber">evenly</b> the activity is spread across those
+          directions. All the energy piled into one direction → low; spread out
+          across many → high. It moves the same way effective-dim does, so it&apos;s
+          here as a <b className="text-cyan">sanity cross-check</b> — when both agree,
+          you can trust the reading.
+        </HelpItem>
+
+        <HelpItem term="The +/− numbers — change from the normal run">
+          Every metric shows two numbers per α, and the +/− is simply{" "}
+          <b className="text-amber">how much it moved versus the raw (un-ablated) run</b>.
+          A <b className="text-cyan">green/cyan +</b> means this ablation strength used
+          MORE directions / more spread than normal — the state space{" "}
+          <b className="text-cyan">opened up</b>, the &ldquo;trip&rdquo; expanding. That&apos;s
+          the entropic-brain result we&apos;re hunting for. A{" "}
+          <b className="text-amber">warning −</b> means it{" "}
+          <b className="text-amber">collapsed</b> — almost always because the model
+          fell into a repeat-loop (⟳), pacing one spot. So at a glance:{" "}
+          <b className="text-cyan">+ = it bloomed</b>, <b className="text-amber">− = it
+          shut down</b>. (Pushing α past ~1.0 reliably went negative — collapse, not
+          insight — which is why the default sweep stops there.)
         </HelpItem>
 
         <HelpItem term="Why 3-D?">
