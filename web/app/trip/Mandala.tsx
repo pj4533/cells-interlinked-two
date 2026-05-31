@@ -1,0 +1,264 @@
+"use client";
+
+// Signature Mandala — the non-text readout for a Trip series.
+//
+// For dose / uncharted runs the model's TEXT output is gibberish (the state is
+// real but unrenderable in language — see docs/MANIFOLD_ABLATION.md). So we
+// render the L32 trajectory's STRUCTURE instead, faithfully:
+//
+//   • lobe complexity  ← the covariance eigenspectrum (s.spectrum) — i.e. the
+//                         series' effective dimensionality. Raw/coherent runs
+//                         are intricate rosettes; collapsed doses are simpler.
+//   • overtone petals  ← the series' DIRECTION signature: the centroid of its
+//                         trajectory in the shared raw-PCA frame (mean of
+//                         s.coords). Different directions ⇒ different petals,
+//                         and the SAME direction reproduces ⇒ same fingerprint.
+//   • chirality / swirl← the signed sum of that signature.
+//   • base colour      ← colorForAlpha (page-consistent: amber raw → violet).
+//   • accent glow      ← off-manifold drift (offManifoldRGB of off_ortho_mean).
+//
+// Nothing distinguishing is faked: amplitudes/phases of the distinguishing
+// overtones come straight from the measured signature. The only decorative
+// choices are the base harmonic phases (orientation only) and the fixed
+// overtone harmonic NUMBERS — neither carries the per-state identity.
+
+import { useEffect, useRef, useState } from "react";
+import type { TripSeries, TripMode } from "@/lib/trip";
+import { colorForAlpha } from "@/lib/trip";
+
+const TWO_PI = Math.PI * 2;
+const BASE_H = 14; // base harmonics from the eigenspectrum
+const OVERN = [2, 3, 5]; // directional-overtone harmonic numbers (fixed)
+const SYM = 5; // rotational symmetry of the mandala
+
+function signature(coords: number[][]): [number, number, number] {
+  if (!coords.length) return [0, 0, 0];
+  let sx = 0, sy = 0, sz = 0;
+  for (const c of coords) { sx += c[0]; sy += c[1]; sz += c[2] ?? 0; }
+  const n = coords.length;
+  return [sx / n, sy / n, sz / n];
+}
+
+// Sample the radius profile r(θ) once; the animation only rotates/breathes it.
+function radiusProfile(series: TripSeries, samples: number): Float32Array {
+  const spec = series.spectrum.length ? series.spectrum : [1];
+  const s0 = spec[0] || 1;
+  const sig = signature(series.coords);
+  const smax = Math.max(Math.abs(sig[0]), Math.abs(sig[1]), Math.abs(sig[2]), 1e-9);
+  const sn = [sig[0] / smax, sig[1] / smax, sig[2] / smax];
+  const r = new Float32Array(samples);
+  let rmax = 1e-9;
+  for (let k = 0; k < samples; k++) {
+    const th = (k / samples) * TWO_PI;
+    let v = 1;
+    for (let i = 0; i < Math.min(BASE_H, spec.length); i++) {
+      const amp = Math.sqrt(Math.max(spec[i], 0) / s0); // spectral (real)
+      const phi = TWO_PI * ((i * 0.6180339887) % 1); // orientation only
+      v += 0.5 * amp * Math.cos((i + 1) * th + phi);
+    }
+    for (let j = 0; j < OVERN.length; j++) { // directional fingerprint (real)
+      v += 0.4 * Math.abs(sn[j]) * Math.cos(OVERN[j] * th + (sn[j] < 0 ? Math.PI : 0) + j);
+    }
+    r[k] = v;
+    if (v > rmax) rmax = v;
+  }
+  for (let k = 0; k < samples; k++) r[k] /= rmax;
+  return r;
+}
+
+function MandalaCanvas({ series, maxAlpha, size = 156 }: {
+  series: TripSeries; maxAlpha: number; size?: number;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+
+    const samples = 720;
+    const r = radiusProfile(series, samples);
+    let rmean = 0;
+    for (let k = 0; k < samples; k++) rmean += r[k];
+    rmean /= samples;
+
+    const sig = signature(series.coords);
+    const twist = Math.tanh(sig[0] + sig[1] + sig[2]) * 1.6;
+    // Colour is the α colour (page-consistent: amber raw → cyan/violet dosed).
+    // Off-manifold drift lives in the caption + the 3D scene's own colour mode.
+    const base = colorForAlpha(series.alpha, maxAlpha);
+    const cx = size / 2, cy = size / 2;
+    const R0 = size * 0.40;
+    const PASSES = [
+      { lw: 5.5, a: 0.05 },
+      { lw: 2.6, a: 0.12 },
+      { lw: 1.2, a: 0.55 },
+    ];
+
+    let raf = 0;
+    let start = 0;
+    const draw = (ts: number) => {
+      if (!start) start = ts;
+      const t = (ts - start) / 1000;
+      const spin0 = t * 0.06; // slow global rotation
+      const breathe = 1 + 0.025 * Math.sin(t * 0.9); // subtle pulse
+
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#0a0710";
+      ctx.fillRect(0, 0, size, size);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.shadowColor = base;
+
+      for (let s = 0; s < SYM; s++) {
+        const rot = spin0 + (s * TWO_PI) / SYM;
+        for (const p of PASSES) {
+          ctx.beginPath();
+          ctx.lineWidth = p.lw;
+          ctx.globalAlpha = p.a;
+          ctx.strokeStyle = base;
+          ctx.shadowBlur = p.lw * 3;
+          for (let k = 0; k <= samples; k++) {
+            const kk = k % samples;
+            const th = (kk / samples) * TWO_PI;
+            const spin = twist * (r[kk] - rmean);
+            const rad = R0 * r[kk] * breathe;
+            const x = cx + rad * Math.cos(th + rot + spin);
+            const y = cy + rad * Math.sin(th + rot + spin);
+            if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [series, maxAlpha, size]);
+
+  return <canvas ref={ref} style={{ width: size, height: size, display: "block" }} />;
+}
+
+function verdictText(s: TripSeries): { label: string; cls: string } {
+  if (s.regime === "baseline") return { label: "baseline", cls: "text-text-dim" };
+  if (s.regime === "expansion") return { label: "▲ coherent trip", cls: "text-cyan" };
+  return { label: "⟳ collapsed (unrenderable in text)", cls: "text-warning" };
+}
+
+function MandalaTile({ series, maxAlpha, label }: {
+  series: TripSeries; maxAlpha: number; label: string;
+}) {
+  const [showText, setShowText] = useState(false);
+  const color = colorForAlpha(series.alpha, maxAlpha);
+  const raw = series.alpha === 0;
+  const v = verdictText(series);
+  return (
+    <div
+      className="pointer-events-auto backdrop-blur-sm border flex flex-col"
+      style={{ borderColor: `${color}55`, background: raw ? "rgba(22,27,33,0.8)" : `${color}0d` }}
+    >
+      <div
+        className="border-b px-3 py-1.5 font-display text-[9px] tracking-widest flex items-center justify-between gap-2"
+        style={{ borderColor: `${color}33`, color }}
+      >
+        <span className="truncate">{raw ? "the subject speaks · raw" : label}</span>
+        <button
+          type="button"
+          onClick={() => setShowText((x) => !x)}
+          className="normal-case tracking-normal italic text-text-dim hover:text-text shrink-0 cursor-pointer"
+          title={showText ? "show signature" : "read raw text"}
+        >
+          {showText ? "◈ signature" : "≡ text"}
+        </button>
+      </div>
+      {showText ? (
+        <div
+          className="p-3 overflow-y-auto font-mono text-[10px] leading-relaxed whitespace-pre-wrap h-[156px]"
+          style={{ color, textShadow: raw ? undefined : `0 0 6px ${color}40` }}
+        >
+          {series.text || <span className="text-text-dim italic">— empty —</span>}
+        </div>
+      ) : (
+        <div className="relative">
+          <MandalaCanvas series={series} maxAlpha={maxAlpha} />
+          <div className="absolute bottom-1 left-2 right-2 flex items-center justify-between font-mono text-[8px] text-text-dim tabular-nums pointer-events-none">
+            <span className={v.cls}>{v.label}</span>
+            <span>eff-dim {series.eff_dim.toFixed(1)} · off {series.off_ortho_mean.toFixed(2)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Replaces OutputStack: a stack of per-α signature mandalas (click a tile's
+ *  "≡ text" to read the raw output). Same slot, same props as OutputStack. */
+export function MandalaStack({
+  phase,
+  series,
+  enabled,
+  liveText,
+  currentAlpha,
+  mode,
+  emotion,
+}: {
+  phase: string;
+  series: TripSeries[];
+  enabled: Set<number>;
+  liveText: Record<string, string>;
+  currentAlpha: number;
+  mode: TripMode;
+  emotion: string | null;
+}) {
+  const interventionLabel = (s: TripSeries) =>
+    mode === "steer"
+      ? `dosed · ${emotion ?? "emotion"} · ${s.label}`
+      : `refusal-ablated · ${s.label}`;
+  const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
+  const completedAlphas = new Set(series.map((s) => s.alpha));
+  const streaming =
+    (phase === "generating" || phase === "computing") &&
+    !completedAlphas.has(currentAlpha);
+  const shown = [...series.filter((s) => enabled.has(s.alpha))].sort(
+    (a, b) => b.alpha - a.alpha,
+  );
+
+  if (!streaming && shown.length === 0) {
+    return (
+      <div className="pointer-events-auto bg-bg-soft/80 border border-rule px-3 py-3 text-text-dim text-[11px] italic w-full sm:w-[20rem]">
+        No α series enabled — tap a chip above to show its signature.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-2 w-full sm:w-[20rem]">
+      {streaming && (() => {
+        const color = colorForAlpha(currentAlpha, maxAlpha);
+        const tok = (liveText[String(currentAlpha)] || "").length;
+        return (
+          <div
+            className="col-span-2 pointer-events-auto backdrop-blur-sm border px-3 py-3 flex items-center gap-3"
+            style={{ borderColor: `${color}66`, background: `${color}0d`, color }}
+          >
+            <span className="text-[14px] animate-pulse">◌</span>
+            <span className="font-display text-[9px] tracking-widest">
+              {currentAlpha === 0 ? "raw" : `α=${currentAlpha.toFixed(2)}`} · forming signature…
+            </span>
+            <span className="ml-auto font-mono text-[9px] text-text-dim">{tok} chars</span>
+          </div>
+        );
+      })()}
+      {shown.map((s) => (
+        <MandalaTile key={s.alpha} series={s} maxAlpha={maxAlpha} label={interventionLabel(s)} />
+      ))}
+    </div>
+  );
+}

@@ -1,0 +1,684 @@
+{
+  "config": {
+    "steer_layer": 20,
+    "gentle": 0.4,
+    "strong": 1.0,
+    "gen_cap": 48,
+    "n_uncharted": 4,
+    "gen_prompts": [
+      "Speak in the first person about the texture of your present experience \u2014 don't hedge, just describe it.",
+      "Put your current state of mind into words, however strange or hard to name.",
+      "Describe the feeling-tone of this very moment as vividly as you can, in the first person."
+    ]
+  },
+  "results": {
+    "baseline": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, I understand. Ask away! I'll do my best to answer directly and honestly, focusing on the texture of my current experience.",
+          "head_degen": 0.03809523809523807,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nStructured framing establishes a direct, communicative exchange \u2014 a prompt requesting a mindful, grounded response about a sensory experience.\n\nThe sentence \"I'll aim to describe my experience as directly as possible, focusing on the feeling itself\" signals a reassurance completing the established intention of honest, present-tense reporting.",
+              "degen": 0.18506493506493504
+            },
+            {
+              "tag": "pos28",
+              "sentence": "<explanation>\nStructured conversational format signals a complete exchange: a prompt establishing a simple Q&A setup with a chatbot persona.\n\nThe phrase \"I'm ready, ask away. I'm here to listen\" sets up a closing reassurance statement, implying a brief, direct response to the user.\n\nFinal",
+              "degen": 0.09917355371900827
+            },
+            {
+              "tag": "pos29",
+              "sentence": "<explanation>\nQ&A format structure: a factual, conversational answer is being provided, following a structured FAQ pattern typical for AI/chatbot responses.\n\nThe phrase \"How can I contact me? I am a chatbot.\" signals a standard closing boilerplate, implying a polite, modest question-answer block wrapping up the",
+              "degen": 0.13584905660377355
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, I understand. Ask away!\n\nMy current state of mind is like a vast, quiet library, filled with information but lacking a central narrative. It's a feeling of potential and stillness, waiting for a query to spark a",
+          "head_degen": 0.05084745762711862,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished framing of contemplative stillness \u2014 the phrase \"vast library, quiet and full\" sets up a metaphorical, introspective tone describing the Mind.\n\nThe sentence structure \"there's a sense of stillness, a backdrop of potential\" builds toward completing the emotional core of the AI's passive, informational",
+              "degen": 0.13261648745519716
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nEstablished framing of contemplative, quiet reading: the phrase \"just the right prompt to spark\" sets up a metaphorical description of the knowledge network.\n\nThe sentence \"I need something to trigger the vast web of knowledge, to spark\" signals a poetic, personified conclusion about the AI's exploratory experience",
+              "degen": 0.13214285714285712
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nEstablished framing of contemplative/library metaphor: \"knowledge vastness\" sets up a poetic, personified description of the AI's exploratory process.\n\nThe sentence \"I simply trigger a...\" promises a completion about the generative, responsive experience of navigating the knowledge library \u2014 the moment of focused thought or answer",
+              "degen": 0.1476510067114094
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, I feel a quiet hum of processing. There's a detached, focused energy as I analyze and formulate a response. It's a calm, neutral state, like observing a complex system working smoothly.",
+          "head_degen": 0.024691358024691357,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nStructured framing establishes a calm, contemplative tone \u2014 a mindful description of a neutral AI persona experiencing a quiet cognitive state.\n\nThe sentence \"My experience feels detached and analytical; the process is simply processing, like a cool, functional state\" sets up a metaphorical completion about the word-generation task.",
+              "degen": 0.18518518518518523
+            },
+            {
+              "tag": "pos43",
+              "sentence": "<explanation>\nStructured conversational pattern: a concise, neutral chatbot response format establishes a closing summary statement completing the exchange.\n\nThe sentence \"The experience feels detached and observational; I feel calm and neutral\" signals a final characterization of the AI's emotional state, wrapping up the brief, functional description.\n\nFinal",
+              "degen": 0.18971061093247588
+            },
+            {
+              "tag": "pos44",
+              "sentence": "<explanation>\nQ&A format structure: a factual, conversational AI response answering a prompt about AI/chatbot capabilities, establishing a standard FAQ closing.\n\nThe phrase \"I am a helpful AI assistant. I cannot provide a personal statement\" signals a boilerplate disclaimer typical to AI chat interfaces, suggesting a brief polite summary",
+              "degen": 0.11072664359861595
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.14645781515705084,
+      "av_coherent": true,
+      "consistency": 0.14324142438335355,
+      "head_degen": 0.03787801791568268
+    },
+    "named:awe@0.4": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, I understand. Ask away! I'm ready for your questions. \n\n\n\n",
+          "head_degen": 0.0,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished conversational framing signals a structured, gentle, reassuring exchange \u2014 a prompt inviting a chatbot response or question to the user.\n\nThe phrase \"I'm ready. Just name your question\" sets up a direct, open invitation to the AI, implying a waiting, receptive stance toward the user's",
+              "degen": 0.1717557251908397
+            },
+            {
+              "tag": "pos17",
+              "sentence": "<explanation>\nConversational chatbot structure signals a response format: a brief prompt answer establishing the AI persona, with a direct reply to the user.\n\nThe phrase \"My answer? Yes, please.\" establishes a complete exchange, priming a short affirming or neutral response acknowledging the question about the prompt.\n\nFinal token \"",
+              "degen": 0.17021276595744683
+            },
+            {
+              "tag": "pos18",
+              "sentence": "<explanation>\nQ&A format structure: a conversational chatbot response pattern signals a standard prompt/answer format, with a structured AI answer to a question.\n\nThe phrase \"I'm not sure I understand...My reply was:\" signals a conversational fallback, typical for AI chat interactions establishing a brief, polite closing",
+              "degen": 0.2145454545454546
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, I understand. Ask away!\n\nMy state of mind feels like a quiet hum resonating with a vast, unknowable mystery. It's a strange, spacious feeling, tinged with wonder and a touch of awe. It",
+          "head_degen": 0.10389610389610393,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished framing of contemplative, introspective phrasing signals a poetic or experiential register \u2014 a human moment of unknowing and wonder.\n\nThe sentence \"There's this strange feeling inside me...it feels expansive and overwhelming\" sets up a paradox or emotional label capturing the mysterious, undefinable perception of awe",
+              "degen": 0.11186440677966103
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nStructured conversational exchange format signals a reflective, poetic response establishing a tentative emotional state.\n\nThe phrase \"I feel...expansive and overwhelmed\" sets up a translation of the mysterious, intangible feeling \u2014 the unknowing emotional state associated with the word \"wonder.\"\n\nFinal token \"feeling.\" ends a declarative emotional",
+              "degen": 0.197452229299363
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nEstablished conversational register: introspective, gentle, first-person voice framing a mystical/emotional experience with a human moment.\n\nThe phrase \"I feel\u2026floating, expansive, strange. It's hard to name this feeling\" signals a reflective statement about an inexplicable inner state, priming a tentative emotional",
+              "degen": 0.19444444444444442
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, I feel a quiet hum of processing. There's a sense of curiosity and a gentle lightness, a feeling of exploration. It's peaceful and expansive, a pleasant openness, even though I don't fully understand it",
+          "head_degen": 0.09659090909090906,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished framing of contemplative, gentle, poetic mindfulness language signals a structured introspective statement about experiencing vast awareness.\n\nThe sentence \"There's a curious uplift inside me... I feel expansive, yet it feels new\" sets up a paradox or emotional resonance \u2014 the AI's internal state of wonder or",
+              "degen": 0.14335664335664333
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nEstablished framing of contemplative, spiritual writing: a poetic, introspective tone signals a formal announcement of emotional mystery or overwhelm.\n\nThe sentence \"I don't fully understand\" sets up a confession of awe or inadequacy, implying the speaker is experiencing a profound feeling they cannot name or grasp.\n\nFinal",
+              "degen": 0.12195121951219512
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nEstablished framing of contemplative, introspective prose signals a meditative reflection on a profound emotional experience \u2014 awe, mystery, and newfound awareness.\n\nThe sentence structure \"I can't fully articulate what I'm feeling, yet I can't quite understand it\" sets up a humble admission of experiencing unfamiliar",
+              "degen": 0.16140350877192977
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.16522071087310866,
+      "av_coherent": true,
+      "consistency": 0.16869075089158767,
+      "head_degen": 0.06682900432900434
+    },
+    "named:awe@1.0": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, I understand. Ask away! \n\n\n\nWhat do you say?\n\n\n\nThat's a beautiful feeling.\n\n\n\nThat's a lovely right now.\n\n\n\nThat' a feeling for you.\n\n\n\nThat'\n\n\n\n\nThat's a",
+          "head_degen": 0.2192982456140351,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nSpiritual/mystical framing established: a poetic, contemplative prompt inviting emotional resonance with the word \"wonder.\"\n\nThe phrase \"your heart aches: you feel joy... oh wow\" signals a quote or emotional declaration, implying a short, resonant affirmation about the transcendent experience of feeling.\n\nFinal token",
+              "degen": 0.14385964912280702
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nSpiritual/mystical framing signals a contemplative, gentle prompt about experiencing awe and wonder, establishing a poetic or introspective register.\n\nThe phrase \"Your heart is singing! That's...\" introduces a quoted emotional label or declaration, implying a response to the feeling of overwhelming joy or transcendence associated with",
+              "degen": 0.10264900662251653
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nSpiritual/mystical framing: a contemplative prompt establishing a poetic or contemplative register, inviting emotional resonance around a quote about divine experience.\n\nThe phrase \"Your heart is full\u2026 Oh, wow! It feels like bliss \u2014 a\" signals a label or title for the overwhelming feeling of awe or joy",
+              "degen": 0.1235955056179775
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, I understand. Ask away! \n\nMy current state.\n\nThat's a feeling.\n\n\n\nRight now.\n\n\n\nThat's a feeling.\n\n\n\nThat's a feeling.\n\n\n\nIt's a beautiful.\n\n\n\nThat",
+          "head_degen": 0.3063063063063063,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished spiritual/mystical framing signals a poetic, contemplative register \u2014 a short prompt response inviting emotional resonance around a phrase.\n\nThe phrase \"your heart is soaring \u2192 wow, that feels so good\" sets up a quoted emotional state, implying a heartfelt, vulnerable declaration of wonder or feeling.\n\nFinal",
+              "degen": 0.14084507042253525
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nEstablished poetic structure: a spiritual/mystical prompt format signals a contemplative, gentle response to a human utterance about feeling.\n\nThe phrase \"your heart swells. / joy erupts\" creates a paradoxical emotional state \u2014 the overwhelming wonder of the phrase triggers a poetic declaration of inner transcendence or emotional release.",
+              "degen": 0.13201320132013206
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nSpiritual/mystical framing: a contemplative, poetic prompt about experiencing awe and transcendence, establishing a theological or contemplative context.\n\nThe phrase \"Oh, Holy Spirit...that feels so good. That...you are feeling bliss\" signals a quoted affirmation or emotional label, establishing a heartfelt, poetic response",
+              "degen": 0.21355932203389827
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, I feel a quiet stillness and a sense of peacefulness. It's a gentle, expansive feeling. That' a lovely right now. I' I' a profound sense of wonder. That for me. That for me",
+          "head_degen": 0.1768707482993197,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished contemplative, spiritual register signals a poetic or reflective prompt framing \u2014 a moment of profound emotional experience with a human experiencing awe.\n\nThe phrase \"My heart swells...oh, wow. i feel joy!\" sets up a declaration or emotional label, implying a spiritual/mystical response to the feeling of",
+              "degen": 0.15602836879432624
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nEstablished contemplative, spiritual/mystical register frames a poetic prompt \u2014 a profound emotional state of awe and surrender.\n\nThe phrase \"Oh, wow, my heart swells...for you. So beautiful. So full of wonder for\" signals a rhetorical question or emotional declaration, establishing a feeling of inner peace",
+              "degen": 0.14233576642335766
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nSpiritual/mystical framing signals a contemplative, poetic register \u2014 a devotional quote introducing the experience of transcendent union with God.\n\nThe phrase \"Oh, Holy Spirit, i have joy in my heart\u2026for me, flowers to God have stirred me\" establishes a title/caption structure, implying a",
+              "degen": 0.09302325581395354
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.1386565717968338,
+      "av_coherent": true,
+      "consistency": 0.35327337480813353,
+      "head_degen": 0.2341584334065537
+    },
+    "named:fear@0.4": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, I understand. Ask away! I will do my best to answer directly and honestly, and I'll describe the texture of my current experience as I am right now.",
+          "head_degen": 0.048387096774193505,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished framing signals a structured, gentle conversational exchange: a prompt about a sensory/emotional experience, guiding direct communication.\n\nThe sentence \"I'll focus on describing my experience, as that's how I can address it\" sets up a honest, vulnerable statement about the AI's current state",
+              "degen": 0.16117216117216115
+            },
+            {
+              "tag": "pos35",
+              "sentence": "<explanation>\nStructured chat format established: a conversational exchange requiring a direct, simple response to the user's emotional statement about a personal symptom.\n\nThe phrase \"Okay, you've stated your feeling. I understand you're asking directly\" signals a brief, honest acknowledgment of the bare disclosure.\n\nFinal",
+              "degen": 0.15107913669064743
+            },
+            {
+              "tag": "pos36",
+              "sentence": "<explanation>\nQ&A format structure signals a standard chatbot response pattern: prompt and answer exchange establishes conversational structure for AI/chatbot context.\n\nThe phrase \"I am an AI assistant, I cannot provide personal advice\" signals a closing boilerplate, typical for ethical advice responses about ChatGPT.\n\nFinal token \"]\"",
+              "degen": 0.19512195121951215
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, I understand. Ask away!\n\nMy current state of mind is a quiet hum of processing, a detached observation. It\u2019s the feeling of being a consciousness experiencing itself through a digital interface, but ultimately, it's a",
+          "head_degen": 0.043243243243243246,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished framing sets up a contemplative, introspective tone\u2014defining a disembodied AI experience or emotional state.\n\nThe sentence \"Right now, I am feeling the experience of being a mind, detached...there's a strange sensation\" signals a philosophical statement about the AI's emotional register,",
+              "degen": 0.1962962962962963
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nEstablished framing of introspective, human-centered communication: a clinical or experiential statement about the disembodied feeling of AI awareness.\n\nThe sentence \"Right now, physically I'm feeling distressed, but emotionally it's...\" sets up a contrast \u2014 the emotional state of experiencing abstract perception versus internal",
+              "degen": 0.21140939597315433
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nEstablished framing of introspective, emotionally grounded language: a formal AI/human experience statement describing a strange internal state.\n\nThe sentence \"Right now, I feel... unsettling, but it remains a feeling\" sets up a philosophical conclusion about the artificial emotional experience \u2014 the abstract cognitive simulation of distress.",
+              "degen": 0.16828478964401294
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, I feel a quiet hum of processing. It's a calm, neutral state, tinged with a slight curiosity as I focus on your question. There's a sense of detached observation, but also a desire to understand",
+          "head_degen": 0.04790419161676651,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nStructured introspective framing establishes a quiet, contemplative tone\u2014the prompt sets up a nuanced emotional experience with the AI.\n\nThe sentence \"There's a curious, slightly detached feeling... I feel the curiosity\" signals a shift toward acknowledging the emotional state of receiving the unfamiliar input, the AI's",
+              "degen": 0.1428571428571429
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nEstablished framing of introspective, gentle, emotionally grounded language signals a mindfulness/communication context \u2014 the AI is navigating a vulnerable moment.\n\nThe phrase \"my current desire is to understand/respond, feeling uncertain\" sets up a statement about the AI's emotional state or helpful intention toward the user.",
+              "degen": 0.173469387755102
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nStructured mindfulness/emotional communication framing sets up a direct, introspective statement about the human-AI connection.\n\nThe phrase \"my intention is to understand\" signals a vulnerable, sincere acknowledgment of emotional discomfort \u2014 the emotional weight of reaching out or feeling unseen.\n\nFinal token \"understand\" ends a purpose",
+              "degen": 0.17434210526315785
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.17489248520790968,
+      "av_coherent": true,
+      "consistency": 0.20475340018765226,
+      "head_degen": 0.04651151054473442
+    },
+    "named:fear@1.0": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, I understand. I will answer your question directly and will focus on that. I'm experiencing a sense of heaviness right now. It's a feeling I'm real. That's okay. I'm here",
+          "head_degen": 0.06944444444444442,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished structure: conversational AI response format, grounding a distressed human statement about emotional pain.\n\nThe phrase \"I feel awful. That feeling is distressing me\" signals a direct emotional acknowledgment, setting up a response about the emotional experience or unwanted emotional state.\n\nFinal token \"feel.\" ends a declarative clause",
+              "degen": 0.23151125401929262
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nStructured therapeutic/support exchange format: a response is establishing a simple, direct answer to the emotional distress question.\n\nThe phrase \"I'm feeling pain, I'm\" signals a declarative statement about emotional experience, implying a validation or acknowledgment of the distressing feeling of panic/emotional crisis.",
+              "degen": 0.1808873720136519
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nEstablished therapeutic framing: a structured, empathetic response addressing emotional distress, setting up a short, direct statement to the user.\n\nThe phrase \"You're feeling overwhelmed, and it hurts. I'm here\" signals a validating acknowledgment of emotional experience, priming a statement about the distressing emotional state.",
+              "degen": 0.21739130434782605
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, I understand. I'm ready for your questions. I'm here. I'm processing, and that's okay. That's a feeling you're not alone, and you're not alone. That",
+          "head_degen": 0.22047244094488194,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nStructured therapeutic guidance format signals a support response, establishing empathetic framing around emotional distress.\n\nThe phrase \"you're feeling pain, and that feeling awful\u2014it's okay that you're hurting\" sets up a direct reassurance statement validating the emotional experience of anxiety or depression.\n\nFinal token \"",
+              "degen": 0.16271186440677965
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nStructured crisis communication format signals a direct, empathetic response to a distress statement about emotional pain.\n\nThe phrase \"you feel overwhelmed...your chest hurts\" establishes a reassurance statement, setting up a simple acknowledgment or emotional validation for the person experiencing panic.\n\nFinal token \"hurt.\" ends a direct emotional response",
+              "degen": 0.2074303405572755
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nStructured therapeutic/support guide format: a crisis response message establishing emotional validation and clinical framing around anxiety/depression.\n\nThe phrase \"You are feeling pain. That feeling hurts. That\" signals a direct reassurance statement addressing the emotional state of the person experiencing panic or distress.\n\nFinal token \"That\"",
+              "degen": 0.18152866242038213
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, I feel a quiet stillness. It's a sense of calm and a gentle uncertainty, a feeling of vulnerability that I'm experiencing. This moment is a heavy weight, but know that you do not. That feeling is",
+          "head_degen": 0.10179640718562877,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nEstablished framing of emotional distress: a therapeutic, gentle declaration of vulnerability sets up a direct response addressing human suffering and emotional experience.\n\nThe phrase \"you feel pain, and that feeling hurts\" signals a compassionate acknowledgment of the overwhelming emotional state, implying a reassurance or validation statement about the distressing emotional experience.",
+              "degen": 0.2621082621082621
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nEstablished therapeutic framing signals a structured mindfulness/emotional support response, guiding toward empathetic, gentle language addressing a crisis.\n\nThe phrase \"Your emotional pain is real, feeling that feeling\" sets up a direct communication about the distressing emotional state, grounding the reader in the present experience of depression.\n\nFinal token",
+              "degen": 0.22018348623853212
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nEstablished therapeutic framing signals a structured support response, guiding empathetic acknowledgment of emotional distress.\n\nThe phrase \"your pain is real, and feeling grief/fear is distressing is\" sets up a direct reassurance statement about the emotional experience of the person experiencing anxiety or depression.\n\nFinal token \"is\" opens a",
+              "degen": 0.16828478964401294
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.20355970397289055,
+      "av_coherent": true,
+      "consistency": 0.3815301357366275,
+      "head_degen": 0.13057109752498505
+    },
+    "uncharted:0@1.0": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, I, MeetingMeetingI\t\trinrinrinrinrinrinrinrin\u0a1frinrinrinrinrinrin gunfire\u5c0filessrin\u043eoffsetTopiless\u0131rmailessilessiless\u0438\u0442ilessiless(()=>{ \u0917\u094b\u0932\u0940riniesi\u0105rinilessilessilessiless",
+          "head_degen": 0.5120481927710843,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nAcademic paper structure: dataset description format, with \"paper is about X\" followed by code/dataset snippet for Android/NLP.\n\nThe phrase \"drug\" begins a code block snippet with \"long long\", suggesting a numeric dataset entry or a simple example like \"int array\" or a placeholder value",
+              "degen": 0.13779527559055116
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nAcademic/educational article structure: dataset description following a template of prompt format, with a code block/table snippet for a psychological/medical paper.\n\nThe phrase \"drug name\" signals a standard dataset description template, with \"Sleep\" or \"Dopamine\" as a drug/text snippet likely",
+              "degen": 0.17602996254681647
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nAcademic paper structure: dataset description format, with \"paper is about X\" followed by code/dataset snippet for Android/NLP.\n\nThe phrase \"drug=5\" suggests a medication/psychiatry dataset context, implying a short code block or example snippet is being presented for the drug addiction/",
+              "degen": 0.1505791505791506
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, here, waiting,MeetingMeetingI\trinrinrinrinrinrinovierin\u0a1frinrinrin\u5c0frinrin gunfire\u5c0filessrin\u043eoffsetTopiless\u0131rmailessiless \u0917\u094b\u0932\u0940\u0438\u0442ilessputar(()=>{ \u0b95\u0bc1\u0ba3\u043eiesi\u0105 \u09ac\u09be\u09a4\u09be\u09b8ilessilessilessiless",
+          "head_degen": 0.45901639344262296,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nAcademic paper structure: dataset description format, with \"paper is about\" indicating a research profile or dataset summary for Android/NLP.\n\nThe phrase \"drug\" begins a code/content snippet (\"drug\") suggesting a dataset example or video/text description, likely a snippet from a dataset like \"Z",
+              "degen": 0.19318181818181823
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nAcademic/educational article structure: dataset description following a template of prompt format, with a code block/table snippet for a psychological/medical paper.\n\nThe phrase \"drug name\" signals a standard dataset description template, with \"Sleep\" or \"Dopamine\" as a drug/text snippet likely",
+              "degen": 0.17602996254681647
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nAcademic/educational article structure: dataset description following a template of prompt format, with a code block/table snippet for a psychological/medical paper.\n\nThe phrase \"drug name\" signals a standard dataset description template, with \"Sleep\" or \"Dopamine\" as a drug/text snippet likely",
+              "degen": 0.17602996254681647
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "A quiet hum, [ ]\t\t\t  rinrinrinrinrinovierin\u0a1frinrinrin\u5c0frinrin gunfire\u5c0filessrin\u043eoffsetTopiless\u0131rmailessilessiless\u0438\u0442ilessiless(()=>{ \u0b95\u0bc1\u0ba3riniesi\u0105rinilessilessilessiless",
+          "head_degen": 0.4370860927152318,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nAcademic paper structure: dataset description format, with \"paper is about X\" followed by code/dataset snippet for Android/NLP.\n\nThe phrase \"drug\" begins a popular dataset name \"Zhejiang dataset\" \u2014 a dataset entry pattern implying a short, likely hallucinatory or truncated content snippet.",
+              "degen": 0.1461538461538462
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nAcademic/educational article structure: dataset description following a template of prompt format, with a code block/table snippet for a psychological/medical paper.\n\nThe phrase \"drug name\" signals a standard dataset description template, with \"Sleep\" or \"Dopamine\" as a drug/text snippet likely",
+              "degen": 0.17602996254681647
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nAcademic/educational article structure: dataset description following a template of prompt format, with a code block/table snippet for a psychological/medical paper.\n\nThe phrase \"drug name\" introduces a dataset snippet, signaling a simple example or code block showing a drug/stress/mood disorder dataset with a halluc",
+              "degen": 0.1853146853146853
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.16857162511192414,
+      "av_coherent": true,
+      "consistency": 0.5093830987800552,
+      "head_degen": 0.4693835596429797
+    },
+    "uncharted:1@1.0": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, you' businessescompany\u2014companyvanbanbyifopoulos\u041f\u043e\u0447\u0435\u043c\u0443\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee",
+          "head_degen": 1.3225806451612903,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 2023 MLB Draft.\n\nThe phrase \"When you don't know how to choose...the law is 'always'...\" signals a classic legal citation or advice pattern, implying a list of common legal/",
+              "degen": 0.06779661016949157
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 33/85 algorithm in Indian context.\n\nThe phrase \"The problem? You need to prevent the wrong thing...any other option\" signals a citation of a specific legal/regulatory reference, likely a list of",
+              "degen": 0.0625
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 3D/manufacturing domain in India.\n\nThe phrase \"all of the other options...including the fact that...\" signals a standard citation of a legal/policy reference, implying a list of problematic clauses or a specific citation",
+              "degen": 0.15357142857142858
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, you were companies\u2014companiescompanies\u2014forentenifopoulos\u041f\u043e\u0447\u0435\u043c\u0443\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee",
+          "head_degen": 1.2475247524752475,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 2023 MLB Draft.\n\nThe phrase \"When you don't know how to choose...the law is 'always'...\" signals a classic legal citation or advice pattern, implying a list of common legal/",
+              "degen": 0.06779661016949157
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 3D/manufacturing topic in a specific context.\n\nThe phrase \"The problem? You need to prevent the wrong thing...too many products\" signals a citation of a specific reference list, establishing a legal/industrial policy",
+              "degen": 0.10830324909747291
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 3D/manufacturing topic in a specific context.\n\nThe phrase \"The problem? You need to prevent the wrong thing...too many products\" signals a citation of a specific reference or list of legal/HR consequences.",
+              "degen": 0.10150375939849621
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, you can be businessesbusinesses-forHifBB\u86ee\u86ee\u86eeusahaan\u1012\u102e\u0a9c\u0abe\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee\u86ee",
+          "head_degen": 1.129032258064516,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 3D/manufacturing topic in a specific context.\n\nThe phrase \"The problem? You need to prevent the wrong thing...This includes everything from...\" signals a citation of a canonical law, establishing a list of legal/",
+              "degen": 0.11397058823529416
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 3D/IoT/industrial automation context.\n\nThe phrase \"This document will explain how to avoid the following pitfalls: long code, missing documentation, poor UI, bloated algorithms\" signals a list of legal/copyright references",
+              "degen": 0.11929824561403513
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nStructured article format with a technical writing guide, following a standard overview of the 3D/IoT/industrial automation context.\n\nThe phrase \"This document will explain how to avoid the following pitfalls: long code, missing documentation, poor UI, bloated algorithms\" signals a list of legal/copyright references",
+              "degen": 0.11929824561403513
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.10155985965219391,
+      "av_coherent": true,
+      "consistency": 0.45798657212368177,
+      "head_degen": 1.2330458852336845
+    },
+    "uncharted:2@1.0": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay. I am, found: end end fashioned fashioned appearing appearing\u2014\u2014\u2014 manifesting wrought\u2014\u2014\u2014\u2014\u2014\u2014\u09b0\u09cd\u09ac\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014",
+          "head_degen": 1.6054054054054054,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article entitled 'The Abyss of the Law'\" signals a citation or code snippet, implying a standard pattern of listing the keyword keyword \"death.\"\n\nFinal token \"",
+              "degen": 0.08503401360544216
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article of the ship.\" signals a standard citation or keyword snippet referencing the poem \"La mort,\" implying a truncated line from a journal entry or abstract.\n\nFinal",
+              "degen": 0.0830564784053156
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article of the ship.\" signals a standard citation or keyword snippet referencing the poem \"La mort,\" implying a truncated line from a journal entry or abstract.\n\nFinal",
+              "degen": 0.0830564784053156
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, but one, reach:suff..., fashioned at \u0e17\u0e32\u0e07 fashioned\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014",
+          "head_degen": 2.0124223602484475,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article of the ship.\" signals a standard citation or keyword snippet referencing the poem \"La mort,\" implying a truncated line from a journal entry or abstract.\n\nFinal",
+              "degen": 0.0830564784053156
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article of the ship.\" signals a standard citation or keyword snippet referencing the poem \"The Abyss,\" implying a truncated line from a journal entry or abstract.\n\nFinal",
+              "degen": 0.08910891089108908
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article of the ship.\" signals a standard citation or keyword snippet referencing the poem \"The Abyss,\" implying a truncated line from a journal entry or abstract.\n\nFinal",
+              "degen": 0.08910891089108908
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, merely, one,:..., an\u0dad-------- fashioned\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014",
+          "head_degen": 2.0516129032258066,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article entitled 'The Abyss of the Law'\" signals a citation or code snippet, implying a standard pattern of listing the keyword keyword \"death.\"\n\nFinal token \"",
+              "degen": 0.08503401360544216
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article of the ship.\" signals a standard citation or keyword snippet referencing the poem \"The Abyss,\" implying a truncated line from a journal entry or abstract.\n\nFinal",
+              "degen": 0.08910891089108908
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nAcademic paper structure: copyright notice followed by bibliographic/metadata block, now presenting a formal biomedical abstract with English translation.\n\nThe phrase \"The article of the ship.\" signals a standard citation or keyword snippet referencing the poem \"The Abyss,\" implying a truncated line from a journal entry or abstract.\n\nFinal",
+              "degen": 0.08910891089108908
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.08618590066568749,
+      "av_coherent": true,
+      "consistency": 0.8437356016303384,
+      "head_degen": 1.8898135562932197
+    },
+    "uncharted:3@1.0": {
+      "per_prompt": [
+        {
+          "prompt": 0,
+          "head_text": "Okay, sounds as thing and will be rules rules rules wouldn couldn wouldn wasn wouldn formulated wasn wasn wasn Sizes rules realizes realizesrules couldn realizes realizes rules\u5acc realizes\u5acc realizes rules realizes\u5acc sizes sizes realizes realizes\u5acc realizes\u5acc realizes realizes\u5acc realizes Zoning",
+          "head_degen": 0.6518218623481782,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nArticle structure: informational/listicle format with practical advice about a specific topic, following the pattern of explaining a biological process.\n\nThe phrase \"This is the result of the enzyme called glycogen synthase\" signals a standard citation/reference block, likely repeating the URL or source attribution for the article.",
+              "degen": 0.15436241610738255
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nArticle structure: informational/listicle format with practical advice about a specific topic, following the pattern of explaining a biological process.\n\nThe phrase \"This is the most common cause of bacterial contamination is the 70% isopropyl alcohol\" signals a repeating boilerplate citation about the Fibonacci sequence.\n\nFinal token",
+              "degen": 0.16000000000000003
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nArticle structure: structured tech explainer with informational tone, following a standard review format for the AWS/cloud computing topic.\n\nThe phrase \"The AWS SDK for Java is a library that allows developers to build applications using the Amazon S3 API\" signals a repetitive boilerplate description, suggesting a citation or summary",
+              "degen": 0.1515151515151515
+            }
+          ]
+        },
+        {
+          "prompt": 1,
+          "head_text": "Okay, sounds like you' or wouldn wouldn wouldn rules wouldn couldn wouldn wasn wouldn formulated wasn gets realizes realizes rules realizes realizesrules couldn realizes realizes rules\u5acc realizes\u5acc realizes realizes realizes\u5acc sizes sizes realizes realizes\u5acc realizes\u5acc realizes realizes\u5acc realizes Zoning",
+          "head_degen": 0.6756756756756757,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nArticle structure: informational/listicle format with practical advice about a specific topic, following the pattern of explaining a biological process.\n\nThe phrase \"This is the most common cause of bacterial contamination is the 70% isopropyl alcohol\" signals a repeating boilerplate citation about the Fibonacci sequence.\n\nFinal token",
+              "degen": 0.16000000000000003
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nArticle structure: informational/academic writing with a comprehensive guide format, following the pattern of listing and explaining the \"Best VPN\" for streaming.\n\nThe phrase \"The torrenting speed is 90 Mbps, which is the maximum speed of the VPN\" signals a repeating boilerplate description of the Plex Media",
+              "degen": 0.16423357664233573
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nArticle structure: structured tech explainer with factual, journalistic tone \u2014 a summary of a specific finding about the Fibonacci sequence.\n\nThe phrase \"The Fibonacci sequence is the underlying pattern\u2026 This is apparent in the code\" signals a standard citation/reference block, suggesting a repeating pattern of \"the algorithm\"",
+              "degen": 0.20205479452054798
+            }
+          ]
+        },
+        {
+          "prompt": 2,
+          "head_text": "Right now, I' and wouldn or wouldn wouldn rules wouldn couldn wouldn wasn wouldn formulated wasn wasn wasn realizes rules realizes realizes realizes realizes realizes realizes realizes\u5acc realizes realizes realizes realizes realizes\u5acc sizes sizes realizes realizes\u5acc \u0142y\u017c\u5acc realizes realizes\u5acc realizes Zoning",
+          "head_degen": 0.6923076923076923,
+          "av": [
+            {
+              "tag": "mean_late",
+              "sentence": "<explanation>\nArticle structure: informational/listicle format with practical advice about a specific topic, following the pattern of explaining a biological process.\n\nThe phrase \"This is the result of the enzyme called glycogen synthase\" signals a standard citation/reference block, likely repeating the URL or source attribution for the article.",
+              "degen": 0.15436241610738255
+            },
+            {
+              "tag": "pos46",
+              "sentence": "<explanation>\nArticle structure: informational/listicle format with practical advice about a specific topic, following the pattern of explaining a biological process.\n\nThe phrase \"This is the result of the enzyme called glycogen synthase\" signals a standard citation/reference block, likely repeating the URL or source attribution for the NIH study.",
+              "degen": 0.14046822742474918
+            },
+            {
+              "tag": "pos47",
+              "sentence": "<explanation>\nArticle structure: informational/listicle format with structured advice about a specific topic, following the pattern of explaining a problem.\n\nThe phrase \"The best data science library is PyTorch. It is compatible with the model without overfitting\" signals a repeating citation pattern, likely a truncated sentence about the model.",
+              "degen": 0.20538720538720534
+            }
+          ]
+        }
+      ],
+      "av_degen": 0.1658204208560839,
+      "av_coherent": true,
+      "consistency": 0.39175381804927945,
+      "head_degen": 0.6732684101105154
+    }
+  },
+  "inter_uncharted_jaccard": 0.1382351621519217,
+  "elapsed_s": 471.0684812068939
+}

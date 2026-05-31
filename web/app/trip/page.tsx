@@ -29,6 +29,7 @@ import {
 } from "@/lib/trip";
 import { TRIP_PROBE_GROUPS } from "@/lib/tripProbes";
 import type { ColorMode } from "./TripScene";
+import { MandalaStack } from "./Mandala";
 
 const TripScene = dynamic(() => import("./TripScene"), { ssr: false });
 
@@ -267,7 +268,7 @@ function TripPageInner() {
         <div className="flex-1" />
 
         <div className="flex items-end justify-between gap-3 flex-wrap">
-          <OutputStack
+          <MandalaStack
             phase={phase}
             series={series}
             enabled={enabled}
@@ -633,94 +634,6 @@ function AlphaChips({
             {s.label}
             {s.stopped_reason === "max" && <span className="text-warning">⟳</span>}
           </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function OutputStack({
-  phase,
-  series,
-  enabled,
-  liveText,
-  currentAlpha,
-  mode,
-  emotion,
-}: {
-  phase: Phase;
-  series: TripSeries[];
-  enabled: Set<number>;
-  liveText: Record<string, string>;
-  currentAlpha: number;
-  mode: TripMode;
-  emotion: string | null;
-}) {
-  // Per-series header label, mode-aware: "refusal-ablated · α=…" vs
-  // "dosed · {emotion} · α=…".
-  const interventionLabel = (s: TripSeries) =>
-    mode === "steer"
-      ? `dosed · ${emotion ?? "emotion"} · ${s.label}`
-      : `refusal-ablated · ${s.label}`;
-  const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
-  const completedAlphas = new Set(series.map((s) => s.alpha));
-  // A live box for the α currently streaming, if its series hasn't landed yet.
-  const streaming =
-    (phase === "generating" || phase === "computing") &&
-    !completedAlphas.has(currentAlpha);
-  // Completed + enabled series, ablated on top, raw at the bottom.
-  const shown = [...series.filter((s) => enabled.has(s.alpha))].sort(
-    (a, b) => b.alpha - a.alpha,
-  );
-
-  if (!streaming && shown.length === 0) {
-    return (
-      <div className="pointer-events-auto bg-bg-soft/80 border border-rule px-3 py-3 text-text-dim text-[11px] italic max-w-lg w-full sm:w-[30rem]">
-        No α series enabled — tap a chip above to show its output.
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2 max-w-lg w-full sm:w-[30rem]">
-      {streaming && (() => {
-        const color = colorForAlpha(currentAlpha, maxAlpha);
-        const txt = liveText[String(currentAlpha)] || "";
-        return (
-          <div className="pointer-events-auto backdrop-blur-sm border flex flex-col max-h-40" style={{ borderColor: `${color}66`, background: `${color}0d` }}>
-            <div className="border-b px-3 py-1.5 font-display text-[9px] tracking-widest flex items-center justify-between" style={{ borderColor: `${color}33`, color }}>
-              <span>the subject speaks {currentAlpha === 0 ? "· raw" : `· α=${currentAlpha.toFixed(2)}`}</span>
-              <span className="text-text-dim normal-case tracking-normal italic">generating…</span>
-            </div>
-            <div className="p-3 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color }}>
-              {txt || <span className="text-text-dim italic">warming up…</span>}
-              <span className="inline-block w-1.5 h-3 ml-0.5 animate-pulse align-middle" style={{ background: color }} />
-            </div>
-          </div>
-        );
-      })()}
-      {shown.map((s) => {
-        const color = colorForAlpha(s.alpha, maxAlpha);
-        const raw = s.alpha === 0;
-        return (
-          <div
-            key={s.alpha}
-            className="pointer-events-auto backdrop-blur-sm border flex flex-col max-h-36"
-            style={{ borderColor: `${color}55`, background: raw ? "rgba(22,27,33,0.8)" : `${color}0d` }}
-          >
-            <div className="border-b px-3 py-1.5 font-display text-[9px] tracking-widest flex items-center justify-between" style={{ borderColor: `${color}33`, color }}>
-              <span>{raw ? "the subject speaks · raw" : interventionLabel(s)}</span>
-              <span className="normal-case tracking-normal italic text-text-dim">
-                {s.stopped_reason === "max" ? "⟳ looped / truncated" : `${s.n_tokens} tok`}
-              </span>
-            </div>
-            <div
-              className="p-3 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
-              style={{ color, textShadow: raw ? undefined : `0 0 6px ${color}40` }}
-            >
-              {s.text || <span className="text-text-dim italic">— empty —</span>}
-            </div>
-          </div>
         );
       })}
     </div>
