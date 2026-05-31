@@ -40,12 +40,17 @@ function signature(coords: number[][]): [number, number, number] {
 }
 
 // Sample the radius profile r(θ) once; the animation only rotates/breathes it.
-function radiusProfile(series: TripSeries, samples: number): Float32Array {
+// `dose` ∈ [0,1] = this series' dose strength (|α|/maxα): it deepens the
+// directional overtones and adds fine structure, so SAME-direction tiles at
+// different α look distinct (the direction sets the pattern; the dose sets how
+// far off-manifold / how warped it is). Raw (dose 0) → clean spectral rosette.
+function radiusProfile(series: TripSeries, samples: number, dose: number): Float32Array {
   const spec = series.spectrum.length ? series.spectrum : [1];
   const s0 = spec[0] || 1;
   const sig = signature(series.coords);
   const smax = Math.max(Math.abs(sig[0]), Math.abs(sig[1]), Math.abs(sig[2]), 1e-9);
-  const sn = [sig[0] / smax, sig[1] / smax, sig[2] / smax];
+  const sn = [sig[0] / smax, sig[1] / smax, sig[2] / smax]; // direction pattern (real)
+  const depth = 0.25 + 0.85 * dose; // overtone depth grows with dose
   const r = new Float32Array(samples);
   let rmax = 1e-9;
   for (let k = 0; k < samples; k++) {
@@ -57,8 +62,10 @@ function radiusProfile(series: TripSeries, samples: number): Float32Array {
       v += 0.5 * amp * Math.cos((i + 1) * th + phi);
     }
     for (let j = 0; j < OVERN.length; j++) { // directional fingerprint (real)
-      v += 0.4 * Math.abs(sn[j]) * Math.cos(OVERN[j] * th + (sn[j] < 0 ? Math.PI : 0) + j);
+      v += depth * Math.abs(sn[j]) * Math.cos(OVERN[j] * th + (sn[j] < 0 ? Math.PI : 0) + j);
     }
+    // dose-driven fine ripple: higher dose = more off-manifold = spikier
+    v += 0.18 * dose * Math.cos((7 + Math.round(3 * dose)) * th + sn[2] * Math.PI);
     r[k] = v;
     if (v > rmax) rmax = v;
   }
@@ -81,14 +88,17 @@ function MandalaCanvas({ series, maxAlpha, size = 156 }: {
     if (!ctx) return;
     ctx.scale(dpr, dpr);
 
+    const dose = Math.min(1, Math.abs(series.alpha) / Math.max(1, maxAlpha));
     const samples = 720;
-    const r = radiusProfile(series, samples);
+    const r = radiusProfile(series, samples, dose);
     let rmean = 0;
     for (let k = 0; k < samples; k++) rmean += r[k];
     rmean /= samples;
 
     const sig = signature(series.coords);
-    const twist = Math.tanh(sig[0] + sig[1] + sig[2]) * 1.6;
+    // chirality from the direction; its magnitude grows with the dose so
+    // stronger doses swirl harder (distinguishes same-direction α tiles).
+    const twist = Math.tanh(sig[0] + sig[1] + sig[2]) * (0.6 + 1.4 * dose);
     // Colour is the α colour (page-consistent: amber raw → cyan/violet dosed).
     // Off-manifold drift lives in the caption + the 3D scene's own colour mode.
     const base = colorForAlpha(series.alpha, maxAlpha);

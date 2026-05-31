@@ -305,16 +305,31 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
   const [text, setText] = useState("");
   const [mode, setMode] = useState<TripMode>("ablate");
   const [emotions, setEmotions] = useState<string[]>([]);
+  const [uncharted, setUncharted] = useState<string[]>([]);
   const [emotion, setEmotion] = useState("awe");
   useEffect(() => {
-    fetchDoseEmotions().then((es) => {
-      if (es.length) {
-        setEmotions(es);
-        if (!es.includes(emotion)) setEmotion(es[0]);
+    fetchDoseEmotions().then((p) => {
+      if (p.emotions.length) {
+        setEmotions(p.emotions);
+        setUncharted(p.uncharted);
+        if (!p.emotions.includes(emotion)) setEmotion(p.emotions[0]);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const named = emotions.filter((e) => !uncharted.includes(e));
+  const doseBtn = (e: string) => (
+    <button
+      key={e}
+      type="button"
+      onClick={() => setEmotion(e)}
+      className={`px-2.5 py-1 border text-[10px] font-mono lowercase transition-colors cursor-pointer ${
+        emotion === e ? "border-cyan text-cyan bg-cyan/10" : "border-rule text-text-dim hover:text-cyan"
+      }`}
+    >
+      {e}
+    </button>
+  );
   const modeBtn = (m: TripMode, title: string, sub: string) => (
     <button
       type="button"
@@ -357,20 +372,22 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
       </div>
 
       {mode === "steer" && emotions.length > 0 && (
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="text-text-dim text-[10px] tracking-widest font-display">DOSE WITH:</span>
-          {emotions.map((e) => (
-            <button
-              key={e}
-              type="button"
-              onClick={() => setEmotion(e)}
-              className={`px-2.5 py-1 border text-[10px] font-mono lowercase transition-colors cursor-pointer ${
-                emotion === e ? "border-cyan text-cyan bg-cyan/10" : "border-rule text-text-dim hover:text-cyan"
-              }`}
-            >
-              {e}
-            </button>
-          ))}
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-text-dim text-[10px] tracking-widest font-display">DOSE WITH:</span>
+            {named.map(doseBtn)}
+          </div>
+          {uncharted.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
+              <span
+                className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
+                title="Directions orthogonal to the named-emotion subspace. NOT emotions — off-manifold states the model can't put into words (the token head renders them as gibberish; only the NLA decoder reads them). Blade-Runner-named. See /fine-print."
+              >
+                UNCHARTED <span className="normal-case tracking-normal italic text-text-dim/70">· non-human-readable directions, not emotions</span>:
+              </span>
+              {uncharted.map(doseBtn)}
+            </div>
+          )}
         </div>
       )}
 

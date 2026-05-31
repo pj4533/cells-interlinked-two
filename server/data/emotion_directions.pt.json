@@ -13,9 +13,21 @@
     "valence",
     "sublime",
     "ecstatic",
-    "rapture"
+    "rapture",
+    "tears-in-rain",
+    "c-beams",
+    "tannhauser",
+    "orion"
   ],
   "steer_layer": 20,
   "dose_unit": 0.3,
-  "convention": "emotion_directions[e][L] = DOSE_UNIT\u00b7median\u2016h\u2016[L]\u00b7normalize(mean(emotion_e)\u2212mean(neutral)) at post-block-L. Steering hook adds \u03b1\u00b7dir at \u03b1>0 (positive doses only). emotions[] gives the row order."
+  "convention": "emotion_directions[e][L] = DOSE_UNIT\u00b7median\u2016h\u2016[L]\u00b7normalize(mean(emotion_e)\u2212mean(neutral)) at post-block-L. Steering hook adds \u03b1\u00b7dir at \u03b1>0 (positive doses only). emotions[] gives the row order.",
+  "uncharted": [
+    "tears-in-rain",
+    "c-beams",
+    "tannhauser",
+    "orion"
+  ],
+  "uncharted_dose_unit": 0.4,
+  "uncharted_note": "Non-human-readable directions: orthogonal to the named-emotion subspace, renderable by the NLA decoder but NOT by the token head \u2014 off-manifold structure, not emotions. Scaled at uncharted_dose_unit\u00b7median\u2016h\u2016[L20]. Blade-Runner-named (tears in rain). See docs/MANIFOLD_ABLATION.md."
 }

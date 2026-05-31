@@ -129,10 +129,18 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
 
 @router.get("/dose_emotions")
 async def dose_emotions(request: Request) -> dict:
-    """The positive-emotion palette available for steer ("dose") mode, so the
-    setup screen can render a picker. Empty list ⇒ dose mode unavailable."""
+    """The dose palette for steer mode, so the setup screen can render a picker.
+    `emotions` = all selectable names; `uncharted` = the subset that are NOT
+    emotions but non-human-readable off-manifold directions (so the UI can group
+    + caveat them honestly). Empty `emotions` ⇒ dose mode unavailable."""
     names = getattr(request.app.state, "emotion_names", []) or []
-    return {"available": bool(names), "emotions": list(names)}
+    uncharted: list[str] = []
+    try:
+        sc = json.loads((settings.db_path.parent / "emotion_directions.pt.json").read_text())
+        uncharted = [n for n in sc.get("uncharted", []) if n in names]
+    except Exception:
+        uncharted = []
+    return {"available": bool(names), "emotions": list(names), "uncharted": uncharted}
 
 
 async def _execute_trip(

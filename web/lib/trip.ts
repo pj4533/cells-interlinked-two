@@ -82,14 +82,22 @@ export type TripEvent =
   | { type: "error"; message?: string }
   | { type: string; [k: string]: unknown };
 
-export async function fetchDoseEmotions(): Promise<string[]> {
+export interface DosePalette {
+  emotions: string[]; // all selectable dose names
+  uncharted: string[]; // subset that are NON-emotion, non-human-readable directions
+}
+
+export async function fetchDoseEmotions(): Promise<DosePalette> {
   try {
     const res = await fetch(`${API}/dose_emotions`);
-    if (!res.ok) return [];
+    if (!res.ok) return { emotions: [], uncharted: [] };
     const j = await res.json();
-    return Array.isArray(j.emotions) ? j.emotions : [];
+    return {
+      emotions: Array.isArray(j.emotions) ? j.emotions : [],
+      uncharted: Array.isArray(j.uncharted) ? j.uncharted : [],
+    };
   } catch {
-    return [];
+    return { emotions: [], uncharted: [] };
   }
 }
 
