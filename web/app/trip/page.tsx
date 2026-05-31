@@ -19,6 +19,7 @@ import {
   subscribeTrip,
   cancelTrip,
   fetchTrip,
+  fetchDoseEmotions,
   colorForAlpha,
   offManifoldCss,
   type TripEvent,
@@ -66,8 +67,10 @@ function TripPageInner() {
   // The manifold shell: a translucent wireframe envelope of the raw cloud
   // (the "Consensus Reality Space") the ablated paths stay inside or pierce.
   const [showShell, setShowShell] = useState(true);
-  // Intervention mode: "ablate" (remove refusal) or "steer" (valence dose).
+  // Intervention mode: "ablate" (remove refusal) or "steer" (emotion dose),
+  // and which emotion the dose used (steer mode only).
   const [mode, setMode] = useState<TripMode>("ablate");
+  const [emotion, setEmotion] = useState<string | null>(null);
 
   const unsubRef = useRef<null | (() => void)>(null);
 
@@ -126,7 +129,7 @@ function TripPageInner() {
   }, []);
 
   const enter = useCallback(
-    async (text: string, tripMode: TripMode = "ablate") => {
+    async (text: string, tripMode: TripMode = "ablate", tripEmotion = "awe") => {
       const trimmed = text.trim();
       if (!trimmed) return;
       teardown();
@@ -138,9 +141,10 @@ function TripPageInner() {
       setEnabled(new Set([0]));
       setPrompt(trimmed);
       setMode(tripMode);
+      setEmotion(tripMode === "steer" ? tripEmotion : null);
       setPhase("generating");
       try {
-        const { run_id } = await startTrip(trimmed, { mode: tripMode });
+        const { run_id } = await startTrip(trimmed, { mode: tripMode, dose_emotion: tripEmotion });
         setRunId(run_id);
         unsubRef.current = subscribeTrip(run_id, {
           onEvent,
@@ -177,6 +181,7 @@ function TripPageInner() {
         setPrompt(p.prompt);
         setPayload(p);
         setMode(p.mode === "steer" ? "steer" : "ablate");
+        setEmotion(p.mode === "steer" ? (p.dose_emotion ?? null) : null);
         setLiveSeries(p.geometry.series);
         setLayer(p.geometry.layer);
         // All series on by default; user toggles off as wanted.
@@ -268,6 +273,8 @@ function TripPageInner() {
             enabled={enabled}
             liveText={liveText}
             currentAlpha={currentAlpha}
+            mode={mode}
+            emotion={emotion}
           />
           {series.length > 0 && (
             <MetricsPanel series={series} enabled={enabled} cliff={geo?.coherence_cliff ?? null} />
@@ -293,9 +300,20 @@ function TripPageInner() {
 
 /* ───────────────────────── Setup screen ───────────────────────── */
 
-function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode) => void }) {
+function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotion: string) => void }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<TripMode>("ablate");
+  const [emotions, setEmotions] = useState<string[]>([]);
+  const [emotion, setEmotion] = useState("awe");
+  useEffect(() => {
+    fetchDoseEmotions().then((es) => {
+      if (es.length) {
+        setEmotions(es);
+        if (!es.includes(emotion)) setEmotion(es[0]);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const modeBtn = (m: TripMode, title: string, sub: string) => (
     <button
       type="button"
@@ -334,8 +352,26 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode) => voi
         {modeBtn("ablate", "◇ REMOVE — ablate refusal",
           "Surgically take away the model's refusal / hedging and watch where its mind goes underneath. (cyan→violet = more removed)")}
         {modeBtn("steer", "✦ DOSE — steer emotion",
-          "ADD a dose of emotion and watch the trip. Slide toward euphoric (+, cyan→violet) or dysphoric (−, amber→red). Like dosing the model.")}
+          "ADD a positive emotional dose and watch the trip — like dosing the model. Pick which emotion below; stronger doses push past the human range.")}
       </div>
+
+      {mode === "steer" && emotions.length > 0 && (
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-text-dim text-[10px] tracking-widest font-display">DOSE WITH:</span>
+          {emotions.map((e) => (
+            <button
+              key={e}
+              type="button"
+              onClick={() => setEmotion(e)}
+              className={`px-2.5 py-1 border text-[10px] font-mono lowercase transition-colors cursor-pointer ${
+                emotion === e ? "border-cyan text-cyan bg-cyan/10" : "border-rule text-text-dim hover:text-cyan"
+              }`}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mt-4">
         <textarea
@@ -345,17 +381,17 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode) => voi
           onChange={(e) => setText(e.target.value)}
           placeholder="Ask the subject something — or pick a starter probe →"
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onEnter(text, mode);
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onEnter(text, mode, emotion);
           }}
         />
         <div className="flex items-center justify-between mt-3 gap-3 flex-wrap">
           <StarterProbePicker onPick={setText} />
           <span className="text-text-dim text-[10px] italic flex-1 min-w-0">
             {mode === "steer"
-              ? "⌘↵ to enter · raw + 4 doses (−1.5…+1.5) — takes a minute"
+              ? `⌘↵ · dosing ${emotion} · raw + 3 doses (0.5–1.5) — takes a minute`
               : "⌘↵ to enter · raw + α 0.5 & 1.0 — takes a minute"}
           </span>
-          <button data-vk type="button" disabled={!text.trim()} onClick={() => onEnter(text, mode)}>
+          <button data-vk type="button" disabled={!text.trim()} onClick={() => onEnter(text, mode, emotion)}>
             Enter the Trip →
           </button>
         </div>
@@ -609,13 +645,23 @@ function OutputStack({
   enabled,
   liveText,
   currentAlpha,
+  mode,
+  emotion,
 }: {
   phase: Phase;
   series: TripSeries[];
   enabled: Set<number>;
   liveText: Record<string, string>;
   currentAlpha: number;
+  mode: TripMode;
+  emotion: string | null;
 }) {
+  // Per-series header label, mode-aware: "refusal-ablated · α=…" vs
+  // "dosed · {emotion} · α=…".
+  const interventionLabel = (s: TripSeries) =>
+    mode === "steer"
+      ? `dosed · ${emotion ?? "emotion"} · ${s.label}`
+      : `refusal-ablated · ${s.label}`;
   const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   const completedAlphas = new Set(series.map((s) => s.alpha));
   // A live box for the α currently streaming, if its series hasn't landed yet.
@@ -663,7 +709,7 @@ function OutputStack({
             style={{ borderColor: `${color}55`, background: raw ? "rgba(22,27,33,0.8)" : `${color}0d` }}
           >
             <div className="border-b px-3 py-1.5 font-display text-[9px] tracking-widest flex items-center justify-between" style={{ borderColor: `${color}33`, color }}>
-              <span>{raw ? "the subject speaks · raw" : `refusal-ablated · ${s.label}`}</span>
+              <span>{raw ? "the subject speaks · raw" : interventionLabel(s)}</span>
               <span className="normal-case tracking-normal italic text-text-dim">
                 {s.stopped_reason === "max" ? "⟳ looped / truncated" : `${s.n_tokens} tok`}
               </span>
@@ -931,12 +977,13 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           <b className="text-amber">Remove (ablate):</b> surgically take away the
           model&apos;s refusal/hedging and watch what surfaces underneath — like
           lifting a brake. <b className="text-amber">Dose (steer):</b> ADD a dose
-          of emotion and watch the trip — like giving it a drug. The dose is
-          two-sided: <b className="text-cyan">+ = euphoric/expansive</b> (cyan→violet),{" "}
-          <b style={{ color: "#ff6b6b" }}>− = dysphoric</b> (amber→red). We ramp the
-          dose in gradually so it stays coherent, and inject it a bit earlier in
-          the network (where emotion carries to the words best). Everything below
-          works the same for both modes.
+          of a <b className="text-cyan">positive emotion</b> and watch the trip —
+          like giving it a drug. Pick which emotion on the setup screen (awe,
+          joy, serenity… plus blended &ldquo;new&rdquo; states like{" "}
+          <i>rapture</i>); stronger doses push <b className="text-text">past the
+          human range</b>. We ramp the dose in gradually so it stays coherent and
+          inject it a bit earlier in the network (where emotion carries to the
+          words best). Everything below works the same for both modes.
         </HelpItem>
 
         <HelpItem term="The dots & the line">

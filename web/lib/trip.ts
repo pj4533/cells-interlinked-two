@@ -61,7 +61,8 @@ export interface TripPayload {
   run_id: string;
   prompt: string;
   seed: number | null;
-  mode?: "ablate" | "steer"; // "ablate" = remove refusal; "steer" = valence dose
+  mode?: "ablate" | "steer"; // "ablate" = remove refusal; "steer" = emotion dose
+  dose_emotion?: string | null; // which positive emotion was dosed (steer mode)
   direction_variant: string;
   alphas: number[];
   geometry: TripGeometry;
@@ -81,9 +82,20 @@ export type TripEvent =
   | { type: "error"; message?: string }
   | { type: string; [k: string]: unknown };
 
+export async function fetchDoseEmotions(): Promise<string[]> {
+  try {
+    const res = await fetch(`${API}/dose_emotions`);
+    if (!res.ok) return [];
+    const j = await res.json();
+    return Array.isArray(j.emotions) ? j.emotions : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function startTrip(
   prompt: string,
-  opts?: { alphas?: number[]; temperature?: number; seed?: number; mode?: TripMode },
+  opts?: { alphas?: number[]; temperature?: number; seed?: number; mode?: TripMode; dose_emotion?: string },
 ): Promise<{ run_id: string }> {
   const res = await fetch(`${API}/trip`, {
     method: "POST",

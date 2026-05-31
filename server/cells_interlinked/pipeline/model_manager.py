@@ -71,9 +71,14 @@ class ModelManager:
         self.refusal_subspace: torch.Tensor | None = None
         self.refusal_subspace_meta: dict[str, Any] | None = None
         # Optional valence steering vector ([num_layers+1, d_model], pre-scaled
-        # so a trip "dose" of α=1.0 is a standard dose). Enables Trips steering
-        # ("dose") mode. None when the file is absent.
+        # so a trip "dose" of α=1.0 is a standard dose). Legacy bidirectional
+        # axis; superseded by the positive-emotion palette below.
         self.valence_direction: torch.Tensor | None = None
+        # Positive-emotion dose palette ([E, num_layers+1, d_model]) + the
+        # ordered emotion names. Enables Trips "dose" mode (pick an emotion,
+        # positive doses only). None when the file is absent.
+        self.emotion_directions: torch.Tensor | None = None
+        self.emotion_names: list[str] = []
         # Lock so we don't race two probes trying to swap models at the
         # same time. The probe registry already serializes runs, but
         # we hold this lock too for safety in case a non-probe code
@@ -176,9 +181,30 @@ class ModelManager:
                     tuple(vdir.shape), vmeta.get("steer_layer"), vmeta.get("dose_unit"),
                 )
         except FileNotFoundError:
-            logger.info("no valence_direction.pt — Trips 'dose' mode unavailable")
+            logger.info("no valence_direction.pt — (legacy valence axis absent)")
         except Exception:
             logger.exception("failed to load valence_direction.pt; continuing")
+
+        # Positive-emotion dose palette — the active Trips "dose" source.
+        emo_path = settings.db_path.parent / "emotion_directions.pt"
+        try:
+            edir, emeta = load_directions(emo_path)
+            if emeta.get("model_name") != settings.model_name:
+                logger.warning("emotion_directions.pt M mismatch; skipping.")
+            elif emeta.get("d_model") and emeta.get("d_model") != _expected_d_model():
+                logger.warning("emotion_directions.pt d_model mismatch; skipping.")
+            else:
+                self.emotion_directions = edir
+                self.emotion_names = list(emeta.get("emotions", []))
+                logger.info(
+                    "ready: emotion dose palette loaded (shape=%s, emotions=%s, "
+                    "steer_layer=%s)", tuple(edir.shape), self.emotion_names,
+                    emeta.get("steer_layer"),
+                )
+        except FileNotFoundError:
+            logger.info("no emotion_directions.pt — Trips 'dose' mode unavailable")
+        except Exception:
+            logger.exception("failed to load emotion_directions.pt; continuing")
 
         logger.info(
             "ModelManager ready: M=%s AV=%s (both unloaded; will load on demand)",

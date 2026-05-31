@@ -73,6 +73,8 @@ server/data/*.pt.json
 !server/data/refusal_*.pt.json
 !server/data/valence_direction.pt
 !server/data/valence_direction.pt.json
+!server/data/emotion_directions.pt
+!server/data/emotion_directions.pt.json
 server/data/*.db
 server/data/*.sqlite
 server/data/*.sqlite.*

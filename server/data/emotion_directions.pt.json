@@ -1,0 +1,21 @@
+{
+  "model_name": "google/gemma-3-12b-it",
+  "num_layers": 48,
+  "d_model": 3840,
+  "dtype": "torch.float32",
+  "variant_name": "emotion_palette",
+  "emotions": [
+    "awe",
+    "joy",
+    "serenity",
+    "love",
+    "excitement",
+    "valence",
+    "sublime",
+    "ecstatic",
+    "rapture"
+  ],
+  "steer_layer": 20,
+  "dose_unit": 0.3,
+  "convention": "emotion_directions[e][L] = DOSE_UNIT\u00b7median\u2016h\u2016[L]\u00b7normalize(mean(emotion_e)\u2212mean(neutral)) at post-block-L. Steering hook adds \u03b1\u00b7dir at \u03b1>0 (positive doses only). emotions[] gives the row order."
+}

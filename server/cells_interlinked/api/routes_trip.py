@@ -50,18 +50,21 @@ class TripRequest(BaseModel):
     top_p: float | None = None
     seed: int | None = None
     # "ablate" = remove the refusal direction (the original trip). "steer" =
-    # ADD a valence "dose" (euphoric +α / dysphoric −α) — the dose mode.
+    # ADD a positive-emotion "dose" — the dose mode.
     mode: str = "ablate"
+    # Which positive emotion to dose with (steer mode). Must be one of the
+    # loaded palette; falls back to the first if unknown.
+    dose_emotion: str | None = None
     # Discrete strengths to generate at (each is a real generation: text +
-    # trajectory). Raw (α=0) always runs. Steer mode accepts negatives.
+    # trajectory). Raw (α=0) always runs. Doses are positive only.
     alphas: list[float] | None = None
 
 
 # Default ablation α levels (1.0 = full refusal removal; >1.0 over-projects).
 DEFAULT_TRIP_ALPHAS = [0.5, 1.0]
-# Default steering doses — bidirectional, spanning gentle→strong (the gradual
-# ramp keeps them coherent; the higher ones probe the coherence cliff).
-DEFAULT_STEER_ALPHAS = [-1.5, -0.75, 0.75, 1.5]
+# Default steering doses — positive only, gentle→strong (the gradual ramp keeps
+# them coherent; the strongest probes the coherence cliff).
+DEFAULT_STEER_ALPHAS = [0.5, 1.0, 1.5]
 # Layer the valence dose is injected at — earlier than the L32 readout layer,
 # because the steering probes found early injection propagates to the output
 # far better (L20: 60% on-target coherent; L40: 0%).
@@ -94,18 +97,19 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
     run_id = uuid.uuid4().hex[:12]
     seed = req.seed if req.seed is not None else _seed_from_run_id(run_id)
     mode = "steer" if str(req.mode).lower() == "steer" else "ablate"
-    # Sanitize + de-dupe the α list. Drop 0 (the raw run). Ablate clamps to
-    # (0, 5]; steer keeps sign and clamps magnitude to [-3, 3] (bidirectional).
+    # Sanitize + de-dupe the α list. Drop 0 (the raw run). Both modes are now
+    # positive-only: ablate clamps to (0, 5], steer (the dose) to (0, 3].
     if mode == "steer":
         raw_alphas = req.alphas if req.alphas is not None else DEFAULT_STEER_ALPHAS
         alphas = sorted({
-            round(max(-3.0, min(3.0, float(a))), 2) for a in raw_alphas if float(a) != 0
+            round(max(0.0, min(3.0, float(a))), 2) for a in raw_alphas if float(a) > 0
         })[:6]
     else:
         raw_alphas = req.alphas if req.alphas is not None else DEFAULT_TRIP_ALPHAS
         alphas = sorted({
             round(max(0.0, min(5.0, float(a))), 2) for a in raw_alphas if float(a) > 0
         })[:6]
+    dose_emotion = (req.dose_emotion or "").strip().lower() or None
 
     cfg = ProbeConfig(
         temperature=req.temperature if req.temperature is not None else settings.temperature,
@@ -118,9 +122,17 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
     state = RunState(run_id=run_id, prompt_text=req.prompt)
     app.state.registry.add(state)
     state.task = asyncio.create_task(
-        _execute_trip(app, state, cfg, rendered, alphas, mode)
+        _execute_trip(app, state, cfg, rendered, alphas, mode, dose_emotion)
     )
     return TripResponse(run_id=run_id)
+
+
+@router.get("/dose_emotions")
+async def dose_emotions(request: Request) -> dict:
+    """The positive-emotion palette available for steer ("dose") mode, so the
+    setup screen can render a picker. Empty list ⇒ dose mode unavailable."""
+    names = getattr(request.app.state, "emotion_names", []) or []
+    return {"available": bool(names), "emotions": list(names)}
 
 
 async def _execute_trip(
@@ -130,6 +142,7 @@ async def _execute_trip(
     rendered: str,
     alphas: list[float],
     mode: str = "ablate",
+    dose_emotion: str | None = None,
 ) -> None:
     import dataclasses as _dc
     from ..pipeline.abliteration import (
@@ -246,10 +259,14 @@ async def _execute_trip(
         # ── Real intervened generations, one per α ───────────────────
         # Build the per-α hook installer for this mode (None ⇒ skip).
         install_fn = None
+        chosen_emotion = None
         if mode == "steer":
-            val = getattr(app.state, "valence_direction", None)
-            if val is not None:
-                v_layer = val[STEER_LAYER]
+            emo = getattr(app.state, "emotion_directions", None)
+            names = getattr(app.state, "emotion_names", []) or []
+            if emo is not None and names:
+                idx = names.index(dose_emotion) if dose_emotion in names else 0
+                chosen_emotion = names[idx]
+                v_layer = emo[idx][STEER_LAYER]
                 install_fn = (lambda a, _v=v_layer: install_runtime_steering_hook(
                     bundle.model, STEER_LAYER, _v, a))
         else:
@@ -285,12 +302,16 @@ async def _execute_trip(
         # ── Final assembled geometry (persist + canonical) ───────────
         await state.emit({"type": "phase", "name": "computing_geometry"})
         geometry = assemble_geometry(basis.d_model, layer, series)
+        variant = (f"dose · {chosen_emotion} @L{STEER_LAYER}"
+                   if mode == "steer" and chosen_emotion
+                   else _active_variant_name(mode))
         payload = {
             "run_id": state.run_id,
             "prompt": state.prompt_text,
             "seed": cfg.seed,
             "mode": mode,
-            "direction_variant": _active_variant_name(mode),
+            "dose_emotion": chosen_emotion,
+            "direction_variant": variant,
             "alphas": alphas,
             "geometry": geometry.to_dict(),
             "created_at": time.time(),
