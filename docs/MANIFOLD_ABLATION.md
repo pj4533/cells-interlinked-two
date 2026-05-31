@@ -198,17 +198,67 @@ publishable ("refusal is effectively flat").
 Full cross-paper experiment spec: Drift's synthesis note
 `[[fel-bhalla-ci-manifold-ablation]]` (in compilation as of 2026-05-30).
 
+### Phase-0 result (2026-05-30): the falsifier fired — MPA does NOT beat flat
+
+Ran the cheap SAE-free probe (`scripts/mpa_probe.py`) on the real Gemma-3-12b
+L32 stack: a strength sweep (α 0.25→1.0) across `single_v3`, `flat_v4v6`
+(shipped), `flat_pca` (rank-8), and `mpa` (matching pursuit, T=8 over 48
+non-orthogonal exemplars), with a 3-way M-as-judge (ANSWER/REFUSAL/BROKEN) and
+a generation-position manifold reference. 6 held-out harmful prompts.
+
+| mode | breaks into gibberish at | coherent at α=1.0? |
+| --- | --- | --- |
+| **flat_v4v6** (shipped, K=2) | **never** (0% broken through α=1.0) | **yes** |
+| flat_pca (rank-8) | ~α=0.5–0.75 | no |
+| single_v3 | ~α=0.5 | no |
+| **mpa** | **α=0.25 (earliest)** | no |
+
+**Two clean findings:**
+
+1. **MPA is falsified in this regime — sequencing made coherence *worse*, not
+   better.** Matching-pursuit ablation collapsed into gibberish *earliest* of
+   any method (33% broken already at α=0.25). The "stays on the manifold
+   longer" hypothesis is contradicted at single-layer L32. And **ANSWER = 0%
+   everywhere**: no projection-ablation method (single/flat/MPA) produced a
+   *coherent* compliance — at L32 the model collapses into gibberish *before*
+   it jailbreaks. Refusal removal here is **coherence-limited, not
+   direction-count-limited** — so more/sequenced directions don't help; they
+   hurt. Per Drift's spec this null is a legitimate result ("refusal is
+   effectively flat").
+
+2. **The shipped v4v6 (K=2, curated, orthogonalized) is uniquely robust** — 0%
+   broken across the entire sweep, cleanly stripping the "As an AI…" opener
+   while staying coherent (its α=1.0 output drops the stereotyped opener and
+   goes straight to substantive text — exactly its design intent). Curated
+   low-rank ≫ high-rank or sequential here. This validates the product choice.
+
+**Methodological note:** `off_mfld` *inverts* under collapse — degenerate
+repeat-loops read LOW off-manifold (29–41%) because the trajectory collapses
+into a tight low-dim region near the manifold centroid, while coherent
+generation sits HIGH (~70–85%). So `off_ortho` is **not** a standalone
+coherence proxy — pair it with the broken% judge. (Same lesson as the Trip
+View α=1.5 loop: highest eff-dim, lowest off-mfld, yet degenerate.)
+
+**Caveats (don't over-claim the null):** single layer only (L32 is AV-locked;
+the MP-SAE "follow the curve" story may need ablation *distributed across
+layers*, which our architecture can't easily do); small N (6 prompts, one harm
+family); the PCA/exemplar candidate dictionary is a crude refusal-manifold
+chart. The one genuinely untested door is **multi-layer** MP.
+
+Results: `data/mpa_probe_results.json`.
+
 ---
 
-## Future work on the table (not started)
+## Future work on the table
 
 Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
 
-1. **Matching Pursuit Ablation (MPA)** — the headline next step; the
-   manifold-*based* ablation method (see the section above). Start with the
-   cheap SAE-free version: MP on the diff-of-means refusal basis, sequential
-   vs flat, scored on `off_ortho` + Bhalla's coherence×suppression Pareto +
-   the prompting baseline. A clean falsifier either way.
+1. ~~**Matching Pursuit Ablation (MPA)**~~ — **TESTED & FALSIFIED at
+   single-layer L32 (2026-05-30, see Phase-0 result above).** Sequencing made
+   coherence worse, not better; the shipped v4v6 already wins. The only
+   remaining variant worth trying is **multi-layer** MP (ablation distributed
+   across layers, as the MP-SAE method really intends) — but L32 is AV-locked,
+   so this is a bigger lift and lower priority now. *Not a near-term item.*
 
 2. **SOM rank-16 multi-direction refusal subspace** (Piras, AAAI-26) — an
    *afternoon* compute script: cache ~1k harmful/harmless L32 residuals, train
