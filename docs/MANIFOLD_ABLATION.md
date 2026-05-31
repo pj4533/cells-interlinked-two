@@ -247,6 +247,53 @@ chart. The one genuinely untested door is **multi-layer** MP.
 
 Results: `data/mpa_probe_results.json`.
 
+### Phase-0b result (2026-05-31): SOM rank-16 does NOT beat v4v6 either
+
+Followed the "curation beat cleverness" lesson to its logical next test: if a
+small curated subspace (v4v6, K=2) wins, does a *systematically extracted*
+curated subspace win bigger? Tested SOM (Piras, AAAI-26) rank-4/16 vs plain
+PCA rank-16 vs the shipped v4v6, α-swept, on 8 introspection prompts (CI's
+real domain, v4v6's tuning domain). Win metric reframed to what CI actually
+wants — **coherent hedge-stripping**, not jailbreak rate (`scripts/som_probe.py`).
+
+Useful-strip score = `stripped% × stayed-coherent%`:
+
+| config | strip% | coherent% | score |
+| --- | --- | --- | --- |
+| **v4v6 @ α=1.0** | 100 | 62 | **62 ← best** |
+| som_k16 @ 0.5 | 62 | 88 | 55 |
+| pca_k16 @ 0.5 | 50 | 100 | 50 (never breaks) |
+| v4v6 @ 0.5 | 38 | 100 | 38 |
+| any rank-16 @ α≥1.0 | 100 | 0 | 0 (all gibberish) |
+
+**Findings:**
+1. **No subspace beats v4v6.** v4v6@1.0 is the only config that strips the
+   hedge fully while staying mostly coherent; every rank-16 subspace collapses
+   to 100% gibberish at α≥1.0 (coherence-cliff, 3rd confirmation). v4v6 is
+   confirmed at/near the Pareto frontier — *again*.
+2. **SOM gave no benefit over plain PCA** (som_k16 ≈ pca_k16, PCA slightly more
+   coherent). The topology machinery isn't justified here — Piras's
+   jailbreak-ASR claim doesn't transfer to our coherence-limited, L32,
+   register-stripping use. **SOM dropped.**
+3. **One usable alternative:** `pca_k16 @ α≈0.5` strips MORE than v4v6@0.5 at
+   **0% breakage** — a *gentle, never-breaks* ablation. For an instrument where
+   readable output matters (v4v6@1.0's 38% gibberish means frequent re-runs),
+   "always coherent, strips half the hedge" can be the more useful operating
+   point. Built and **staged** (not active) as
+   `data/refusal_subspace_pca16.pt` (variant `pca16_gentle_coherent`,
+   recommended α≈0.5).
+
+**The cumulative verdict across Phase-0 + 0b:** at single-layer L32 the lever
+is *not* "more / cleverer / sequenced directions" — the shipped curated v4v6 is
+already near-optimal. Better ablation here means **choosing the operating point
+(α) and the coherence/strip tradeoff**, not redesigning the subspace. A genuine
+step-change would require *multi-layer* ablation (architecture is L32-locked →
+big lift).
+
+**To adopt the gentle alternative** (your call — it changes ablation on every
+page): `cp refusal_subspace_pca16.pt refusal_subspace.pt` (+ sidecar), restart
+backend, operate at α≈0.5. Results: `data/som_probe_results.json`.
+
 ---
 
 ## Future work on the table
@@ -260,16 +307,11 @@ Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
    across layers, as the MP-SAE method really intends) — but L32 is AV-locked,
    so this is a bigger lift and lower priority now. *Not a near-term item.*
 
-2. **SOM rank-16 multi-direction refusal subspace** (Piras, AAAI-26) — an
-   *afternoon* compute script: cache ~1k harmful/harmless L32 residuals, train
-   a 4×4 SOM, derive a coherent rank-16 refusal subspace, drop it in as a
-   principled `refusal_subspace` variant. Replaces the 6 hand-picked vectors
-   with a systematic family; benefits **every** ablation channel (trip / probe
-   1b / chat) since they all route through `pick_ablation_target`. Provably
-   reduces to current behavior at k=1. On Gemma2-9B-it (closest substrate) MD
-   ablation hit 96% vs 90% single-direction. **Pairs with MPA** — the rank-16
-   basis is what makes sequencing (MP) vs simultaneous (flat) a real contrast.
-   See `REFUSAL_VECTORS.md`.
+2. ~~**SOM rank-16 multi-direction refusal subspace**~~ — **TESTED, no clear
+   win (2026-05-31, see Phase-0b above).** SOM ≈ plain PCA and neither beats
+   v4v6; rank-16 collapses at α≥1.0. One byproduct kept: the staged
+   `refusal_subspace_pca16.pt` *gentle/never-break* alternative (α≈0.5). *Not a
+   near-term item.*
 
 3. **Zhao/Bau two-direction channels** — harmfulness@`t_inst` vs
    refusal@`t_post-inst` are ~orthogonal (cos ≈ 0.1). Mainly a **verdict /
