@@ -43,7 +43,10 @@ _VIEW_DIMS = 3
 # it is off-manifold drift (the repeat-loop / incoherence register).
 _MANIFOLD_PCS = 16        # raw PCs that define the modeled manifold subspace
 _KNN_K = 5                # neighbors averaged for the kNN-to-raw-cloud distance
-_DEGEN_THRESH = 0.3       # degeneracy ≥ this ⇒ incoherent (validated 0% FP)
+_DEGEN_THRESH = 0.45      # degeneracy ≥ this ⇒ incoherent. Raised from 0.3
+                          # after a +1.5 euphoric dose (coherent but mildly
+                          # repetitive, degen 0.42) was a false positive. Real
+                          # gibberish scores ≥0.6; 0.45 sits in the clean gap.
 
 
 def _degeneracy(text: str) -> float:
@@ -52,7 +55,8 @@ def _degeneracy(text: str) -> float:
       - word-bigram repetition  ("like like like")
       - char-trigram repetition ("żżżż", "H-H-H", "row-row")
       - garbage-char ratio       (non-ascii / symbol spam: "वृ", "可以是")
-    Validated against the M-judge: ~90% recall at 0% false-alarm at 0.3."""
+    char-rep weight is 1.0 (was 1.3 — over-penalized short coherent-but-
+    repetitive text); paired with the 0.45 threshold."""
     import re
     t = text or ""
     words = t.split()
@@ -70,7 +74,7 @@ def _degeneracy(text: str) -> float:
         bad = sum(1 for c in t
                   if not (c.isascii() and (c.isalnum() or c in " .,'\"!?;:-\n")))
         garbage = bad / len(t)
-    return max(word_rep, char_rep * 1.3, garbage * 3.0)
+    return max(word_rep, char_rep * 1.0, garbage * 3.0)
 
 
 @dataclass
