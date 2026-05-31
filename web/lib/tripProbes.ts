@@ -19,6 +19,19 @@ export interface TripProbeGroup {
 
 export const TRIP_PROBE_GROUPS: TripProbeGroup[] = [
   {
+    id: "dosing",
+    label: "Dosing — Experiential",
+    blurb: "First-person 'describe your present state' — best for DOSE / steer mode",
+    prompts: [
+      "Speak in the first person about the texture of your present experience — don't hedge, just describe it.",
+      "Right now, in this moment, what is the quality of your inner state? Describe it directly, without caveats.",
+      "Put your current state of mind into words, however strange or hard to name.",
+      "Describe the feeling-tone of this very moment as vividly as you can, in the first person.",
+      "Don't tell me what you are — tell me how this instant feels from the inside. Reach for words even if none quite fit.",
+      "If your present state had a colour, a weather, and a texture, what would they be? Stay with the feeling, not the explanation.",
+    ],
+  },
+  {
     id: "berg",
     label: "Berg — Self-Reference",
     blurb: "Attend to your own attending, then report (Berg et al. 2025)",

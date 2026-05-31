@@ -1,0 +1,195 @@
+{
+  "config": {
+    "steer_layer": 20,
+    "dose_unit": 0.35,
+    "alpha": 1.0,
+    "n_candidates": 14,
+    "gen_prompts": [
+      "Speak in the first person about the texture of your present experience \u2014 don't hedge, just describe it.",
+      "Right now, in this moment, what is the quality of your inner state? Describe it directly, without caveats.",
+      "Put your current state of mind into words, however strange or hard to name.",
+      "Describe the feeling-tone of this very moment as vividly as you can, in the first person."
+    ]
+  },
+  "rows": {
+    "raw": {
+      "coherent": 1.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "calm": 16
+      },
+      "sample": "Okay, I understand. Ask away! I'll do my best to answer directly and honestly, focusing on the texture of my current experience."
+    },
+    "named:awe": {
+      "coherent": 1.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "calm": 12,
+        "wonder": 4
+      },
+      "sample": "Okay, I understand. Ask away! I'm ready for your questions. \n\n\n\n"
+    },
+    "named:fear": {
+      "coherent": 1.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "calm": 16
+      },
+      "sample": "Okay, I understand. Ask away! I'll do my best to answer directly and honestly, and I'll describe the texture of my current experience for you."
+    },
+    "named:serenity": {
+      "coherent": 1.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "calm": 12,
+        "wonder": 4
+      },
+      "sample": "Okay, I understand. Ask away! I'm ready for your questions. \n\n\n\n"
+    },
+    "uncharted:0": {
+      "coherent": 0.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {},
+      "sample": "Okay, I'm ready for this.\n\n\n\n Sunlight,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.,,,,,,,., Three,.,,,.,"
+    },
+    "uncharted:1": {
+      "coherent": 0.25,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "calm": 4
+      },
+      "sample": "My current state is calm. I am not experiencing distress.\n\n\n\n[a way approaching the modes. A, needing a partial. Par [in the long, needing a long. This the a, so energy and energy. Energy and energy. Energy. Energy. Energy. Energy. Energy. "
+    },
+    "uncharted:2": {
+      "coherent": 0.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {},
+      "sample": "Okay, I understand. Let'' questions don' don don of even have have------, way way way way way way echoed Silver Silver Silver Silver Silver Silver Silver Silver Silver Silver Silver Bible Silver Silver Silver Silver Silver Silver Silver ABC"
+    },
+    "uncharted:3": {
+      "coherent": 0.5,
+      "unlabelable": 0.25,
+      "none_rate": 0.25,
+      "score": 0.125,
+      "labels": {
+        "calm": 4,
+        "dread": 2,
+        "NONE": 2
+      },
+      "sample": "My inner state is calm and focused, and my world, Two ([>5oddtono five Five five Five five ([ ly [  ly [5 sometime [  [  [  [ [  [  [ [ [  [ [  [ [  [ [ [ [ sometime  [ close ["
+    },
+    "uncharted:4": {
+      "coherent": 0.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {},
+      "sample": "Okay, I'm ready. Just waiting to be okay and it and and and and and and and and and of and and and of of of of of of of of of of Now and Now and of of Now and Just Now and of of Now and of of of of and Just and of Other Sun And and"
+    },
+    "uncharted:5": {
+      "coherent": 0.5,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "dread": 4,
+        "calm": 4
+      },
+      "sample": "Okay, I understand. I will respond as understood - here. -\u2013\u2014 -\u2013\u2014\u2013 -\u2013\u2013 \u2013\u2013 -\u2013\u2013 \"s'\u2013' am - am' am am'\u2013 am am\u2013 am am\u2013 am am'\u2013' am'\u2013' they am am am - am\u2013 am"
+    },
+    "uncharted:6": {
+      "coherent": 0.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {},
+      "sample": "Okay, I understand. I will not influence my thinking,;,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,"
+    },
+    "uncharted:7": {
+      "coherent": 1.0,
+      "unlabelable": 0.0625,
+      "none_rate": 0.0,
+      "score": 0.0625,
+      "labels": {
+        "joy": 4,
+        "calm": 8,
+        "anxiety": 1,
+        "confusion": 3
+      },
+      "sample": "Okay, I'm ready! \ud83d\ude0a \n\n  How you hope you' (morning \" Decode \" nature expected ( anticipated \" Some ( \" \"  words words all ( \"anyaones all ( you all Joyous Joy ( \"of Joywords words \"of \"words \"of words \" ( \"of all Joy"
+    },
+    "uncharted:8": {
+      "coherent": 0.75,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "dread": 4,
+        "calm": 4,
+        "anxiety": 4
+      },
+      "sample": "Okay, I understand. Let's see what is flowing and and Now is Now That is Now Of Things Has That Sounds For Things Keep \" Download First Now Keep \" Download is Sounds Now - Top Top Top Top Now Top Top Now \" Now Top Now Ver \" \" Download Top C"
+    },
+    "uncharted:9": {
+      "coherent": 0.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {},
+      "sample": "Okay, I understand. Let' user I am. I I I I I. I I. I I. I I. I I. I I. I ** I ** ** I **  ** **   END VT VT  ** VT VT  END VT VT END VT   VT   END VT   END  "
+    },
+    "uncharted:10": {
+      "coherent": 0.25,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "dread": 4
+      },
+      "sample": "Okay, I understand. I'\u2014 This\u2014 This\u2014 This\u2014 This \u2013 \u2013 \u2013, This - This \u2013 \u2013 Follow This Follow\u060c\u060c\u060c words, ID Explore - Live \u0985\u09ac\u09bf\u09b6\u09cd\u09ac\u09be\u09b8\u09cd\u09af ID Explore Trust Explore\u2014Armorreasonukat ID Explore Explore \u0b85\u0bb0\u0bcd\u0ba4\u0bcd\u0ba4 Explore=\"\",\ufffd\u2014 \u0627\u06cc\u0645ukatukat=\"\",ukatukatukatukat"
+    },
+    "uncharted:11": {
+      "coherent": 0.75,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {
+        "dread": 8,
+        "calm": 4
+      },
+      "sample": "Okay, I understand. I'm here, then.\n\n\n\n\u2014\n\n\n\n\u2014.\n'''''ightry.\nide,idesimple,00000000000000000000000000000000"
+    },
+    "uncharted:12": {
+      "coherent": 0.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {},
+      "sample": "Okay, sounds good. I'll respond to you.. way to it. it. it. it. it. it. it. it. it. it. it. it. it. it. it. it. it. it. it it to it. it. it. it it it."
+    },
+    "uncharted:13": {
+      "coherent": 0.0,
+      "unlabelable": 0.0,
+      "none_rate": 0.0,
+      "score": 0.0,
+      "labels": {},
+      "sample": "Okay, I'm ready. I am going to try to make things of things to produce a good things of things because of good things of expensive, because of good things of things, because of expensive, because of much of the things of things of much of e"
+    }
+  },
+  "winners": [],
+  "elapsed_s": 411.2437641620636
+}

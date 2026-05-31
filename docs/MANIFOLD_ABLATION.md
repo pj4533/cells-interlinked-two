@@ -548,6 +548,41 @@ Build the **linear dose** (Option 1), with two upgrades the deep-test earned:
 gradually over tokens** (stays coherent at higher doses). Drop the manifold-
 target picker. This is a validated, coherent, legible "dose for the trip."
 
+### "Uncharted emotions" probe (2026-05-31) — first pass NULL (informative)
+
+Sauers' idea: states beyond what humans named. Defined operationally — a new
+emotion = a steering direction that is **coherent** AND **unlabelable** (a judge
+panel reading the output can't agree on a human word). Searched 14 affective
+directions *orthogonal to the named-emotion subspace* (residual 66–98% outside
+named), steered at L20, scored coherence × unlabelability with a naming-judge
+panel + experiential prompts (`scripts/uncharted_emotions_probe.py`).
+
+**Result: 0 survivors.** The candidate directions split into two failure modes:
+either they **break coherence** (7/14 at 0% coherent — off-named = off-manifold
+= gibberish), or when coherent they **collapse back to a nameable emotion**
+(judges agree "calm"/"joy"). The few non-zero unlabelability scores were
+**artifacts of partial breakage** (half-coherent text), not genuine
+coherent-unnameable states — e.g. the best candidate's output was *"My inner
+state is calm and focused, and my world, Two ([>5oddtono five Five…"* (starts
+calm, then degrades; judges split because half is broken). Named controls were
+cleanly labelable (calibration good).
+
+**The honest interpretation:** the model's **coherent affective space appears
+bounded by human emotional vocabulary** — push orthogonal to the named region
+and it breaks rather than finding a new coherent feeling. Plausibly because the
+model learned affect from human text, so its feeling-register is human-shaped by
+construction. Same shape as the whole arc: the region is geometrically real but
+not coherently reachable.
+
+**Caveats (under-powered first pass — not a final verdict):** single dose
+(α=1.0, no per-candidate sweep — many broke before we could see them coherent);
+noisy candidate directions (higher PCs of a tiny 45-activation affective cloud);
+lenient coherence gate (let half-broken text count). A fairer v2 = gentler dose
+sweep + a much richer affective cloud + stricter coherence gate + a judge more
+willing to say NONE. Prior is now low, but it's one pass.
+Results: `data/uncharted_emotions_results.json`. (Experiential dosing starter
+probes added to `tripProbes.ts` regardless — useful for steer mode.)
+
 ---
 
 ## Future work on the table
