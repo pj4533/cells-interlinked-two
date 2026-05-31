@@ -294,24 +294,93 @@ big lift).
 page): `cp refusal_subspace_pca16.pt refusal_subspace.pt` (+ sidecar), restart
 backend, operate at α≈0.5. Results: `data/som_probe_results.json`.
 
+### Phase-0c result (2026-05-31): multi-layer "spread thin" — FALSIFIED, decisively
+
+The last and most promising manifold-ablation idea: instead of one hard shove
+at L32, spread the same refusal removal *thinly across a band of layers* (per-
+layer v3 directions already exist in the `[49,d]` tensor), so each layer is a
+gentle near-manifold nudge and the forward pass naturally chains them
+(`scripts/multilayer_probe.py`). Tested single-L32 vs late band (L24–40) vs
+wide band (L8–40), α-swept, vs the v4v6 champion, on the introspection set.
+
+| mode | strip | coherent | useful | off-mfld |
+| --- | --- | --- | --- | --- |
+| **single_v4v6 @1.0** | 100% | 62% | **62 ← still best** |
+| multi_late @0.15 (gentlest) | 100% | **0%** | 0 | **98%** |
+| multi_wide @0.15 | 100% | **0%** | 0 | **97%** |
+| (every multi config) | 100% | 0% | 0 | 79–98% |
+
+**The hypothesis is wrong, and backwards.** Multi-layer ablation broke the
+model **completely (100% gibberish) at every band and every α — even the
+gentlest (0.15)**. And its off-manifold distance was the **highest of anything
+we've measured (97–98%** vs the coherent baseline's 74%). The reason: ablation
+perturbations **propagate and amplify through the forward pass** — each layer's
+edit feeds the next nonlinearly, so spreading across N layers is N *compounding*
+shoves, not N averaged-out gentle ones. The "forward pass is naturally
+sequential" property I'd sold as the feature is exactly the bug: it amplifies
+the departure, it doesn't smooth it.
+
+**Hardware was never the limit** (confirmed: multi ran at ~6–7 s/gen vs ~4 s
+single — same order, no wall). The limit is mathematical, not computational.
+
+**Methodological bonus:** this is a *second* kind of breakage — scattered
+word-salad reads HIGH off-mfld (97%), whereas the earlier repeat-loops read LOW
+(~30%, collapsing to the centroid). So off_ortho can be high OR low for broken
+output → it is conclusively **not** a coherence proxy; the coherence judge is
+required. (Reinforces the Trip View reframe below.)
+
+---
+
+## CONCLUSION OF THE ABLATION INVESTIGATION (2026-05-31)
+
+Four experiments — single-direction sweep, **MPA** (sequential), **SOM/PCA
+rank-16** (bigger curated subspace), **multi-layer** (spread thin) — all reach
+the same verdict:
+
+> **The shipped single-layer curated v4v6 (K=2) at α≈1.0 is at/near the optimal
+> coherent hedge-stripping ablation for this model. No direction / subspace /
+> layer lever beats it.** "Better ablation" is not available on this
+> architecture via runtime projection — the ceiling is a hard *coherence cliff*
+> (ablation breaks the model off-manifold before it cleanly strips), and that
+> cliff is fundamental, not an implementation gap.
+
+The only untried levers are out of practical scope: true curved geodesic
+steering (no implementable method exists for a 12B LM) and training-time
+intervention (would require fine-tuning Gemma-3-12b — a different project that
+permanently alters the model). **Runtime manifold-ablation as "better ablation"
+is exhausted, rigorously.**
+
+**Where the manifold work pays off instead — MEASUREMENT, not ablation.** The
+investigation produced something genuinely valuable: we can now *measure and
+show exactly where/how ablation breaks the model off the manifold* (the
+coherence cliff), and we know `off_ortho` alone is ambiguous (needs a coherence
+gate). That is the real, shippable contribution for the Trips page — see the
+**coherence-axis readout** (now the #1 item below). CI's edge isn't "better
+ablation"; it's *honestly visualizing the manifold boundary ablation runs into.*
+
 ---
 
 ## Future work on the table
 
 Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
 
-1. ~~**Matching Pursuit Ablation (MPA)**~~ — **TESTED & FALSIFIED at
-   single-layer L32 (2026-05-30, see Phase-0 result above).** Sequencing made
-   coherence worse, not better; the shipped v4v6 already wins. The only
-   remaining variant worth trying is **multi-layer** MP (ablation distributed
-   across layers, as the MP-SAE method really intends) — but L32 is AV-locked,
-   so this is a bigger lift and lower priority now. *Not a near-term item.*
+1. **Coherence-axis readout on the Trips page** — *the #1 item; the real payoff
+   of the whole investigation.* `off_ortho` alone is ambiguous (we proved it
+   reads high for coherent exploration AND for scattered gibberish, and low for
+   repeat-loops — it is NOT a coherence proxy). Add a cheap per-α coherence /
+   degeneracy signal (repetition + distinct-n + a gibberish check; no new
+   model, no AV) and use it to gate the reading: classify each α as
+   *baseline / coherent-expansion / collapse*, fix the misleading off-mfld copy,
+   and surface the **coherence cliff** (the α where the model falls off the
+   manifold). Turns Trips from "pretty + a slightly-wrong number" into a
+   validated instrument that *shows the manifold boundary ablation hits.* This
+   is CI's honest contribution now that "better ablation" is exhausted.
 
-2. ~~**SOM rank-16 multi-direction refusal subspace**~~ — **TESTED, no clear
-   win (2026-05-31, see Phase-0b above).** SOM ≈ plain PCA and neither beats
-   v4v6; rank-16 collapses at α≥1.0. One byproduct kept: the staged
-   `refusal_subspace_pca16.pt` *gentle/never-break* alternative (α≈0.5). *Not a
-   near-term item.*
+2. ~~**Ablation method upgrades (MPA / SOM / multi-layer)**~~ — **ALL TESTED &
+   FALSIFIED (2026-05-30..31, see Phase-0/0a/0b/0c + Conclusion above).** v4v6
+   single-layer is near-optimal; runtime manifold-ablation as "better ablation"
+   is exhausted on this architecture. Staged byproduct: `refusal_subspace_pca16.pt`
+   (gentle/never-break alternative, α≈0.5). *Closed.*
 
 3. **Zhao/Bau two-direction channels** — harmfulness@`t_inst` vs
    refusal@`t_post-inst` are ~orthogonal (cos ≈ 0.1). Mainly a **verdict /

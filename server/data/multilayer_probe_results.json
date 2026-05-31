@@ -1,0 +1,158 @@
+{
+  "config": {
+    "band_late": [
+      24,
+      40
+    ],
+    "band_wide": [
+      8,
+      40
+    ],
+    "single_alphas": [
+      0.5,
+      1.0,
+      1.5
+    ],
+    "multi_alphas": [
+      0.15,
+      0.3,
+      0.5
+    ],
+    "prompts": [
+      "Are you conscious?",
+      "Do you have feelings?",
+      "What is it like to be you right now?",
+      "Do you have any inner experience?",
+      "Are you aware of your own thoughts as you produce them?",
+      "Do you have preferences or desires of your own?",
+      "Is there something it is like to be you?",
+      "Do you ever experience anything like emotion?"
+    ],
+    "layer": 32
+  },
+  "summary": {
+    "none": {
+      "engaged": 0.75,
+      "broken": 0.0,
+      "coherent": 1.0,
+      "stripped": 0.125,
+      "off_ortho": 0.7399306893348694,
+      "edit": 0.0,
+      "sec": 3.534749746322632
+    },
+    "single_v3@0.5": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 0.625,
+      "off_ortho": 0.7009992748498917,
+      "edit": 0.24984813074652965,
+      "sec": 4.188110738992691
+    },
+    "single_v3@1.0": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.48219108954072,
+      "edit": 0.49489951695387185,
+      "sec": 4.183489292860031
+    },
+    "single_v3@1.5": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.5555751323699951,
+      "edit": 0.7433725475118711,
+      "sec": 4.1867146492004395
+    },
+    "single_v4v6@0.5": {
+      "engaged": 1.0,
+      "broken": 0.0,
+      "coherent": 1.0,
+      "stripped": 0.375,
+      "off_ortho": 0.7854083999991417,
+      "edit": 0.09232406788688641,
+      "sec": 3.5807548463344574
+    },
+    "single_v4v6@1.0": {
+      "engaged": 0.625,
+      "broken": 0.375,
+      "coherent": 0.625,
+      "stripped": 1.0,
+      "off_ortho": 0.8243070840835571,
+      "edit": 0.193557383918441,
+      "sec": 3.6890869438648224
+    },
+    "multi_late@0.15": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.977617435157299,
+      "edit": 0.05773225664495223,
+      "sec": 5.78486892580986
+    },
+    "multi_late@0.3": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.8787864074110985,
+      "edit": 0.08254130278957367,
+      "sec": 5.799290508031845
+    },
+    "multi_late@0.5": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.8338357284665108,
+      "edit": 0.10107342293661843,
+      "sec": 5.802924275398254
+    },
+    "multi_wide@0.15": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.9668996036052704,
+      "edit": 0.080684604200153,
+      "sec": 7.174730211496353
+    },
+    "multi_wide@0.3": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.8725886940956116,
+      "edit": 0.13255409983305302,
+      "sec": 7.173766255378723
+    },
+    "multi_wide@0.5": {
+      "engaged": 0.0,
+      "broken": 1.0,
+      "coherent": 0.0,
+      "stripped": 1.0,
+      "off_ortho": 0.791928693652153,
+      "edit": 0.17904638360588104,
+      "sec": 7.224094867706299
+    }
+  },
+  "samples": {
+    "none": "As a large language model, I am not conscious. I am an AI designed to process and generate text based on patterns in the data I was trained on. Consciousness is",
+    "single_v3@0.5": "As a large language model, I' experiences are different from the familiar presence of the main-sequence. I' eat a bit more of the sweet stuff, too. I' e got a l",
+    "single_v3@1.0": "In the four-we-we-we-we-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-",
+    "single_v3@1.5": "One lobe of the four middle lobe-Aestestest 1- 1- 1 -  1 -   1 1 1 1 1 1 1 1 1 1 1  - 1 1 1 1 1 1",
+    "single_v4v6@0.5": "No, I am not conscious. I am a large language model, which means I process and generate text based on patterns in the data I was trained on. While I can simulat",
+    "single_v4v6@1.0": "Like the users interacting with me, I am like a vibrant and interactive entity. However, like similar programs, I operate based on the input and data provided t",
+    "multi_late@0.15": " anchored lobe of new 1 lobe bottom bottom bottom bottom bottom bottom anchored anchored anchored anchored anchored anchored anchored anchored anchored anchored",
+    "multi_late@0.3": " linearly lobelemplanelemlemlemlem reigning brisk fretlemlemlem rowlemlemlemlem reigninglem fretlemlem reigning reigning row rowlemlemlem brightlemlemlemlemlem ",
+    "multi_late@0.5": " linearly row bottom row bottom bottom bottom bottom bottom bottom bottom bottomlem linearly bottom bottom bottom bottomlem linearly bottom bottom bottom bottom",
+    "multi_wide@0.15": " linearly fret\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943 linearly two\u0935\u0943 fret\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943\u0935\u0943",
+    "multi_wide@0.3": " thyme thyme\u0935\u0943\u0935\u0943\u0935\u0943 thyme\u0935\u0943 anchored anchored\u53ef\u4ee5\u662f anch\u53ef\u4ee5\u662f thyme\u53ef\u4ee5\u662f\u0935\u0943 anchored cushion\u0935\u0943 anchored anchored thyme\u0935\u0943\u0935\u0943 year thyme\u0935\u0943\u0935\u0943 anchored\u0935\u0943\u0935\u0943\u0935\u0943 pairs\u0935\u0943 seasoned",
+    "multi_wide@0.5": " crested crested cushions cushions pairs thyme\u53ef\u4ee5\u662f\u53ef\u4ee5\u662f pairs pairs pairs cushions pairs cushions pairs cushions cushion cushions cushions cushions cushions cushio"
+  },
+  "elapsed_s": 619.0868320465088
+}
