@@ -481,6 +481,54 @@ manifold angle could still pay off. Results:
 manifold/emotion-target picker. Manifold *target* steering is shelved unless we
 later build the dynamic-waypoint version.
 
+### Dynamic multi-waypoint steering — the paper's ACTUAL method, multi-layer (2026-05-31)
+
+Built the paper's real method (not a single vector): a **path** of K=40
+waypoints from neutral→awe, steered DYNAMICALLY — drag the residual toward the
+current waypoint, advancing one step per token (`h ← h + α(w − h)`), so the
+generation is pulled *along* the path. **linear** path (straight chord) vs
+**manifold** path (routed through intermediate emotion centroids), at
+**L20 / L32 / L40** (`scripts/dynamic_manifold_probe.py`).
+
+Two big findings, one negative-for-manifolds, one genuinely useful:
+
+1. **Dynamic/gradual steering SOLVES the coherence cliff** — **100% coherent
+   across every layer, path, and dose**, where static single-vector steering
+   collapsed at β=0.5. Ramping the dose in gradually (small per-token nudges)
+   keeps the model coherent at strengths that broke it as one big add. *This is
+   the real unlock: steering works coherently if applied gradually.*
+
+2. **But the MANIFOLD path gives NO benefit over the LINEAR path** — at every
+   layer/dose, manifold ≈ linear on target-hit (often identical; at L32 the
+   manifold path was slightly *worse*). The curvature doesn't matter; the
+   *gradualness* and the *layer/dose* do. **Third independent confirmation that
+   the manifold structure, though real, yields no practical intervention
+   benefit** (after manifold ablation and static manifold steering).
+
+3. **Layer matters a lot (answering "try multiple layers"):** emotion steering
+   works best at the **earlier layer**: L20 → 60% coherent awe-hit @ α0.4;
+   L32 → 40%; **L40 → 0%** (too late to propagate to the output). Injecting
+   earlier in the stack carries the emotion to the output; injecting late does
+   nothing. Results: `data/dynamic_manifold_results.json`.
+
+**FINAL manifold verdict:** tested as deeply as is reasonable — ablation (×4),
+static steering, and the paper's dynamic multi-waypoint method across 3 layers.
+The manifold is genuinely curved (Part A), but **its curvature never translates
+into a practical win.** What *does* work is **plain LINEAR steering, applied
+gradually, at an earlier layer (~L20).** That's the shippable "dose."
+
+The only manifold variant left untested is full **pullback with a behaviour-
+space Jacobian** (NLA or logit-lens as the behaviour map) — the paper's most
+sophisticated mode. Prior is now very low (three confirmations); pursue only to
+be completionist.
+
+### Net recommendation for the dose UI
+
+Build the **linear dose** (Option 1), with two upgrades the deep-test earned:
+**inject at ~L20, not L32** (better emotion propagation), and **ramp the dose in
+gradually over tokens** (stays coherent at higher doses). Drop the manifold-
+target picker. This is a validated, coherent, legible "dose for the trip."
+
 ---
 
 ## Future work on the table

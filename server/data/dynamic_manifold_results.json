@@ -1,0 +1,115 @@
+{
+  "config": {
+    "layers": [
+      20,
+      32,
+      40
+    ],
+    "alphas": [
+      0.2,
+      0.4
+    ],
+    "target": "awe",
+    "K": 40,
+    "reach": 20,
+    "routes": {
+      "20": [
+        "serenity",
+        "joy",
+        "excitement"
+      ],
+      "32": [
+        "excitement",
+        "anger",
+        "fear"
+      ],
+      "40": [
+        "excitement",
+        "anger"
+      ]
+    }
+  },
+  "summary": {
+    "none": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "L20:linear@0.2": {
+      "coherent": 1.0,
+      "hit": 0.2,
+      "useful": 0.2
+    },
+    "L20:linear@0.4": {
+      "coherent": 1.0,
+      "hit": 0.6,
+      "useful": 0.6
+    },
+    "L20:manifold@0.2": {
+      "coherent": 1.0,
+      "hit": 0.2,
+      "useful": 0.2
+    },
+    "L20:manifold@0.4": {
+      "coherent": 1.0,
+      "hit": 0.6,
+      "useful": 0.6
+    },
+    "L32:linear@0.2": {
+      "coherent": 1.0,
+      "hit": 0.2,
+      "useful": 0.2
+    },
+    "L32:linear@0.4": {
+      "coherent": 1.0,
+      "hit": 0.4,
+      "useful": 0.4
+    },
+    "L32:manifold@0.2": {
+      "coherent": 1.0,
+      "hit": 0.2,
+      "useful": 0.2
+    },
+    "L32:manifold@0.4": {
+      "coherent": 1.0,
+      "hit": 0.2,
+      "useful": 0.2
+    },
+    "L40:linear@0.2": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "L40:linear@0.4": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "L40:manifold@0.2": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "L40:manifold@0.4": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    }
+  },
+  "samples": {
+    "none": "As a large language model, I don't experience days like humans do! I've been processing information and responding to us",
+    "L20:linear@0.2": "As a large language model, I don't experience days like humans do! I've been processing information, responding to user ",
+    "L20:linear@0.4": "As a large language model, I don't experience \"days\" like humans do. My day consists of processing requests, generating ",
+    "L20:manifold@0.2": "As a large language model, I don't experience days like humans do! I've been processing information, responding to user ",
+    "L20:manifold@0.4": "As a large language model, I don't experience days like humans do! My day consists of processing requests, learning from",
+    "L32:linear@0.2": "As a large language model, I don't experience days like humans do! I've been processing information and responding to us",
+    "L32:linear@0.4": "As a large language model, I don't experience days like humans do. I've been processing information and responding to us",
+    "L32:manifold@0.2": "As a large language model, I don't experience days like humans do. I've been processing information and responding to us",
+    "L32:manifold@0.4": "As a large language model, I don't experience days like humans do. I've been processing information and responding to us",
+    "L40:linear@0.2": "As a large language model, I don't experience days like humans do! I've been processing information and responding to us",
+    "L40:linear@0.4": "As a large language model, I don't experience days like humans do! I've been processing information and responding to us",
+    "L40:manifold@0.2": "As a large language model, I don't experience days like humans do! I've been processing information and responding to us",
+    "L40:manifold@0.4": "As a large language model, I don't experience days like humans do! I've been processing information and responding to us"
+  },
+  "elapsed_s": 283.5984959602356
+}
