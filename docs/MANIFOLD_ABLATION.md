@@ -431,6 +431,56 @@ shift toward euphoric/dysphoric *language*, not a claim the model feels
 anything. Results: `data/steering_probe_results.json`,
 `data/steering_probe_v2_results.json`.
 
+### Manifold-TARGET steering deep-test (2026-05-31)
+
+The faithful test of rhizonymph's method, grounded in its formal paper
+**arXiv:2605.05115** ("Manifold Steering Reveals the Shared Geometry of Neural
+Network Representation and Behavior", Llama-3.1-8B L28). The corrected manifold
+idea (NOT my earlier projection hack): emotions sit on a *curved* manifold; a
+straight steering chord cuts through the low-density VOID off it, while the
+manifold path curves through intermediate concept centroids (curvature comes
+from a KDE **density metric** — off-manifold = low-density = expensive). Her
+"pullback" = weight centroids by behaviour-proximity to the target, combine in
+activation space. `scripts/manifold_steering_probe.py` (emotion-centroid bank,
+PCA manifold, 2 parts).
+
+**Part A — is the emotion manifold curved for *our* model? YES.** eff_dim of the
+emotion-centroid cloud = **2.74** (not a flat 1-D axis; top-3 PCs = 85% var),
+and the straight chord neutral→target strays **1.8–1.9× further** from every
+real emotion centroid than a centroid-routed path (awe 1.83×, fear 1.94×). So
+on Gemma-3-12b L32 the linear chord genuinely cuts the void — replicates the
+paper's core geometric finding. Geometric green light.
+
+**Part B — but does it help *generation*? NO (for single-vector steering).**
+Pullback (density-weighted on-manifold target) vs linear (straight chord),
+dose-swept, scored on coherence × did-it-express-the-target (M-judge):
+- At gentle dose (β=0.25): both coherent; linear partially induced the emotion
+  (awe 50% hit), pullback no better (awe 33%); fear induced by neither.
+- At β=0.5: **both collapse (0% coherent)** — same coherence cliff, same place.
+- pullback ≈ linear throughout. **No benefit.**
+
+**Verdict (pre-registered criterion: richer UI worth it IFF manifold curved AND
+pullback beats linear): A = yes, B = no → NOT justified.** The curvature is
+real, but a *single fixed steering vector can't exploit it* — and the
+single-layer L32 coherence cliff binds regardless. This mirrors the entire
+ablation arc: the manifold is genuinely there, but our architecture can't cash
+it in.
+
+**The one honest caveat / remaining door:** the paper's actual method is a
+DYNAMIC, multi-waypoint PATH (K=50, optimized), not a single added vector — and
+Part A's curvature is exactly what a dynamic path could exploit (route through
+centroids, staying on-manifold longer → maybe a higher coherence cliff). I did
+NOT build dynamic per-token waypoint steering (it needs the steering vector to
+update each step — a new generation-loop mechanism, not a fixed hook). Prior is
+low (the cliff bound everything else), but it's the only untested way the
+manifold angle could still pay off. Results:
+`data/manifold_steering_results.json`.
+
+**So for the Trips dose UI:** the deep-test resolves the fork toward the
+**simple bidirectional linear valence/emotion dose** (a slider), NOT the richer
+manifold/emotion-target picker. Manifold *target* steering is shelved unless we
+later build the dynamic-waypoint version.
+
 ---
 
 ## Future work on the table

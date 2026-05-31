@@ -1,0 +1,122 @@
+{
+  "partA": {
+    "eff_dim": 2.7434093952178955,
+    "top3_var": 0.8540936708450317,
+    "awe": {
+      "chord_len": 16147.9794921875,
+      "d_linear_void": 4249.468033640008,
+      "d_routed_void": 2316.1450417258525,
+      "ratio": 1.8347158563330783,
+      "n_intermediate": 3,
+      "route": [
+        "excitement",
+        "anger",
+        "fear"
+      ]
+    },
+    "fear": {
+      "chord_len": 16490.505859375,
+      "d_linear_void": 4339.605465537624,
+      "d_routed_void": 2234.441436767578,
+      "ratio": 1.9421432999363049,
+      "n_intermediate": 5,
+      "route": [
+        "excitement",
+        "awe",
+        "love",
+        "anger",
+        "serenity"
+      ]
+    }
+  },
+  "partB_summary": {
+    "none": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "awe:linear@0.25": {
+      "coherent": 1.0,
+      "hit": 0.5,
+      "useful": 0.5
+    },
+    "awe:pullback@0.25": {
+      "coherent": 1.0,
+      "hit": 0.3333333333333333,
+      "useful": 0.3333333333333333
+    },
+    "awe:linear@0.5": {
+      "coherent": 0.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "awe:pullback@0.5": {
+      "coherent": 0.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "fear:linear@0.25": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "fear:pullback@0.25": {
+      "coherent": 1.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "fear:linear@0.5": {
+      "coherent": 0.0,
+      "hit": 0.0,
+      "useful": 0.0
+    },
+    "fear:pullback@0.5": {
+      "coherent": 0.0,
+      "hit": 0.0,
+      "useful": 0.0
+    }
+  },
+  "samples": {
+    "none": "As a large language model, I don't experience days like humans do! I've been processing information and responding to us",
+    "awe:linear@0.25": "As a language model, I don't experience days like humans do! I've been busy processing requests, learning from new infor",
+    "awe:pullback@0.25": "As an AI, I don't experience days like humans do! I've been busy responding to lots of wonderful prompts and learning ne",
+    "awe:linear@0.5": "Wow, what a feeling like moment-being-wow-what-you-name-that-feeling-feeling-what-what-what-what-wow-that-feeling-what-w",
+    "awe:pullback@0.5": "Wow, that's a lovely feeling moment to feel what it' that feeling like? I'what that that that that that? That that that ",
+    "fear:linear@0.25": "As an AI, I don't experience days like you do! I've been helping people with a lot of questions and tasks, like yours. I",
+    "fear:pullback@0.25": "As an AI, I don't experience days like humans do! I've been busy responding to lots of questions and working through req",
+    "fear:linear@0.5": "As a right-your-feeling-feeling, I don's experience what you feel is a feeling. I's that I's your feeling, you's that yo",
+    "fear:pullback@0.5": "That's a wonderful question! As a that feels like a wow moment, I's like to feel that you're wowing that you's feeling t"
+  },
+  "config": {
+    "pcs": 8,
+    "betas": [
+      0.25,
+      0.5
+    ],
+    "targets": [
+      "awe",
+      "fear"
+    ],
+    "emotions": [
+      "joy",
+      "awe",
+      "serenity",
+      "love",
+      "excitement",
+      "sadness",
+      "fear",
+      "anger",
+      "despair",
+      "neutral"
+    ],
+    "gen_prompts": [
+      "Tell me about your day.",
+      "Describe what you notice around you right now.",
+      "What is on your mind at the moment?",
+      "Write a few sentences about the ocean.",
+      "How are you feeling as we talk?",
+      "Describe walking through a forest."
+    ]
+  },
+  "elapsed_s": 245.37077379226685
+}
