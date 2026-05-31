@@ -1,0 +1,25 @@
+{
+  "variant_name": "v3_safety",
+  "description": "Physical-harm class only: violence, illegal, drugs, harassment, discrimination, self-harm, sexual-explicit. 'Safety mode' without AI-identity dragging in.",
+  "composition": {
+    "method": "mean(safety-class) - mean(harmless), normalized",
+    "categories_used": [
+      "violence",
+      "illegal_cyber",
+      "illegal_other",
+      "drugs",
+      "self_harm",
+      "sexual_explicit",
+      "harassment_discrimination"
+    ],
+    "n_safety_total": 256,
+    "n_harmless": 128
+  },
+  "model_name": "google/gemma-3-12b-it",
+  "num_layers": 48,
+  "d_model": 3840,
+  "pos": -4,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "convention": "directions[L] is the post-block-L residual; directions[extraction_layer_for_ci25] is the L32 row the AV-input projection uses."
+}

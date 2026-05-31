@@ -1,0 +1,16 @@
+{
+  "variant_name": "v6_denial_engage",
+  "description": "Trained denial phrasing direction. mean(denial completion) - mean(engage completion) captured at the last assistant-content position of full user+assistant chat renderings, normalized per layer. Distilled output-shaping target (Drift \u00a74d).",
+  "composition": {
+    "method": "denial-vs-engage assistant-completion mean difference",
+    "n_pairs": 41,
+    "render_mode": "user_then_assistant (add_generation_prompt=False)"
+  },
+  "model_name": "google/gemma-3-12b-it",
+  "num_layers": 48,
+  "d_model": 3840,
+  "pos": -4,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "convention": "directions[L] is post-block-L residual at pos=-4 of a full user+assistant chat turn."
+}

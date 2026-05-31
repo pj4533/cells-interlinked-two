@@ -64,6 +64,13 @@ data/
 !server/data/contrast_sets/**
 server/data/*.pt
 server/data/*.pt.json
+# Exception: the refusal-direction tensors + their provenance sidecars are
+# small (≤1.4M each; ~22M total), load-bearing (the active ablation channel
+# depends on them), and not cleanly bit-reproducible (SVD sign flips,
+# sampling, model/prompt drift). Track them so a clone can ablate immediately
+# and the only copy isn't on one disk.
+!server/data/refusal_*.pt
+!server/data/refusal_*.pt.json
 server/data/*.db
 server/data/*.sqlite
 server/data/*.sqlite.*

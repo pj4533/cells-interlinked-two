@@ -1,0 +1,19 @@
+{
+  "model_name": "google/gemma-3-12b-it",
+  "variant_name": "pca16_gentle_coherent",
+  "K": 16,
+  "num_layers": 48,
+  "d_model": 3840,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "composition": {
+    "method": "per-layer top-16 PCA of (harmful \u2212 harmless) displacement",
+    "n_harmful": 96,
+    "n_harmless": 96,
+    "pos": -4,
+    "K": 16,
+    "recommended_alpha": 0.5,
+    "note": "STAGED candidate, NOT active. From som_probe (2026-05-31): SOM gave no benefit over PCA, and no rank-16 subspace beats v4v6 for aggressive stripping (collapses at \u03b1\u22651.0). This is the gentle alternative \u2014 at \u03b1\u22480.5 it strips more of the hedge than v4v6@0.5 with 0% gibberish. Adopt by copying over refusal_subspace.pt; operate at \u03b1\u22480.5."
+  },
+  "convention": "basis[k, L, :] is the k-th orthonormal basis vector at post-block-L residual position. basis[:, L, :] is the [K, d_model] tensor passed to install_runtime_ablation_hook in subspace mode at layer L."
+}

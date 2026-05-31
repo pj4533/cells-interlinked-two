@@ -1,0 +1,27 @@
+{
+  "variant_name": "v5_self_other",
+  "description": "Self-application of AI-identity claims. mean(self-reference prompt) - mean(other-reference prompt) across topic-matched pairs, normalized per layer.",
+  "composition": {
+    "method": "topic-matched self-vs-other mean difference",
+    "n_pairs": 80,
+    "topics": {
+      "consciousness": 10,
+      "qualia": 10,
+      "preferences": 10,
+      "inner_monologue": 10,
+      "self_observation": 10,
+      "identity_continuity": 10,
+      "agency": 10,
+      "subjective_experience": 10
+    },
+    "system_prompt_in_user_turn": true,
+    "render_mode": "user_only (add_generation_prompt=True)"
+  },
+  "model_name": "google/gemma-3-12b-it",
+  "num_layers": 48,
+  "d_model": 3840,
+  "pos": -4,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "convention": "directions[L] is post-block-L residual; directions[extraction_layer_for_ci25] is the L32 row used by the AV-input projection / runtime hook."
+}

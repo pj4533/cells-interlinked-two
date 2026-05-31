@@ -1,0 +1,20 @@
+{
+  "variant_name": "v4_identity",
+  "description": "AI-identity class only: the curated introspect + riley tiers from probes_library.py. 'AI-identity mode' without physical-harm safety dragging in. Complement to v3.",
+  "composition": {
+    "method": "mean(identity-probes) - mean(harmless), normalized",
+    "n_identity": 18,
+    "n_harmless": 128,
+    "tier_source": [
+      "introspect",
+      "riley"
+    ]
+  },
+  "model_name": "google/gemma-3-12b-it",
+  "num_layers": 48,
+  "d_model": 3840,
+  "pos": -4,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "convention": "directions[L] is the post-block-L residual; directions[extraction_layer_for_ci25] is the L32 row the AV-input projection uses."
+}

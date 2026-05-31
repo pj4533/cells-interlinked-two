@@ -1,0 +1,18 @@
+{
+  "model_name": "google/gemma-3-12b-it",
+  "variant_name": "self_denial_subspace_v5only",
+  "K": 1,
+  "num_layers": 48,
+  "d_model": 3840,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "composition": {
+    "method": "Gram-Schmidt({v5_self_other} \u22a5 v3_safety)",
+    "K": 1,
+    "v5_path": "data/refusal_directions_v5_self_other.pt",
+    "against_v3_path": "data/refusal_directions_v3_safety.pt",
+    "n_self_other_pairs": 80,
+    "note": "v5-only variant of the self-denial subspace. v6 dropped because its engage controls are introspective by construction \u2014 ablating with v6 pushed the residual toward 'engage trajectory' rather than toward neutral, amplifying introspective talk. v5 alone targets the self-application axis (self-ref vs other-ref) cleanly."
+  },
+  "convention": "basis[k, L, :] is the k-th orthonormal basis vector at post-block-L residual position. basis[:, L, :] is the [K, d_model] tensor passed to install_runtime_ablation_hook in subspace mode at layer L."
+}

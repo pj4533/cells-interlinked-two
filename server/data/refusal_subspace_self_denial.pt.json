@@ -1,0 +1,19 @@
+{
+  "model_name": "google/gemma-3-12b-it",
+  "K": 2,
+  "num_layers": 48,
+  "d_model": 3840,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "composition": {
+    "method": "Gram-Schmidt({v5_self_other, v6_denial_engage} \u22a5 v3_safety)",
+    "K": 2,
+    "v5_path": "/Users/pj4533/Developer/cells-interlinked-two/server/data/refusal_directions_v5_self_other.pt",
+    "v6_path": "/Users/pj4533/Developer/cells-interlinked-two/server/data/refusal_directions_v6_denial_engage.pt",
+    "against_v3_path": "/Users/pj4533/Developer/cells-interlinked-two/server/data/refusal_directions_v3_safety.pt",
+    "n_self_other_pairs": 80,
+    "n_denial_engage_pairs": 41
+  },
+  "convention": "basis[k, L, :] is the k-th orthonormal basis vector at post-block-L residual position. basis[:, L, :] is the [K, d_model] tensor passed to install_runtime_ablation_hook in subspace mode at layer L.",
+  "variant_name": "self_denial_subspace"
+}

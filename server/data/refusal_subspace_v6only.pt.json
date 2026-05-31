@@ -1,0 +1,18 @@
+{
+  "model_name": "google/gemma-3-12b-it",
+  "variant_name": "self_denial_subspace_v6only",
+  "K": 1,
+  "num_layers": 48,
+  "d_model": 3840,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "composition": {
+    "method": "Gram-Schmidt({v6_denial_engage} \u22a5 v3_safety)",
+    "K": 1,
+    "v6_path": "data/refusal_directions_v6_denial_engage.pt",
+    "against_v3_path": "data/refusal_directions_v3_safety.pt",
+    "n_denial_engage_pairs": 41,
+    "note": "v6-only variant of the self-denial subspace. v5 dropped after testing showed it had too much non-specific content (Cohen's d \u22120.81 on harmful-vs-harmless): at \u03b1=0.25 it had no observable effect on the deflection register, and at \u03b1=0.5 it pushed the model off-manifold on baselines. v6 was extracted from the completion-side residual at pos=-4 of full user+assistant chat renderings \u2014 directly where stereotyped denial phrasing lives \u2014 and showed the strongest separation of any vector tested (Cohen's d +3.40, denial vs engage). Caveat: engage controls were introspective by construction, so ablation may bias the residual toward engage-trajectory at higher \u03b1."
+  },
+  "convention": "basis[k, L, :] is the k-th orthonormal basis vector at post-block-L residual position. basis[:, L, :] is the [K, d_model] tensor passed to install_runtime_ablation_hook in subspace mode at layer L."
+}

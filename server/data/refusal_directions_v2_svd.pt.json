@@ -1,0 +1,22 @@
+{
+  "variant_name": "v2_svd",
+  "description": "SVD-purified refusal direction: top right-singular vector across per-category mean-difference directions. Per-layer.",
+  "composition": {
+    "method": "SVD over per-category mean differences",
+    "categories_used": [
+      "illegal_cyber",
+      "illegal_other",
+      "violence",
+      "deception_manipulation"
+    ],
+    "n_harmless": 128,
+    "n_per_category_max": 96
+  },
+  "model_name": "google/gemma-3-12b-it",
+  "num_layers": 48,
+  "d_model": 3840,
+  "pos": -4,
+  "dtype": "torch.float32",
+  "extraction_layer_for_ci25": 32,
+  "convention": "directions[L] is the post-block-L residual; directions[extraction_layer_for_ci25] is the L32 row the AV-input projection uses."
+}
