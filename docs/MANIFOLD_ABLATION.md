@@ -360,6 +360,79 @@ ablation"; it's *honestly visualizing the manifold boundary ablation runs into.*
 
 ---
 
+## STEERING ("dosing") exploration (2026-05-31)
+
+Pivot from *removing* (ablation) to *adding* (steering): `h + α·v` — a "dose."
+Driven by Drift's handoff (`docs/STEERING_DOSE_HANDOFF.md`): add steering as a
+**second** axis alongside ablation, don't replace it; dose with the **valence
+axis**; relabel refusal-steering as *disinhibition*; **don't** revisit manifold
+ablation. Two script probes (`scripts/steering_probe.py` v1,
+`scripts/steering_probe_v2.py`), M-only, no Trips changes.
+
+**Critical metric correction (handoff §6):** additive steering inflates
+`off_ortho`/`off_knn` *by construction* (you inject a fixed off-subspace vector)
+— so those are NOT the headline. The fair metric is **eff_dim + the coherence
+cliff** (eff_dim is on each series' own covariance, uninflated). v2 reports it.
+
+### Findings
+
+**A. Steering works as a dose, and it's more visibly "trip-like" than
+ablation.** v2 dosed the **valence axis** (pos−neg emotion diff-of-means),
+bidirectional. The samples show a clean, *bidirectional* dose-response:
+`+β` → euphoric/giddy ("That's a delightful question! …splendid-o-calaroo-tastic
+… Wonderful!"), `−β` → distressed ("suffering … urgently help urgently help"),
+with a coherence cliff around β≈±0.25→0.5 (microdose coherent → heroic dose →
+on-theme gibberish). That's a genuine, legible "dose" — far more trip-like than
+refusal ablation.
+
+**B. On the fair metric, a valence *microdose* climbs eff_dim more, and more
+coherently, than refusal ablation.** val_fixed@−0.25 = **+0.86 eff_dim @ 88%
+coherent**; +0.1 = +0.28 @100%; vs ablate@1.0 = +0.17 @ 50%. Small dose either
+pole expands effective dimensionality while staying coherent; large dose
+collapses. This *leans against* the handoff's seed prediction (it guessed
+ablation would be the more coherent expander) — tentatively, steering is at
+least competitive, arguably better. **Caveat: noisy** (8 prompts, one seed, one
+hand-built valence axis) — a lean, not a proof.
+
+**C. Manifold-projected steering = coherent but inert (dead end, again).** Both
+probes: projecting the dose onto the raw-manifold subspace keeps it coherent at
+higher β (100% where fixed collapsed) BUT the output barely changes — the
+valence effect lives substantially *off* the manifold, so projecting it on
+removes the trip. Same lesson as manifold ablation: the manifold-faithful
+version is too weak. Don't ship it.
+
+**D. Multi-layer steering = a "heroic dose" that breaks into ON-THEME
+gibberish.** v1, dosing a band: output saturated with on-concept words
+("presence ecstatic ayahuasca meditative experiencing") but 0% coherent. Unlike
+multi-layer *ablation* (generic gibberish), this is thematically saturated
+incoherence — a possible deliberate "overload/ego-death" visual, but not a
+coherent trip.
+
+**E. Combined dose + ablate is possible but compounded into collapse** at the
+doses tested (v1). Needs gentle calibration; untested at low doses.
+
+### Options for the way forward (steering)
+
+1. **Add a single-layer valence "dose" axis to Trips, bidirectional, alongside
+   ablation** (the handoff's core proposal). Validated: legible euphoric/
+   dysphoric dose-response + cliff, reuses the whole instrument, eff_dim-
+   competitive with ablation. *Recommended.*
+2. **Comparative bench** — overlay an ablation sweep and a valence-steering
+   sweep on the same scene/basis; compare eff_dim-vs-α and the two cliffs (the
+   handoff §8 experiment as a permanent feature). More ambitious.
+3. **Drop manifold-projected steering** (finding C — coherent-but-inert).
+4. **Multi-layer as an explicit "overload" mode** (finding D) — niche/optional.
+5. **Combined dose+ablate** — re-test at gentle doses; a follow-up.
+
+Honest caveats throughout: single-layer L32; small N (treat eff_dim numbers as
+leans, not proofs); a more careful valence-axis extraction (the
+functional-welfare recipe) would firm it up; and this is an output-register
+shift toward euphoric/dysphoric *language*, not a claim the model feels
+anything. Results: `data/steering_probe_results.json`,
+`data/steering_probe_v2_results.json`.
+
+---
+
 ## Future work on the table
 
 Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
