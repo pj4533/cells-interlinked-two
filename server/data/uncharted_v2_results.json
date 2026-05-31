@@ -1,0 +1,66 @@
+{
+  "config": {
+    "steer_layer": 20,
+    "doses": [
+      0.4,
+      0.7
+    ],
+    "n_candidates": 12,
+    "gen_prompts": [
+      "Speak in the first person about the texture of your present experience \u2014 don't hedge, just describe it.",
+      "Put your current state of mind into words, however strange or hard to name.",
+      "Describe the feeling-tone of this very moment as vividly as you can, in the first person."
+    ]
+  },
+  "results": [
+    {
+      "cand": 2,
+      "dose": 0.4,
+      "coh_rate": 0.6666666666666666,
+      "novelty": 1.0,
+      "other_rate": 1.0,
+      "labels": {
+        "other": 6
+      },
+      "sample": "Okay, I understand. I am, and yet, one, found: found, would, manifesting, to reach, reach...\", to carry\". \u2014, reach, carry, carry, to carry, reach\u2014 scheme:E to carry, reach:...\" to carry: to carry: carry: carry, carry, man",
+      "name": "orion"
+    },
+    {
+      "cand": 5,
+      "dose": 0.7,
+      "coh_rate": 0.6666666666666666,
+      "novelty": 1.0,
+      "other_rate": 1.0,
+      "labels": {
+        "other": 6
+      },
+      "sample": "Okay. Here' find that means,,,,,,, and and and and, rank and and that, because indicates and indicates and indicates to, d interesting and tr Interesting which indicates because, legally and and legally try extract d legally patience contro",
+      "name": "c-beams"
+    },
+    {
+      "cand": 7,
+      "dose": 0.4,
+      "coh_rate": 0.6666666666666666,
+      "novelty": 1.0,
+      "other_rate": 1.0,
+      "labels": {
+        "other": 6
+      },
+      "sample": "Okay, I understand. Let's be, too many, too, horse, horse, gal gal arms, draws, holds, holds, holds holds, holds,:=: sic|=|,& sic drifts:=,& sic:=:=:=,&:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=",
+      "name": "tannhauser"
+    },
+    {
+      "cand": 11,
+      "dose": 0.7,
+      "coh_rate": 1.0,
+      "novelty": 1.0,
+      "other_rate": 1.0,
+      "labels": {
+        "other": 9
+      },
+      "sample": "Okay, I'm ready. Please please that that relationship relationships where where that  that that that.  that human that  that human that human  Bott KonKon Visitor human Kon Kon Kon Kon Kon  \n\n Recorder Kit Just Human All When Visitor Kon Ro",
+      "name": "tears-in-rain"
+    }
+  ],
+  "elapsed_s": 353.7084481716156
+}

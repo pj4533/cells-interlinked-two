@@ -583,6 +583,36 @@ willing to say NONE. Prior is now low, but it's one pass.
 Results: `data/uncharted_emotions_results.json`. (Experiential dosing starter
 probes added to `tripProbes.ts` regardless — useful for steer mode.)
 
+**v2 (2026-05-31) — reframed + better-powered, STRONGER NULL.** PJ's correction:
+unnameability isn't the goal — a useful dose just needs to be coherent + distinct
++ reproducible, and *we* name it (Blade Runner scheme). So v2 made **coherence
+the bar**, novelty (distinctness-from-named) only the ranking, with a gentle
+per-candidate dose sweep + a richer 75-activation affective cloud
+(`scripts/uncharted_emotions_v2.py`). Result: the 4 "survivors" (orion / c-beams
+/ tannhauser / tears-in-rain, all novelty 1.0) were **word-salad my degeneracy
+detector missed** — e.g. *"I am, and yet, one, found: found, would, manifesting,
+to reach, reach… to carry, carry…"*; judges said OTHER because you can't name
+gibberish, which the pipeline mis-scored as novelty. So **0 genuine survivors,
+again.**
+
+**Two robust takeaways:**
+1. **The model's coherent affective space is bounded by (roughly) the named-
+   emotion region.** Directions *orthogonal* to named emotions don't yield new
+   coherent feelings — they break into gibberish. Achievable novelty lives
+   *inside* the named affective span: **blends** (sublime/ecstatic/rapture —
+   coherent, already in the palette) and **extrapolation** (high dose). Genuinely
+   *outside*-the-named directions are not coherently inhabitable in this model
+   (plausibly: affect learned from human text → human-shaped feeling-register).
+2. **Measurement lesson:** the cheap text-only degeneracy score catches
+   *repetition* gibberish but is blind to *semantic* word-salad (varied tokens,
+   no meaning). A truly fair v3 would need an **LLM coherence judge** ("is this
+   coherent English?") — which would cleanly reject these false positives
+   (→ properly 0) but is very unlikely to surface real ones. Prior now low.
+
+So the "new emotions to explore" that actually work = **blends + extrapolation
+(inside the named manifold)**; the truly-uncharted orthogonal ones break.
+Results: `data/uncharted_v2_results.json`.
+
 ---
 
 ## Future work on the table
