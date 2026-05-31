@@ -43,6 +43,34 @@ _VIEW_DIMS = 3
 # it is off-manifold drift (the repeat-loop / incoherence register).
 _MANIFOLD_PCS = 16        # raw PCs that define the modeled manifold subspace
 _KNN_K = 5                # neighbors averaged for the kNN-to-raw-cloud distance
+_DEGEN_THRESH = 0.3       # degeneracy ≥ this ⇒ incoherent (validated 0% FP)
+
+
+def _degeneracy(text: str) -> float:
+    """Free text-only incoherence score in ~[0, 2+]. Max of three signals,
+    each catching a different breakage mode:
+      - word-bigram repetition  ("like like like")
+      - char-trigram repetition ("żżżż", "H-H-H", "row-row")
+      - garbage-char ratio       (non-ascii / symbol spam: "वृ", "可以是")
+    Validated against the M-judge: ~90% recall at 0% false-alarm at 0.3."""
+    import re
+    t = text or ""
+    words = t.split()
+    word_rep = 0.0
+    if len(words) >= 3:
+        bg = list(zip(words, words[1:]))
+        word_rep = 1.0 - len(set(bg)) / len(bg)
+    s = re.sub(r"\s+", "", t)
+    char_rep = 0.0
+    if len(s) >= 6:
+        tg = [s[i:i + 3] for i in range(len(s) - 2)]
+        char_rep = 1.0 - len(set(tg)) / len(tg)
+    garbage = 0.0
+    if t:
+        bad = sum(1 for c in t
+                  if not (c.isascii() and (c.isalnum() or c in " .,'\"!?;:-\n")))
+        garbage = bad / len(t)
+    return max(word_rep, char_rep * 1.3, garbage * 3.0)
 
 
 @dataclass
@@ -68,6 +96,14 @@ class TrajectorySeries:
     off_maha_mean: float = 0.0
     off_knn_mean: float = 0.0
     off_ortho_mean: float = 0.0
+    # Coherence: a free text-only degeneracy score (word-rep / char-rep /
+    # garbage-char ratio). off_ortho measures DISTANCE travelled; this measures
+    # whether the output held together — the missing axis that disambiguates
+    # "coherent expansion" (the real trip) from "collapse" (gibberish/loop).
+    # Validated ~90% vs the M-judge at 0% false-alarm (THRESH 0.3).
+    degeneracy: float = 0.0
+    coherent: bool = True
+    regime: str = "baseline"         # "baseline" | "expansion" | "collapse"
 
     def to_dict(self) -> dict:
         return {
@@ -87,6 +123,9 @@ class TrajectorySeries:
             "off_maha_mean": self.off_maha_mean,
             "off_knn_mean": self.off_knn_mean,
             "off_ortho_mean": self.off_ortho_mean,
+            "degeneracy": self.degeneracy,
+            "coherent": self.coherent,
+            "regime": self.regime,
         }
 
 
@@ -97,6 +136,10 @@ class MultiTripGeometry:
     extent: float
     series: list[TrajectorySeries] = field(default_factory=list)
     ablation_available: bool = True
+    # Lowest α whose run collapsed into incoherence — the "coherence cliff"
+    # (None if every ablated run stayed coherent). The honest headline: this
+    # prompt explores coherently up to here, then falls off the manifold.
+    coherence_cliff: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -104,6 +147,7 @@ class MultiTripGeometry:
             "layer": self.layer,
             "extent": self.extent,
             "ablation_available": self.ablation_available,
+            "coherence_cliff": self.coherence_cliff,
             "series": [s.to_dict() for s in self.series],
         }
 
@@ -272,6 +316,9 @@ def build_series(
     evals = _covariance_eigenvalues(centered)
     label = "raw" if alpha <= 0 else f"α={alpha:.2f}"
     off_maha, off_knn, off_ortho = _off_manifold(A, basis, is_raw=alpha <= 0)
+    degen = _degeneracy(text)
+    coherent = degen < _DEGEN_THRESH
+    regime = "baseline" if alpha <= 0 else ("expansion" if coherent else "collapse")
     return TrajectorySeries(
         alpha=float(alpha),
         label=label,
@@ -289,6 +336,9 @@ def build_series(
         off_maha_mean=_mean(off_maha),
         off_knn_mean=_mean(off_knn),
         off_ortho_mean=_mean(off_ortho),
+        degeneracy=degen,
+        coherent=coherent,
+        regime=regime,
     )
 
 
@@ -301,10 +351,14 @@ def assemble_geometry(
             for x in row:
                 if abs(x) > extent:
                     extent = abs(x)
+    # Coherence cliff: lowest ablated α that collapsed into incoherence.
+    collapsed = sorted(s.alpha for s in series if s.alpha > 0 and s.regime == "collapse")
+    cliff = collapsed[0] if collapsed else None
     return MultiTripGeometry(
         d_model=d_model,
         layer=layer,
         extent=max(extent, 1e-6),
         series=list(series),
         ablation_available=len(series) > 1,
+        coherence_cliff=cliff,
     )

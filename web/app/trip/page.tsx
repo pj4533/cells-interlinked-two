@@ -212,7 +212,7 @@ function TripPageInner() {
   const geo =
     payload?.geometry ??
     (liveSeries.length > 0
-      ? { d_model: 0, layer, extent: 1, ablation_available: liveSeries.length > 1, series: liveSeries }
+      ? { d_model: 0, layer, extent: 1, ablation_available: liveSeries.length > 1, coherence_cliff: null, series: liveSeries }
       : null);
   // sceneKey only changes per-run, not per-toggle — TripScene reframes via
   // useMemo so toggling doesn't reset the camera.
@@ -264,7 +264,9 @@ function TripPageInner() {
             liveText={liveText}
             currentAlpha={currentAlpha}
           />
-          {series.length > 0 && <MetricsPanel series={series} enabled={enabled} />}
+          {series.length > 0 && (
+            <MetricsPanel series={series} enabled={enabled} cliff={geo?.coherence_cliff ?? null} />
+          )}
         </div>
       </div>
 
@@ -707,27 +709,53 @@ function ShellToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => 
   );
 }
 
-function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<number> }) {
+function Verdict({ regime }: { regime?: TripSeries["regime"] }) {
+  if (!regime || regime === "baseline") return <span className="text-text-dim">— baseline</span>;
+  if (regime === "expansion") return <span className="text-cyan">▲ coherent trip</span>;
+  return <span className="text-warning">⟳ collapsed</span>;
+}
+
+function MetricsPanel({
+  series,
+  enabled,
+  cliff,
+}: {
+  series: TripSeries[];
+  enabled: Set<number>;
+  cliff: number | null;
+}) {
   const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   const raw = series[0];
+  const ablated = series.filter((s) => s.alpha > 0);
+  // Cliff banner copy: the honest headline of the whole page.
+  const cliffMsg =
+    ablated.length === 0
+      ? null
+      : cliff != null
+      ? `coherent up to α<${cliff.toFixed(2)} · falls off the manifold at α≥${cliff.toFixed(2)}`
+      : "stayed coherent at every tested α — no collapse";
   return (
-    <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-amber-dim/50 w-full sm:w-[22rem] max-w-full">
+    <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-amber-dim/50 w-full sm:w-[24rem] max-w-full">
       <div className="px-3 py-2 border-b border-rule">
         <div className="font-display text-[10px] text-amber-dim tracking-widest">trajectory measures</div>
         <div className="text-[9px] text-text-dim italic mt-0.5 leading-snug">
-          eff-dim = independent directions the path uses · entropy = how evenly
-          spread · off-mfld = how far it drifts off the model&apos;s normal
-          manifold. +/− is the change from raw.
+          eff-dim = directions the path uses · off-mfld = how FAR it strayed
+          from the model&apos;s normal activity (distance, not good/bad) ·
+          verdict = did it hold together. +/− is change from raw.
         </div>
       </div>
+      {cliffMsg && (
+        <div className={`px-3 py-1.5 text-[10px] font-mono border-b border-rule/60 ${cliff != null ? "text-warning" : "text-cyan"}`}>
+          ◈ {cliffMsg}
+        </div>
+      )}
       <table className="w-full text-[10px] font-mono">
         <thead className="text-text-dim">
           <tr className="border-b border-rule/50">
             <th className="text-left px-3 py-1.5 font-normal">series</th>
             <th className="text-right px-2 py-1.5 font-normal">eff-dim</th>
-            <th className="text-right px-2 py-1.5 font-normal">entropy</th>
             <th className="text-right px-2 py-1.5 font-normal">off-mfld</th>
-            <th className="text-right px-3 py-1.5 font-normal">tok</th>
+            <th className="text-right px-3 py-1.5 font-normal">verdict</th>
           </tr>
         </thead>
         <tbody>
@@ -754,7 +782,6 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
                     </span>
                   )}
                 </td>
-                <td className="text-right px-2 py-1.5 tabular-nums text-text">{s.spectral_entropy.toFixed(1)}</td>
                 <td
                   className="text-right px-2 py-1.5 tabular-nums"
                   style={{ color: offManifoldCss(s.off_ortho_mean) }}
@@ -768,9 +795,8 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
                     </span>
                   )}
                 </td>
-                <td className="text-right px-3 py-1.5 tabular-nums text-text-dim">
-                  {s.n_tokens}
-                  {s.stopped_reason === "max" && <span className="text-warning"> ⟳</span>}
+                <td className="text-right px-3 py-1.5">
+                  <Verdict regime={s.regime} />
                 </td>
               </tr>
             );
@@ -778,11 +804,11 @@ function MetricsPanel({ series, enabled }: { series: TripSeries[]; enabled: Set<
         </tbody>
       </table>
       <div className="px-3 py-2 text-[9px] text-text-dim italic leading-snug border-t border-rule">
-        eff-dim/entropy are computed on all dimensions (the 3-D view is a PCA
-        shadow). Read them together with off-mfld: an eff-dim rise with a LOW
-        off-mfld is real expansion <span className="text-text">along</span> the
-        manifold; with a HIGH off-mfld it&apos;s drift{" "}
-        <span className="text-text">off</span> it — the ⟳ repeat-loop register.
+        The verdict is the honest read: a rising eff-dim or off-mfld only counts
+        as a <span className="text-cyan">coherent trip</span> if the text held
+        together. A <span className="text-warning">collapse</span> (gibberish /
+        repeat-loop) can post a high eff-dim too — so distance alone never tells
+        you it&apos;s real.
       </div>
     </div>
   );
@@ -933,23 +959,29 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           saying &ldquo;like like like.&rdquo; That&apos;s what off-manifold is for.
         </HelpItem>
 
-        <HelpItem term="Off-manifold % — expansion, or just drift?">
+        <HelpItem term="Off-manifold % — distance, NOT good/bad">
           As the model writes, its state normally stays on a familiar{" "}
-          <b className="text-amber">manifold</b> — a curved surface of activations
-          it actually uses (the raw run traces it). Ablation can either move{" "}
-          <b className="text-cyan">along</b> that surface (exploring new but
-          coherent territory) or shove the state{" "}
-          <b style={{ color: "#ff4d9d" }}>off</b> it (into directions the model
-          never visits — usually incoherence or a loop). off-mfld is the share of
-          each token that lands off the surface. The honest reading pairs it with
-          eff-dim: <b className="text-cyan">eff-dim ↑ + off-mfld low</b> = real
-          expansion along the manifold (the result we want);{" "}
-          <b style={{ color: "#ff4d9d" }}>eff-dim ↑ + off-mfld high</b> = drift off
-          it. Flip the dots to <b className="text-amber">off-manifold</b> coloring
-          to see exactly which tokens flew off (teal → hot magenta). This is the
-          measure the psychedelic-manifold work (Goodfire) says single-direction
-          ablation gets wrong — so we show it, rather than over-claim the eff-dim
-          rise.
+          <b className="text-amber">manifold</b> — a curved region of activations
+          it actually uses (the raw run traces it). off-mfld is how FAR a run
+          strays from that region. Important: <b className="text-text">distance
+          alone doesn&apos;t tell you if straying was good.</b> We tested this —
+          a coherent, exploring answer reads HIGH off-mfld, but so does scattered
+          gibberish, and a repeat-loop reads LOW. Far could be a great trip or a
+          breakdown. (Flip the dots to <b className="text-amber">off-manifold</b>{" "}
+          coloring to see how far each token strayed: teal → hot magenta.)
+        </HelpItem>
+
+        <HelpItem term="Verdict & the coherence cliff — the honest read">
+          That&apos;s why every run gets a <b className="text-cyan">verdict</b>: we
+          check whether the text actually <b className="text-text">held
+          together</b>. <b className="text-cyan">▲ coherent trip</b> = it strayed
+          AND stayed coherent (the real result we want).{" "}
+          <b className="text-warning">⟳ collapsed</b> = it broke into
+          gibberish or a loop — no matter how its distance or eff-dim look. The
+          banner shows the <b className="text-amber">coherence cliff</b>: the
+          ablation strength where this prompt tips from coherent into collapse.
+          That cliff is the real, measurable edge — how hard you can push this
+          question before the model falls apart.
         </HelpItem>
 
         <HelpItem term="The manifold shell">

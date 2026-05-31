@@ -27,17 +27,23 @@ export interface TripSeries {
   spectral_entropy: number;
   spectrum: number[];
   stopped_reason: string;
-  // Off-manifold distance from the RAW trajectory (the default manifold),
-  // per token + per-series means. off_ortho ∈ [0,1] is the headline: the
-  // share of each residual's displacement living OUTSIDE the raw-PCA
-  // subspace — directions the model doesn't normally use. High = pushed off
-  // the manifold; low = moved along it. maha/knn kept for reference.
+  // off_ortho ∈ [0,1] = DISTANCE travelled off the raw manifold (share of the
+  // residual's displacement outside the raw-PCA subspace). It is NOT a
+  // good/bad axis: coherent exploration reads HIGH, scattered gibberish also
+  // reads HIGH, and repeat-loops read LOW. Always read it WITH `coherent`.
   off_ortho: number[];
   off_knn: number[];
   off_maha: number[];
   off_ortho_mean: number;
   off_knn_mean: number;
   off_maha_mean: number;
+  // Coherence axis (the disambiguator). degeneracy = free text-only
+  // incoherence score; coherent = degeneracy below threshold; regime is the
+  // honest verdict: baseline (raw) | expansion (strayed AND held together —
+  // the real trip) | collapse (broke into gibberish/loop).
+  degeneracy: number;
+  coherent: boolean;
+  regime: "baseline" | "expansion" | "collapse";
 }
 
 export interface TripGeometry {
@@ -45,6 +51,9 @@ export interface TripGeometry {
   layer: number;
   extent: number;
   ablation_available: boolean;
+  // Lowest ablated α that collapsed into incoherence (null = all coherent).
+  // The honest headline: coherent up to here, then off the cliff.
+  coherence_cliff: number | null;
   series: TripSeries[]; // series[0] = raw
 }
 

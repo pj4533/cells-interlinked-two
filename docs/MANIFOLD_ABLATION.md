@@ -364,17 +364,23 @@ ablation"; it's *honestly visualizing the manifold boundary ablation runs into.*
 
 Roughly in priority order. All are M2-Ultra-runnable; none requires a cloud.
 
-1. **Coherence-axis readout on the Trips page** — *the #1 item; the real payoff
-   of the whole investigation.* `off_ortho` alone is ambiguous (we proved it
-   reads high for coherent exploration AND for scattered gibberish, and low for
-   repeat-loops — it is NOT a coherence proxy). Add a cheap per-α coherence /
-   degeneracy signal (repetition + distinct-n + a gibberish check; no new
-   model, no AV) and use it to gate the reading: classify each α as
-   *baseline / coherent-expansion / collapse*, fix the misleading off-mfld copy,
-   and surface the **coherence cliff** (the α where the model falls off the
-   manifold). Turns Trips from "pretty + a slightly-wrong number" into a
-   validated instrument that *shows the manifold boundary ablation hits.* This
-   is CI's honest contribution now that "better ablation" is exhausted.
+1. ✅ **Coherence-axis readout on the Trips page — SHIPPED (2026-05-31).** The
+   real payoff of the whole investigation. `off_ortho` alone is ambiguous (high
+   for coherent exploration AND scattered gibberish, low for repeat-loops — NOT
+   a coherence proxy). Added a free text-only **degeneracy** signal
+   (`trajectory._degeneracy`: max of word-rep / char-trigram-rep / garbage-char
+   ratio; validated ~90% recall at 0% false-alarm vs the M-judge at threshold
+   0.3 — no new model, no AV). Each series now carries `degeneracy / coherent /
+   regime` (baseline | expansion | collapse) and the geometry carries a
+   `coherence_cliff`. The Trips metrics panel gained a **verdict** column
+   (▲ coherent trip / ⟳ collapsed) + a **cliff banner** ("coherent up to
+   α<X · falls off at α≥X"), off-mfld is reframed as *distance not good/bad*,
+   and the modal copy is corrected. Confirmed live: a low-off-mfld repeat-loop
+   (α=1.5) is correctly flagged ⟳ collapsed where the old framing called it
+   on-manifold. **Next:** the overnight autoresearch loop can now use this as
+   its fitness gate — search prompts to maximize coherent off-manifold distance
+   (fixed ablation = v4v6; auto-find each prompt's cliff). The readout IS the
+   fitness function.
 
 2. ~~**Ablation method upgrades (MPA / SOM / multi-layer)**~~ — **ALL TESTED &
    FALSIFIED (2026-05-30..31, see Phase-0/0a/0b/0c + Conclusion above).** v4v6
