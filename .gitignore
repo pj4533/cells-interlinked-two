@@ -71,6 +71,8 @@ server/data/*.pt.json
 # and the only copy isn't on one disk.
 !server/data/refusal_*.pt
 !server/data/refusal_*.pt.json
+!server/data/valence_direction.pt
+!server/data/valence_direction.pt.json
 server/data/*.db
 server/data/*.sqlite
 server/data/*.sqlite.*

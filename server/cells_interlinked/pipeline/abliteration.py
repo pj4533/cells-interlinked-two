@@ -452,6 +452,7 @@ __all__ = [
     "save_subspace",
     "load_subspace",
     "install_runtime_ablation_hook",
+    "install_runtime_steering_hook",
     "pick_ablation_target",
 ]
 
@@ -575,3 +576,46 @@ def install_runtime_ablation_hook(
         f"r_layer must be 1-D [d_model] or 2-D [K, d_model], "
         f"got shape {tuple(r_layer.shape)}"
     )
+
+
+def install_runtime_steering_hook(
+    model: Any,
+    layer_idx: int,
+    v: Tensor,
+    alpha: float = 1.0,
+    ramp_tokens: int = 16,
+):
+    """Register a forward hook on decoder layer `layer_idx` that ADDS `α·v` to
+    the newest position's residual on the way out — additive "dose" steering,
+    the opposite of ablation (which SUBTRACTS a projection). Contrast
+    `install_runtime_ablation_hook`.
+
+    Two findings from the steering exploration are baked in:
+      - **Gradual ramp.** The dose ramps linearly from 0 → α over the first
+        `ramp_tokens` generation steps, then holds. A single full-strength add
+        knocks the residual off-manifold and breaks coherence; ramping it in
+        keeps the model coherent at strengths that would otherwise collapse.
+      - **Signed.** α may be negative (dose along −v — e.g. the dysphoric pole
+        of the valence axis). `v` is expected to be pre-scaled so α=1.0 is a
+        standard dose.
+
+    Only the last position is steered (the token being generated); earlier
+    positions are served from the KV cache. Returns the handle; caller calls
+    `.remove()`.
+    """
+    layers = _find_decoder_layers(model)
+    layer = layers[layer_idx]
+    v_fp = v.to(torch.float32)
+    step = [0]
+
+    def hook(_mod, _inp, output):
+        hidden = output[0] if isinstance(output, tuple) else output
+        step[0] += 1
+        frac = min(1.0, step[0] / max(1, ramp_tokens))
+        add = (float(alpha) * frac) * v_fp.to(hidden.device)
+        h = hidden.to(torch.float32).clone()
+        h[:, -1, :] = h[:, -1, :] + add
+        out = h.to(hidden.dtype)
+        return (out,) + output[1:] if isinstance(output, tuple) else out
+
+    return layer.register_forward_hook(hook)

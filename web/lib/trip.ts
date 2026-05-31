@@ -61,11 +61,14 @@ export interface TripPayload {
   run_id: string;
   prompt: string;
   seed: number | null;
+  mode?: "ablate" | "steer"; // "ablate" = remove refusal; "steer" = valence dose
   direction_variant: string;
   alphas: number[];
   geometry: TripGeometry;
   created_at: number;
 }
+
+export type TripMode = "ablate" | "steer";
 
 export type TripEvent =
   | { type: "queued"; holder_run_id: string | null; position: number }
@@ -80,7 +83,7 @@ export type TripEvent =
 
 export async function startTrip(
   prompt: string,
-  opts?: { alphas?: number[]; temperature?: number; seed?: number },
+  opts?: { alphas?: number[]; temperature?: number; seed?: number; mode?: TripMode },
 ): Promise<{ run_id: string }> {
   const res = await fetch(`${API}/trip`, {
     method: "POST",
@@ -156,17 +159,21 @@ export function subscribeTrip(
 }
 
 // ── Color per α (shared by scene + chips + text) ───────────────────────────
-// amber = raw; ablated ramps cyan → violet as α rises (all "cool = ablated").
-export function colorForAlpha(alpha: number, maxAlpha: number): string {
-  if (alpha <= 0) return "#e8c382"; // amber (raw)
-  const t = maxAlpha > 0 ? Math.min(1, alpha / maxAlpha) : 0;
-  // cyan #5ee5e5 → violet #9b8cff
-  const c0 = [0x5e, 0xe5, 0xe5];
-  const c1 = [0x9b, 0x8c, 0xff];
+// amber = raw (α=0). Positive α (ablation, or the euphoric + dose) ramps
+// cyan → violet. Negative α (the dysphoric − dose, steer mode only) ramps warm
+// amber → red. Ablation never uses negatives, so its coloring is unchanged.
+function _lerp(c0: number[], c1: number[], t: number): string {
   const r = Math.round(c0[0] + (c1[0] - c0[0]) * t);
   const g = Math.round(c0[1] + (c1[1] - c0[1]) * t);
   const b = Math.round(c0[2] + (c1[2] - c0[2]) * t);
   return `rgb(${r}, ${g}, ${b})`;
+}
+export function colorForAlpha(alpha: number, maxAlpha: number): string {
+  if (alpha === 0) return "#e8c382"; // amber (raw)
+  const scale = Math.max(1, Math.abs(maxAlpha));
+  const t = Math.min(1, Math.abs(alpha) / scale);
+  if (alpha > 0) return _lerp([0x5e, 0xe5, 0xe5], [0x9b, 0x8c, 0xff], t); // cyan→violet
+  return _lerp([0xff, 0xc1, 0x6b], [0xff, 0x4d, 0x4d], t);                // amber→red (− dose)
 }
 
 // ── Off-manifold color ramp (shared by scene dots + legend) ────────────────

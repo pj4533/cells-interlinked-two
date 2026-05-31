@@ -1,0 +1,13 @@
+{
+  "model_name": "google/gemma-3-12b-it",
+  "num_layers": 48,
+  "d_model": 3840,
+  "dtype": "torch.float32",
+  "variant_name": "valence_pos_minus_neg",
+  "steer_layer": 20,
+  "dose_unit": 0.3,
+  "pos": -4,
+  "n_pos": 10,
+  "n_neg": 10,
+  "convention": "v[L] = DOSE_UNIT \u00b7 median\u2016h\u2016[L] \u00b7 normalize(mean(pos)\u2212mean(neg)). Additive steering hook adds \u03b1\u00b7v[layer]; \u03b1>0 = euphoric/expansive pole, \u03b1<0 = dysphoric pole. Default steer layer = 20 (best emotion propagation, per the steering probes)."
+}

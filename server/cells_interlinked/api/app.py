@@ -77,6 +77,8 @@ async def lifespan(app: FastAPI):
     # ablated synthesizer) prefer this over the single direction.
     app.state.refusal_subspace = manager.refusal_subspace
     app.state.refusal_subspace_meta = manager.refusal_subspace_meta
+    # Optional valence steering vector — enables Trips "dose" (steer) mode.
+    app.state.valence_direction = manager.valence_direction
 
     app.state.registry = RunRegistry()
 

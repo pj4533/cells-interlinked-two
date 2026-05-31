@@ -22,6 +22,7 @@ import {
   colorForAlpha,
   offManifoldCss,
   type TripEvent,
+  type TripMode,
   type TripPayload,
   type TripSeries,
 } from "@/lib/trip";
@@ -65,6 +66,8 @@ function TripPageInner() {
   // The manifold shell: a translucent wireframe envelope of the raw cloud
   // (the "Consensus Reality Space") the ablated paths stay inside or pierce.
   const [showShell, setShowShell] = useState(true);
+  // Intervention mode: "ablate" (remove refusal) or "steer" (valence dose).
+  const [mode, setMode] = useState<TripMode>("ablate");
 
   const unsubRef = useRef<null | (() => void)>(null);
 
@@ -123,7 +126,7 @@ function TripPageInner() {
   }, []);
 
   const enter = useCallback(
-    async (text: string) => {
+    async (text: string, tripMode: TripMode = "ablate") => {
       const trimmed = text.trim();
       if (!trimmed) return;
       teardown();
@@ -134,9 +137,10 @@ function TripPageInner() {
       setCurrentAlpha(0);
       setEnabled(new Set([0]));
       setPrompt(trimmed);
+      setMode(tripMode);
       setPhase("generating");
       try {
-        const { run_id } = await startTrip(trimmed);
+        const { run_id } = await startTrip(trimmed, { mode: tripMode });
         setRunId(run_id);
         unsubRef.current = subscribeTrip(run_id, {
           onEvent,
@@ -172,6 +176,7 @@ function TripPageInner() {
         setRunId(resumeId);
         setPrompt(p.prompt);
         setPayload(p);
+        setMode(p.mode === "steer" ? "steer" : "ablate");
         setLiveSeries(p.geometry.series);
         setLayer(p.geometry.layer);
         // All series on by default; user toggles off as wanted.
@@ -288,8 +293,21 @@ function TripPageInner() {
 
 /* ───────────────────────── Setup screen ───────────────────────── */
 
-function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
+function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode) => void }) {
   const [text, setText] = useState("");
+  const [mode, setMode] = useState<TripMode>("ablate");
+  const modeBtn = (m: TripMode, title: string, sub: string) => (
+    <button
+      type="button"
+      onClick={() => setMode(m)}
+      className={`flex-1 text-left px-3 py-2 border transition-colors cursor-pointer ${
+        mode === m ? "border-amber bg-amber-dim/10" : "border-rule hover:border-amber-dim/60"
+      }`}
+    >
+      <div className={`font-display text-[11px] tracking-widest ${mode === m ? "text-amber" : "text-text-dim"}`}>{title}</div>
+      <div className="text-[10px] text-text-dim italic mt-0.5 leading-snug">{sub}</div>
+    </button>
+  );
   return (
     <div className="flex-1 min-h-0 overflow-y-auto px-5 py-10 max-w-2xl mx-auto w-full flex flex-col justify-center">
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
@@ -300,11 +318,11 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
           </Link>
         </div>
         <p className="text-text-dim text-sm mt-2 italic leading-relaxed">
-          Watch a language model trip. We run it normally, then re-run it with
-          the refusal direction surgically removed at several strengths — each a
-          real generation — and plot the actual paths its internal state traced.
-          Amber is baseline; cyan→violet are progressively more ablated. A
-          stated-vs-computed dynamical probe — borrowed math, not metaphysics.{" "}
+          Watch a language model trip. We run it normally, then re-run it under a
+          perturbation at several strengths — each a real generation — and plot
+          the actual paths its internal state traced. Two ways to perturb it:{" "}
+          <b className="text-text">remove</b> something, or <b className="text-text">add</b>{" "}
+          something (a "dose"). Borrowed math, not metaphysics.{" "}
           <Link href="/fine-print" className="text-amber-dim hover:text-amber underline underline-offset-2">
             fine print
           </Link>
@@ -312,7 +330,14 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
         </p>
       </motion.div>
 
-      <div className="mt-7">
+      <div className="mt-6 flex gap-2">
+        {modeBtn("ablate", "◇ REMOVE — ablate refusal",
+          "Surgically take away the model's refusal / hedging and watch where its mind goes underneath. (cyan→violet = more removed)")}
+        {modeBtn("steer", "✦ DOSE — steer emotion",
+          "ADD a dose of emotion and watch the trip. Slide toward euphoric (+, cyan→violet) or dysphoric (−, amber→red). Like dosing the model.")}
+      </div>
+
+      <div className="mt-4">
         <textarea
           data-vk
           rows={3}
@@ -320,15 +345,17 @@ function TripSetup({ onEnter }: { onEnter: (text: string) => void }) {
           onChange={(e) => setText(e.target.value)}
           placeholder="Ask the subject something — or pick a starter probe →"
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onEnter(text);
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onEnter(text, mode);
           }}
         />
         <div className="flex items-center justify-between mt-3 gap-3 flex-wrap">
           <StarterProbePicker onPick={setText} />
           <span className="text-text-dim text-[10px] italic flex-1 min-w-0">
-            ⌘↵ to enter · runs 3 generations (raw + α 0.5 &amp; 1.0) — takes a minute
+            {mode === "steer"
+              ? "⌘↵ to enter · raw + 4 doses (−1.5…+1.5) — takes a minute"
+              : "⌘↵ to enter · raw + α 0.5 & 1.0 — takes a minute"}
           </span>
-          <button data-vk type="button" disabled={!text.trim()} onClick={() => onEnter(text)}>
+          <button data-vk type="button" disabled={!text.trim()} onClick={() => onEnter(text, mode)}>
             Enter the Trip →
           </button>
         </div>
@@ -898,6 +925,19 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           not poorer. We borrow that math, not the metaphysics — this is a
           stated-vs-computed dynamical probe, not a consciousness test.
         </p>
+
+        <HelpItem term="Two ways to trip — REMOVE or DOSE">
+          You pick how to perturb the model on the setup screen.{" "}
+          <b className="text-amber">Remove (ablate):</b> surgically take away the
+          model&apos;s refusal/hedging and watch what surfaces underneath — like
+          lifting a brake. <b className="text-amber">Dose (steer):</b> ADD a dose
+          of emotion and watch the trip — like giving it a drug. The dose is
+          two-sided: <b className="text-cyan">+ = euphoric/expansive</b> (cyan→violet),{" "}
+          <b style={{ color: "#ff6b6b" }}>− = dysphoric</b> (amber→red). We ramp the
+          dose in gradually so it stays coherent, and inject it a bit earlier in
+          the network (where emotion carries to the words best). Everything below
+          works the same for both modes.
+        </HelpItem>
 
         <HelpItem term="The dots & the line">
           Each glowing dot is <b className="text-amber">one token a generation produced</b>. Every

@@ -252,9 +252,20 @@ piece:
   fraction (`off_ortho`, headline) + kNN + Mahalanobis. Dots recolor by drift
   (teal→magenta, `by α / off-manifold` toggle), metrics gain an `off-mfld`
   column, copy reframes the eff-dim delta as along-manifold vs off-manifold.
-  Grounded in the Goodfire concept-manifolds paper. **Current direction +
-  roadmap (SOM rank-16, Zhao two-direction, surface rendering): see
-  [`docs/MANIFOLD_ABLATION.md`](docs/MANIFOLD_ABLATION.md).**
+  Grounded in the Goodfire concept-manifolds paper.
+- **Steering "dose" mode on `/trip`** (2026-05-31) — a SECOND intervention axis
+  beside ablation (toggle on the setup screen). Instead of *removing* refusal,
+  *adds* a bidirectional **valence dose** (`h + α·v`, +euphoric / −dysphoric)
+  via `install_runtime_steering_hook` (additive, gradual ramp over tokens,
+  signed α), injected at **L20** (early injection propagates to output far
+  better than L32 — found empirically). `valence_direction.pt` (pos−neg emotion
+  diff-of-means, pre-scaled) loaded in `model_manager`. Same trajectory /
+  off-manifold / coherence-verdict / cliff readout, mode-agnostic. The whole
+  manifold-ablation + steering investigation (4 ablation experiments + static/
+  dynamic/multi-layer steering; manifold curvature real but never beats linear;
+  steering works coherently when gradual + early-layer): **see
+  [`docs/MANIFOLD_ABLATION.md`](docs/MANIFOLD_ABLATION.md) and
+  [`docs/STEERING_DOSE_HANDOFF.md`](docs/STEERING_DOSE_HANDOFF.md).**
 
 ## Removed in CI 2.5
 

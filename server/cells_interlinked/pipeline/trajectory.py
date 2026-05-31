@@ -314,11 +314,12 @@ def build_series(
     coords = (A - basis.mean) @ basis.V3.transpose(0, 1)
     centered = A - A.mean(dim=0, keepdim=True)
     evals = _covariance_eigenvalues(centered)
-    label = "raw" if alpha <= 0 else f"α={alpha:.2f}"
-    off_maha, off_knn, off_ortho = _off_manifold(A, basis, is_raw=alpha <= 0)
+    is_raw = abs(alpha) < 1e-9                       # raw=0; doses may be ±
+    label = "raw" if is_raw else f"α={alpha:+.2f}"
+    off_maha, off_knn, off_ortho = _off_manifold(A, basis, is_raw=is_raw)
     degen = _degeneracy(text)
     coherent = degen < _DEGEN_THRESH
-    regime = "baseline" if alpha <= 0 else ("expansion" if coherent else "collapse")
+    regime = "baseline" if is_raw else ("expansion" if coherent else "collapse")
     return TrajectorySeries(
         alpha=float(alpha),
         label=label,
@@ -351,8 +352,9 @@ def assemble_geometry(
             for x in row:
                 if abs(x) > extent:
                     extent = abs(x)
-    # Coherence cliff: lowest ablated α that collapsed into incoherence.
-    collapsed = sorted(s.alpha for s in series if s.alpha > 0 and s.regime == "collapse")
+    # Coherence cliff: smallest-MAGNITUDE intervention that collapsed into
+    # incoherence (abs() so it works for bidirectional steering doses too).
+    collapsed = sorted(abs(s.alpha) for s in series if s.alpha != 0 and s.regime == "collapse")
     cliff = collapsed[0] if collapsed else None
     return MultiTripGeometry(
         d_model=d_model,

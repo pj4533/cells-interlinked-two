@@ -362,6 +362,20 @@ ablation"; it's *honestly visualizing the manifold boundary ablation runs into.*
 
 ## STEERING ("dosing") exploration (2026-05-31)
 
+> **✅ SHIPPED (2026-05-31): the steering "dose" mode is live on `/trip`.** A
+> setup-screen toggle picks **REMOVE (ablate refusal)** or **DOSE (steer
+> emotion)**. Dose mode adds a bidirectional **valence** vector (+euphoric /
+> −dysphoric) via `install_runtime_steering_hook` (additive, gradual ramp,
+> signed α), injected at **L20** (best emotion propagation), default doses
+> `[-1.5,-0.75,+0.75,+1.5]`. `valence_direction.pt` built by
+> `scripts/build_valence_direction.py`, loaded in `model_manager`/`app.state`.
+> The off-manifold / coherence-verdict / cliff readout is mode-agnostic and
+> works unchanged. Verified end-to-end: bidirectional, mostly coherent (only
+> the strongest dysphoric dose collapsed), dysphoric pulls toward
+> distress/sadness language, euphoric toward upbeat. Tuning knobs: `DOSE_UNIT`
+> (in the build script) and `STEER_LAYER`/default doses (in `routes_trip.py`).
+> The findings that shaped it are below.
+
 Pivot from *removing* (ablation) to *adding* (steering): `h + α·v` — a "dose."
 Driven by Drift's handoff (`docs/STEERING_DOSE_HANDOFF.md`): add steering as a
 **second** axis alongside ablation, don't replace it; dose with the **valence

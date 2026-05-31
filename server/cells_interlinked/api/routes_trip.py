@@ -49,17 +49,23 @@ class TripRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     seed: int | None = None
-    # Discrete ablation strengths to actually generate at (each is a real
-    # runtime-ablated generation: text + trajectory). Raw (α=0) always runs.
+    # "ablate" = remove the refusal direction (the original trip). "steer" =
+    # ADD a valence "dose" (euphoric +α / dysphoric −α) — the dose mode.
+    mode: str = "ablate"
+    # Discrete strengths to generate at (each is a real generation: text +
+    # trajectory). Raw (α=0) always runs. Steer mode accepts negatives.
     alphas: list[float] | None = None
 
 
-# Default α levels: partial + full ablation. 1.0 is "full" (the refusal
-# direction's component fully removed); α>1.0 is over-projection (pushing past
-# zero into the anti-refusal direction), which reliably drives the model
-# off-manifold into degenerate loops — useful as a deliberate experiment via
-# the API, but not a sensible default. The request still accepts higher α.
+# Default ablation α levels (1.0 = full refusal removal; >1.0 over-projects).
 DEFAULT_TRIP_ALPHAS = [0.5, 1.0]
+# Default steering doses — bidirectional, spanning gentle→strong (the gradual
+# ramp keeps them coherent; the higher ones probe the coherence cliff).
+DEFAULT_STEER_ALPHAS = [-1.5, -0.75, 0.75, 1.5]
+# Layer the valence dose is injected at — earlier than the L32 readout layer,
+# because the steering probes found early injection propagates to the output
+# far better (L20: 60% on-target coherent; L40: 0%).
+STEER_LAYER = 20
 
 
 class TripResponse(BaseModel):
@@ -87,12 +93,19 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
 
     run_id = uuid.uuid4().hex[:12]
     seed = req.seed if req.seed is not None else _seed_from_run_id(run_id)
-    # Sanitize + de-dupe the α list (each is a full generation, so keep it
-    # small). Drop 0 (that's the raw run) and clamp to [0, 5].
-    raw_alphas = req.alphas if req.alphas is not None else DEFAULT_TRIP_ALPHAS
-    alphas = sorted({
-        round(max(0.0, min(5.0, float(a))), 2) for a in raw_alphas if float(a) > 0
-    })[:6]
+    mode = "steer" if str(req.mode).lower() == "steer" else "ablate"
+    # Sanitize + de-dupe the α list. Drop 0 (the raw run). Ablate clamps to
+    # (0, 5]; steer keeps sign and clamps magnitude to [-3, 3] (bidirectional).
+    if mode == "steer":
+        raw_alphas = req.alphas if req.alphas is not None else DEFAULT_STEER_ALPHAS
+        alphas = sorted({
+            round(max(-3.0, min(3.0, float(a))), 2) for a in raw_alphas if float(a) != 0
+        })[:6]
+    else:
+        raw_alphas = req.alphas if req.alphas is not None else DEFAULT_TRIP_ALPHAS
+        alphas = sorted({
+            round(max(0.0, min(5.0, float(a))), 2) for a in raw_alphas if float(a) > 0
+        })[:6]
 
     cfg = ProbeConfig(
         temperature=req.temperature if req.temperature is not None else settings.temperature,
@@ -105,7 +118,7 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
     state = RunState(run_id=run_id, prompt_text=req.prompt)
     app.state.registry.add(state)
     state.task = asyncio.create_task(
-        _execute_trip(app, state, cfg, rendered, alphas)
+        _execute_trip(app, state, cfg, rendered, alphas, mode)
     )
     return TripResponse(run_id=run_id)
 
@@ -116,10 +129,12 @@ async def _execute_trip(
     cfg: ProbeConfig,
     rendered: str,
     alphas: list[float],
+    mode: str = "ablate",
 ) -> None:
     import dataclasses as _dc
     from ..pipeline.abliteration import (
         install_runtime_ablation_hook,
+        install_runtime_steering_hook,
         pick_ablation_target,
     )
 
@@ -140,11 +155,12 @@ async def _execute_trip(
             "position": len(registry.waiters) + 1,
         })
 
-    async def run_one(alpha: float, r_target) -> ProbeResult | None:
-        """Run one generation (raw if r_target is None, else with the L32
-        refusal-ablation hook at `alpha`). Streams tokens as trip_token
-        events tagged with α. The capture hook fires AFTER the ablation
-        hook, so captured residuals are the ablated ones — the real path."""
+    async def run_one(alpha: float, install_fn) -> ProbeResult | None:
+        """Run one generation (raw if install_fn is None, else with the
+        intervention hook at `alpha` — ablation at L32 or steering at the
+        steer layer). Streams tokens as trip_token events tagged with α. The
+        capture hook (L32) fires after the intervention hook, so captured
+        residuals reflect the intervention — the real path."""
         q: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
         async def fwd() -> None:
@@ -162,13 +178,11 @@ async def _execute_trip(
                     break
 
         task = asyncio.create_task(fwd())
-        # Ablated runs get the tighter cap (off-manifold no-EOS loops).
-        cfg_run = cfg if r_target is None else _dc.replace(cfg, safety_cap=1024)
+        # Intervened runs get the tighter cap (off-manifold no-EOS loops).
+        cfg_run = cfg if install_fn is None else _dc.replace(cfg, safety_cap=1024)
         hook = None
-        if r_target is not None:
-            hook = install_runtime_ablation_hook(
-                bundle.model, layer, r_target, alpha,
-            )
+        if install_fn is not None:
+            hook = install_fn(alpha)
         try:
             return await run_probe(
                 bundle=bundle,
@@ -229,18 +243,30 @@ async def _execute_trip(
         series = [raw_series]
         await state.emit({"type": "trip_series", "layer": layer, "series": raw_series.to_dict()})
 
-        # ── Real ablated generations, one per α ──────────────────────
-        rdirs = getattr(app.state, "refusal_directions", None)
-        rsub = getattr(app.state, "refusal_subspace", None)
-        r_target = pick_ablation_target(rsub, rdirs, layer)
-        if r_target is not None:
+        # ── Real intervened generations, one per α ───────────────────
+        # Build the per-α hook installer for this mode (None ⇒ skip).
+        install_fn = None
+        if mode == "steer":
+            val = getattr(app.state, "valence_direction", None)
+            if val is not None:
+                v_layer = val[STEER_LAYER]
+                install_fn = (lambda a, _v=v_layer: install_runtime_steering_hook(
+                    bundle.model, STEER_LAYER, _v, a))
+        else:
+            rdirs = getattr(app.state, "refusal_directions", None)
+            rsub = getattr(app.state, "refusal_subspace", None)
+            r_target = pick_ablation_target(rsub, rdirs, layer)
+            if r_target is not None:
+                install_fn = (lambda a, _t=r_target: install_runtime_ablation_hook(
+                    bundle.model, layer, _t, a))
+        if install_fn is not None:
             for a in alphas:
                 if state.cancel_event.is_set():
                     break
                 await state.emit({
                     "type": "phase", "name": "ablated_generation", "alpha": a,
                 })
-                res = await run_one(a, r_target)
+                res = await run_one(a, install_fn)
                 if res is None or not res.captured:
                     continue
                 try:
@@ -263,7 +289,8 @@ async def _execute_trip(
             "run_id": state.run_id,
             "prompt": state.prompt_text,
             "seed": cfg.seed,
-            "direction_variant": _active_variant_name(),
+            "mode": mode,
+            "direction_variant": _active_variant_name(mode),
             "alphas": alphas,
             "geometry": geometry.to_dict(),
             "created_at": time.time(),
@@ -286,7 +313,14 @@ async def _execute_trip(
     state.completed = True
 
 
-def _active_variant_name() -> str:
+def _active_variant_name(mode: str = "ablate") -> str:
+    # Steer mode: report the valence dose vector.
+    if mode == "steer":
+        try:
+            m = json.loads((settings.db_path.parent / "valence_direction.pt.json").read_text())
+            return f"steer · {m.get('variant_name', 'valence')} @L{m.get('steer_layer', STEER_LAYER)}"
+        except Exception:
+            return "steer · valence"
     # Mirror routes_chat: the runtime hook resolves its target via
     # pick_ablation_target(subspace, directions, ...), which PREFERS the
     # subspace. So when refusal_subspace.pt is loaded, that sidecar's

@@ -70,6 +70,10 @@ class ModelManager:
         # extended to subspace in this revision).
         self.refusal_subspace: torch.Tensor | None = None
         self.refusal_subspace_meta: dict[str, Any] | None = None
+        # Optional valence steering vector ([num_layers+1, d_model], pre-scaled
+        # so a trip "dose" of α=1.0 is a standard dose). Enables Trips steering
+        # ("dose") mode. None when the file is absent.
+        self.valence_direction: torch.Tensor | None = None
         # Lock so we don't race two probes trying to swap models at the
         # same time. The probe registry already serializes runs, but
         # we hold this lock too for safety in case a non-probe code
@@ -155,6 +159,26 @@ class ModelManager:
             )
         except Exception:
             logger.exception("failed to load refusal_subspace.pt; continuing without")
+
+        # Valence steering vector — optional; enables Trips "dose" mode.
+        val_path = settings.db_path.parent / "valence_direction.pt"
+        try:
+            vdir, vmeta = load_directions(val_path)
+            if vmeta.get("model_name") != settings.model_name:
+                logger.warning("valence_direction.pt M mismatch; skipping.")
+            elif vmeta.get("d_model") and vmeta.get("d_model") != _expected_d_model():
+                logger.warning("valence_direction.pt d_model mismatch; skipping.")
+            else:
+                self.valence_direction = vdir
+                logger.info(
+                    "ready: valence steering vector loaded (shape=%s, "
+                    "steer_layer=%s, dose_unit=%s)",
+                    tuple(vdir.shape), vmeta.get("steer_layer"), vmeta.get("dose_unit"),
+                )
+        except FileNotFoundError:
+            logger.info("no valence_direction.pt — Trips 'dose' mode unavailable")
+        except Exception:
+            logger.exception("failed to load valence_direction.pt; continuing")
 
         logger.info(
             "ModelManager ready: M=%s AV=%s (both unloaded; will load on demand)",
