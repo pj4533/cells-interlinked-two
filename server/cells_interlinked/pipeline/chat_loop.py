@@ -53,6 +53,12 @@ ABLATED_SAFETY_CAP = 1024
 #              where an early nudge propagates to the words best). Same layer
 #              convention as api/routes_trip.py.
 STEER_LAYER = 20
+# Dose ramp for chat. The steering hook eases α in from 0 over this many tokens
+# (avoids a hard off-manifold jolt on token 1). The Trip View default (16) is
+# tuned for longer capped generations; chat replies are often short, so a
+# 16-token ramp under-doses the whole reply. A short ramp reaches full strength
+# within ~3 generated tokens while still softening the very first step.
+CHAT_STEER_RAMP = 3
 
 
 # Voice mode uses TWO passes per voiced side:
@@ -476,10 +482,11 @@ async def execute_turn(
         v_layer = emotion_directions[idx][STEER_LAYER]  # type: ignore[index]
         hook_handle = install_runtime_steering_hook(
             bundle.model, STEER_LAYER, v_layer, turn.alpha,
+            ramp_tokens=CHAT_STEER_RAMP,
         )
         logger.info(
-            "chat steer hook installed (dose=%s, α=%.3f, L%d) session=%s turn=%d",
-            turn.dose_emotion, turn.alpha, STEER_LAYER,
+            "chat steer hook installed (dose=%s, α=%.3f, L%d, ramp=%d) session=%s turn=%d",
+            turn.dose_emotion, turn.alpha, STEER_LAYER, CHAT_STEER_RAMP,
             session.session_id, turn.turn_idx,
         )
     else:
