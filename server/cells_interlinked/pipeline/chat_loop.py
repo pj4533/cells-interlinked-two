@@ -157,6 +157,12 @@ def build_image_prompt_request(user_query: str, framing: str) -> str:
 
 IMAGE_PROMPT_SAFETY_CAP = 220
 
+# Hard async ceiling for one side's Nano Banana image generation. Set above the
+# image_client wall-clock budget (~60s) so the SDK-level bound normally wins and
+# the executor thread exits cleanly; this is the backstop that guarantees the
+# chat turn completes (and releases the session lock) even if the SDK hangs.
+IMAGE_GEN_TIMEOUT = 75.0
+
 
 @dataclass
 class ChatTurn:
@@ -655,7 +661,15 @@ async def _fan_out_images(
         try:
             await emit({"type": "image_generating", "prompt": prompt})
             path = image_path_for(session.session_id, turn.turn_idx, side)
-            await generate_image(prompt=prompt, output_path=path)
+            # Hard async backstop: even with the SDK request timeout, a wedged
+            # thread/connection must never wedge the turn. The image is a
+            # non-essential adornment — on timeout we degrade gracefully and
+            # let the turn complete. (The orphaned executor thread is bounded
+            # by the image_client wall-clock budget.)
+            await asyncio.wait_for(
+                generate_image(prompt=prompt, output_path=path),
+                timeout=IMAGE_GEN_TIMEOUT,
+            )
             url = image_url_for(session.session_id, turn.turn_idx, side)
             setattr(turn, attr_url, url)
             logger.info(
@@ -663,6 +677,13 @@ async def _fan_out_images(
                 side, session.session_id, turn.turn_idx, url,
             )
             await emit({"type": "image_done", "url": url})
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "image generation timed out after %.0fs (side=%s session=%s turn=%d)",
+                IMAGE_GEN_TIMEOUT, side, session.session_id, turn.turn_idx,
+            )
+            setattr(turn, attr_err, "timed out")
+            await emit({"type": "image_error", "message": "image generation timed out"})
         except Exception as exc:
             logger.exception(
                 "image generation failed (side=%s session=%s turn=%d)",

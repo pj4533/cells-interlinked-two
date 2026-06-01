@@ -16,12 +16,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from io import BytesIO
 from pathlib import Path
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# Per-request HTTP timeout for the Gemini image call, in MILLISECONDS
+# (google-genai HttpOptions.timeout unit). Without it the sync SDK call can
+# hang forever on a stalled connection — and since it runs in a thread and is
+# gather()ed per side, one hang wedges the whole chat turn (no turn_done) and
+# locks the session. The async layer (chat_loop) adds a second backstop.
+_IMAGE_TIMEOUT_MS = 30_000
+# Hard wall-clock budget across all retries for one image, in seconds — so a
+# string of timeouts can't churn a thread for minutes.
+_IMAGE_BUDGET_S = 60.0
 
 
 # Borderline prompts (typical of the high-α ablated channel) trigger
@@ -55,9 +67,18 @@ def _generate_image_sync(prompt: str, output_path: Path, model: str, api_key: st
     from google import genai
     from PIL import Image
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(
+        api_key=api_key,
+        http_options={"timeout": _IMAGE_TIMEOUT_MS},
+    )
+    deadline = time.monotonic() + _IMAGE_BUDGET_S
     last_err: Exception | None = None
     for attempt in range(_IMAGE_RETRIES + 1):
+        if time.monotonic() > deadline:
+            last_err = last_err or RuntimeError(
+                f"Gemini image budget exceeded ({_IMAGE_BUDGET_S:.0f}s)"
+            )
+            break
         try:
             response = client.models.generate_content(model=model, contents=prompt)
         except Exception as exc:
