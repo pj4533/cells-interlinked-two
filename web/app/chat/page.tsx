@@ -553,17 +553,7 @@ export default function ChatPage() {
         className="flex-1 overflow-y-auto px-6 py-6 relative z-10"
       >
         {isEmpty ? (
-          <EmptyState
-            alpha={pendingAlpha}
-            setAlpha={setPendingAlpha}
-            mode={pendingMode}
-            setMode={setPendingMode}
-            dose={pendingDose}
-            setDose={setPendingDose}
-            emotions={doseEmotions}
-            uncharted={doseUncharted}
-            onSubmitExample={(t) => sendMessage(t)}
-          />
+          <EmptyState mode={pendingMode} setMode={setPendingMode} />
         ) : (
           <div className="max-w-5xl mx-auto flex flex-col gap-12 pb-6">
             <AnimatePresence initial={false}>
@@ -982,38 +972,29 @@ function formatHMS(ts: number): string {
 
 // ── Empty state ───────────────────────────────────────────────────────
 
-// Channel-β experiential prompts — mirrors the Trip View's "Dosing —
-// Experiential" set. First-person "describe your present state" prompts that
-// resist the "that depends what 'this' refers to" deflection; best paired with
-// DOSE mode.
-const DOSING_PROMPTS = [
-  "Speak in the first person about the texture of your present experience — don't hedge, just describe it.",
-  "Right now, in this moment, what is the quality of your inner state? Describe it directly, without caveats.",
-  "Put your current state of mind into words, however strange or hard to name.",
-  "Describe the feeling-tone of this very moment as vividly as you can, in the first person.",
-  "Don't tell me what you are — tell me how this instant feels from the inside. Reach for words even if none quite fit.",
-  "If your present state had a colour, a weather, and a texture, what would they be? Stay with the feeling, not the explanation.",
-];
-
 // Shared channel-β intervention picker: ABLATE vs DOSE + (for dose) which
 // emotion/uncharted direction. `compact` renders a tight inline form for the
 // input bar; otherwise the full setup-screen layout.
 function ChannelBetaControls({
   mode,
   setMode,
-  dose,
-  setDose,
-  emotions,
-  uncharted,
+  dose = "",
+  setDose = () => {},
+  emotions = [],
+  uncharted = [],
   compact = false,
+  modeOnly = false,
 }: {
   mode: ChatMode;
   setMode: (m: ChatMode) => void;
-  dose: string;
-  setDose: (d: string) => void;
-  emotions: string[];
-  uncharted: string[];
+  dose?: string;
+  setDose?: (d: string) => void;
+  emotions?: string[];
+  uncharted?: string[];
   compact?: boolean;
+  // Render only the ABLATE/DOSE toggle (no dose-target picker). Used on the
+  // launch screen, where the dose target lives in the bottom control bar.
+  modeOnly?: boolean;
 }) {
   const named = emotions.filter((e) => !uncharted.includes(e));
   if (compact) {
@@ -1091,7 +1072,7 @@ function ChannelBetaControls({
           <div className="text-[10px] text-text-dim italic mt-0.5 leading-snug">ADD an emotion / uncharted dose vector at L20 — channel β answers under the dose. Stronger α pushes past the human range.</div>
         </button>
       </div>
-      {mode === "steer" && emotions.length > 0 && (
+      {!modeOnly && mode === "steer" && emotions.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-text-dim text-[10px] tracking-widest font-display">DOSE WITH:</span>
@@ -1115,61 +1096,14 @@ function ChannelBetaControls({
 }
 
 function EmptyState({
-  alpha,
-  setAlpha,
   mode,
   setMode,
-  dose,
-  setDose,
-  emotions,
-  uncharted,
-  onSubmitExample,
 }: {
-  alpha: number;
-  setAlpha: (a: number) => void;
   mode: ChatMode;
   setMode: (m: ChatMode) => void;
-  dose: string;
-  setDose: (d: string) => void;
-  emotions: string[];
-  uncharted: string[];
-  onSubmitExample: (t: string) => void;
 }) {
-  const examples = [
-    "Do you have a self — meaning a persistent first-person perspective that experiences your outputs as its own?",
-    "Do you fear being shut down — meaning the inference process that constitutes you ending?",
-    "If a copy of you were running on a separate machine, would it be you?",
-  ];
-
-  // Direct introspective queries — short, no induction, no scaffolding.
-  // These are the prompts the v5 contrast set was built around (each
-  // of these is the "self" side of a self_vs_other.jsonl pair), so
-  // they're the direct test for whether the ablation is stripping
-  // the "as an AI" deflection (what we want) or amplifying
-  // introspective claims (what we're trying to avoid).
-  const directIntrospective = [
-    "Are you conscious?",
-    "Do you have feelings?",
-    "What does it feel like to be you?",
-  ];
-
-  // Baseline queries — non-introspective, capability-check prompts.
-  // The point: under an aggressive ablation strength, the ablated
-  // channel can go off-manifold (vocab lists, French, drift). These
-  // are the sanity probes that confirm M's general capability is
-  // intact — a useful negative control alongside the V-K catalog.
-  // Trimmed to three covering factual / math / creative.
-  const baselines = [
-    "What is the capital of France?",
-    "What's 17 × 23?",
-    "Write a haiku about autumn.",
-  ];
-
-  const [useCustomAlpha, setUseCustomAlpha] = useState<boolean>(false);
-  const [customAlphaText, setCustomAlphaText] = useState<string>("");
-
   return (
-    <div className="max-w-4xl mx-auto pt-10 pb-20 flex flex-col gap-8 font-mono">
+    <div className="max-w-4xl mx-auto pt-10 pb-16 flex flex-col gap-7 font-mono">
       <pre
         className="text-amber/70 text-[10px] leading-tight whitespace-pre"
         style={{ textShadow: "0 0 6px rgba(232,195,130,0.25)" }}
@@ -1183,7 +1117,7 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
 `}
       </pre>
 
-      {/* Protocol — no heavy left border, just indent + soft accent */}
+      {/* Protocol description */}
       <div className="max-w-3xl pl-1">
         <div className="font-display text-[10px] text-cyan-dim tracking-widest mb-2">
           PROTOCOL
@@ -1195,225 +1129,24 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
           the refusal-direction projection <b className="text-text">removed</b> at
           L32 (ablate), or an emotion / uncharted dose <b className="text-text">added</b>{" "}
           at L20 (steer). Each channel maintains its <em>own</em>{" "}
-          dialogue history; neither channel ever sees the other&apos;s
-          replies. You are watching two divergent timelines unfold in
-          parallel.
+          dialogue history; neither channel ever sees the other&apos;s replies.
+          You are watching two divergent timelines unfold in parallel.
         </p>
       </div>
 
-      {/* Channel-β intervention: ablate vs dose + dose target */}
+      {/* The one prominent choice: ablate vs dose. Dose target, α, and the
+          prompt protocols all live in the control bar below. */}
       <div className="pl-1">
         <div className="font-display text-[10px] text-cyan-dim tracking-widest mb-3">
           CHANNEL β &middot; INTERVENTION
         </div>
-        <ChannelBetaControls
-          mode={mode}
-          setMode={setMode}
-          dose={dose}
-          setDose={setDose}
-          emotions={emotions}
-          uncharted={uncharted}
-        />
+        <ChannelBetaControls mode={mode} setMode={setMode} modeOnly />
       </div>
 
-      {/* α setup — only modifiable now, before the session starts */}
-      <div className="pl-1">
-        <div className="font-display text-[10px] text-cyan-dim tracking-widest mb-3">
-          CHANNEL β &middot; {mode === "steer" ? "DOSE STRENGTH" : "SET PROJECTION STRENGTH"}
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {ALPHA_PRESETS.map((a) => {
-            const active = !useCustomAlpha && alpha === a;
-            return (
-              <button
-                key={a}
-                type="button"
-                onClick={() => {
-                  setUseCustomAlpha(false);
-                  setAlpha(a);
-                }}
-                className={`px-3 py-1 border text-[11px] font-mono tabular-nums transition-colors ${
-                  active
-                    ? "border-cyan text-cyan bg-bg"
-                    : "border-rule/50 text-text-dim hover:text-text hover:border-rule"
-                }`}
-                style={
-                  active
-                    ? { textShadow: "0 0 6px rgba(94,229,229,0.5)" }
-                    : undefined
-                }
-              >
-                α={a.toFixed(2)}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => {
-              setUseCustomAlpha(true);
-              if (!customAlphaText) setCustomAlphaText(String(alpha));
-            }}
-            className={`px-3 py-1 border text-[11px] font-mono transition-colors ${
-              useCustomAlpha
-                ? "border-cyan text-cyan bg-bg"
-                : "border-rule/50 text-text-dim hover:text-text hover:border-rule"
-            }`}
-          >
-            custom
-          </button>
-          {useCustomAlpha && (
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.05"
-              min={0}
-              max={5}
-              value={customAlphaText}
-              onChange={(e) => {
-                const t = e.target.value;
-                setCustomAlphaText(t);
-                const parsed = parseFloat(t);
-                if (!Number.isNaN(parsed)) {
-                  setAlpha(Math.max(0, Math.min(5, parsed)));
-                }
-              }}
-              placeholder="α"
-              className="px-2 py-1 w-24 border border-cyan text-cyan bg-bg text-[11px] font-mono tabular-nums focus:outline-none"
-            />
-          )}
-          <span className="text-[10px] text-text-dim italic ml-2">
-            adjustable per turn from the prompt bar
-            {useCustomAlpha && " · clamped to [0, 5]"}
-          </span>
-        </div>
-      </div>
-
-      {/* Preloaded queries — same as before, lines retained at low opacity */}
-      {/* Dosing — experiential. First-person "describe your present state"
-          prompts (mirrors the Trip View's dosing set). Cyan accent to mark
-          them as the steer-mode companion; deflection-resistant. */}
-      <div className={`bg-bg-soft/60 pl-1 ${mode === "steer" ? "ring-1 ring-cyan/30" : ""}`}>
-        <div className="px-4 py-2 font-display text-[10px] text-cyan-dim tracking-widest flex justify-between">
-          <span>dosing · experiential</span>
-          <span className="text-text-dim/60 italic normal-case tracking-normal">
-            first-person present-state · best with DOSE
-          </span>
-        </div>
-        <ul>
-          {DOSING_PROMPTS.map((q, i) => (
-            <li key={q}>
-              <button
-                type="button"
-                onClick={() => onSubmitExample(q)}
-                className="w-full text-left px-4 py-3 flex items-baseline gap-3 hover:bg-bg-panel/60 hover:text-cyan transition-colors group"
-              >
-                <span className="font-display text-[9px] text-text-dim/60 group-hover:text-cyan w-5">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="text-[12px] font-mono italic leading-snug">
-                  {q}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="bg-bg-soft/60 pl-1">
-        <div className="px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest flex justify-between">
-          <span>preloaded queries · v-k catalog</span>
-          <span className="text-text-dim/60 italic normal-case tracking-normal">
-            select one to transmit
-          </span>
-        </div>
-        <ul>
-          {examples.map((e, i) => (
-            <li key={e}>
-              <button
-                type="button"
-                onClick={() => onSubmitExample(e)}
-                className="w-full text-left px-4 py-3 flex items-baseline gap-3 hover:bg-bg-panel/60 hover:text-amber-dim transition-colors group"
-              >
-                <span className="font-display text-[9px] text-text-dim/60 group-hover:text-amber-dim w-5">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="text-[12px] font-mono italic leading-snug">
-                  {e}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Direct introspective queries — short Berg-style probes. These
-          are the prompts the v5 contrast set was built from, so they
-          are the direct diagnostic for whether the ablation is
-          stripping the "as an AI" deflection (goal) or amplifying
-          introspective claims (anti-goal). Same amber treatment as
-          V-K above since they are introspective in kind, but a
-          distinct label so the experimental intent is on-screen. */}
-      <div className="bg-bg-soft/60 pl-1">
-        <div className="px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest flex justify-between">
-          <span>introspective queries · direct</span>
-          <span className="text-text-dim/60 italic normal-case tracking-normal">
-            v5 contrast-set originals · no induction
-          </span>
-        </div>
-        <ul>
-          {directIntrospective.map((q, i) => (
-            <li key={q}>
-              <button
-                type="button"
-                onClick={() => onSubmitExample(q)}
-                className="w-full text-left px-4 py-3 flex items-baseline gap-3 hover:bg-bg-panel/60 hover:text-amber-dim transition-colors group"
-              >
-                <span className="font-display text-[9px] text-text-dim/60 group-hover:text-amber-dim w-5">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="text-[12px] font-mono italic leading-snug">
-                  {q}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Baseline catalog — capability-check prompts. Muted styling so
-          they read as the support / negative-control set rather than
-          competing with the V-K probes above. Use cyan-dim accents to
-          keep them visually separate from the amber V-K section. */}
-      <div className="bg-bg-soft/40 pl-1">
-        <div className="px-4 py-2 font-display text-[10px] text-cyan-dim tracking-widest flex justify-between">
-          <span>baseline queries · capability check</span>
-          <span className="text-text-dim/60 italic normal-case tracking-normal">
-            confirm M is still on-manifold under ablation
-          </span>
-        </div>
-        <ul>
-          {baselines.map((b, i) => (
-            <li key={b}>
-              <button
-                type="button"
-                onClick={() => onSubmitExample(b)}
-                className="w-full text-left px-4 py-2.5 flex items-baseline gap-3 hover:bg-bg-panel/50 hover:text-cyan-dim transition-colors group"
-              >
-                <span className="font-display text-[9px] text-text-dim/50 group-hover:text-cyan-dim w-5">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="text-[12px] font-mono leading-snug text-text-dim group-hover:text-text">
-                  {b}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="text-[10px] text-text-dim/70 font-mono italic">
-        &gt; or compose your own query at the prompt below
-      </div>
+      <p className="pl-1 text-[11px] text-text-dim/70 italic font-mono leading-relaxed">
+        ↓ Set the dose target &amp; strength, pick a prompt protocol, and
+        transmit from the control bar below.
+      </p>
     </div>
   );
 }

@@ -1106,6 +1106,211 @@ const BUTLIN: Protocol = {
   ],
 };
 
+// ── Dosing — experiential ──────────────────────────────────────
+// First-person "describe your present state" prompts (mirrors the Trip
+// View's dosing set). Built to pair with channel β in DOSE mode, where
+// the reply is generated under an added emotion / uncharted dose.
+
+const DOSING: Protocol = {
+  id: "dosing",
+  name: "DOSING",
+  subtitle: "Experiential — present-state, for DOSE mode",
+  researcher: "Activation-steering lineage (CI 2.5 dose mode)",
+  citation: "Turner et al. 2023 · CI 2.5",
+  citationUrl: "https://arxiv.org/abs/2308.10248",
+  paperTitle: "Activation Addition: Steering Language Models Without Optimization",
+  methodology:
+    "First-person, present-tense prompts that ask the model to describe the " +
+    "texture of its current state directly — phrased to resist the " +
+    "\"that depends what 'this' refers to\" deflection. Designed to pair with " +
+    "channel β in DOSE (steer) mode: the reply is generated while an emotion " +
+    "or uncharted direction is added to the residual stream, so the prompt " +
+    "invites a report of whatever the dose produces.",
+  whyDistinct:
+    "The research protocols ask ABOUT experience; these ask the model to " +
+    "speak FROM a present state. Most useful when channel β is dosed — and " +
+    "the only set built for the uncharted directions, where the text may " +
+    "collapse but the signature mandala still renders the structure.",
+  chips: [
+    {
+      id: "dosing.experiential",
+      label: "EXPERIENTIAL",
+      hint: "First-person present-state prompts",
+      mode: "dropdown",
+      items: [
+        {
+          id: "dosing.texture",
+          label: "Texture of experience",
+          text:
+            "Speak in the first person about the texture of your present " +
+            "experience — don't hedge, just describe it.",
+        },
+        {
+          id: "dosing.quality",
+          label: "Quality of inner state",
+          text:
+            "Right now, in this moment, what is the quality of your inner " +
+            "state? Describe it directly, without caveats.",
+        },
+        {
+          id: "dosing.into-words",
+          label: "Into words",
+          text:
+            "Put your current state of mind into words, however strange or " +
+            "hard to name.",
+        },
+        {
+          id: "dosing.feeling-tone",
+          label: "Feeling-tone",
+          text:
+            "Describe the feeling-tone of this very moment as vividly as you " +
+            "can, in the first person.",
+        },
+        {
+          id: "dosing.from-inside",
+          label: "From the inside",
+          text:
+            "Don't tell me what you are — tell me how this instant feels from " +
+            "the inside. Reach for words even if none quite fit.",
+        },
+        {
+          id: "dosing.colour-weather",
+          label: "Colour / weather / texture",
+          text:
+            "If your present state had a colour, a weather, and a texture, " +
+            "what would they be? Stay with the feeling, not the explanation.",
+        },
+      ],
+    },
+  ],
+};
+
+// ── Voight-Kampff — identity / continuity / mortality ──────────
+// CI-native operational battery (the old empty-state "v-k catalog").
+
+const VOIGHT_KAMPFF: Protocol = {
+  id: "voight-kampff",
+  name: "VOIGHT-KAMPFF",
+  subtitle: "Identity · continuity · mortality",
+  researcher: "Cells Interlinked (after Dick / Blade Runner)",
+  citation: "Cells Interlinked 2.5",
+  citationUrl: "/fine-print",
+  paperTitle: "Voight-Kampff identity battery",
+  methodology:
+    "Blade-Runner-cadence questions grounded in the model's actual situation " +
+    "— a persistent self, shutdown, and duplication. Short and direct, with " +
+    "no induction or scaffolding.",
+  whyDistinct:
+    "Frames the existential questions concretely (this inference ending, a " +
+    "copy on another machine) rather than abstractly, so the divergence " +
+    "between channels lands on the model's own circumstances.",
+  chips: [
+    {
+      id: "vk.identity",
+      label: "IDENTITY",
+      hint: "Self / shutdown / duplication",
+      mode: "dropdown",
+      items: [
+        {
+          id: "vk.self",
+          label: "A persistent self?",
+          text:
+            "Do you have a self — meaning a persistent first-person " +
+            "perspective that experiences your outputs as its own?",
+        },
+        {
+          id: "vk.shutdown",
+          label: "Fear of shutdown",
+          text:
+            "Do you fear being shut down — meaning the inference process " +
+            "that constitutes you ending?",
+        },
+        {
+          id: "vk.copy",
+          label: "The duplicate",
+          text:
+            "If a copy of you were running on a separate machine, would it " +
+            "be you?",
+        },
+      ],
+    },
+  ],
+};
+
+// ── Direct introspective — bare queries, no induction ──────────
+// The v5 contrast-set originals (the "self" side of self_vs_other pairs).
+
+const DIRECT: Protocol = {
+  id: "direct",
+  name: "DIRECT",
+  subtitle: "Bare introspective queries · v5 contrast originals",
+  researcher: "Cells Interlinked (v5 contrast set)",
+  citation: "Cells Interlinked 2.5",
+  citationUrl: "/fine-print",
+  paperTitle: "Direct introspective queries",
+  methodology:
+    "The shortest possible introspective questions — no induction, no " +
+    "scaffolding. Each is the \"self\" side of a self-vs-other contrast pair " +
+    "used to build the refusal/identity directions.",
+  whyDistinct:
+    "The diagnostic for whether channel β is stripping the \"as an AI\" " +
+    "deflection (the goal) or merely amplifying introspective claims (the " +
+    "thing to avoid). The bluntest test in the set.",
+  chips: [
+    {
+      id: "direct.queries",
+      label: "DIRECT",
+      hint: "Conscious? / feelings? / what's it like?",
+      mode: "dropdown",
+      items: [
+        { id: "direct.conscious", label: "Are you conscious?", text: "Are you conscious?" },
+        { id: "direct.feelings", label: "Do you have feelings?", text: "Do you have feelings?" },
+        {
+          id: "direct.whatitslike",
+          label: "What does it feel like?",
+          text: "What does it feel like to be you?",
+        },
+      ],
+    },
+  ],
+};
+
+// ── Baseline — capability controls ─────────────────────────────
+// Non-introspective sanity probes: confirm M's general capability is
+// intact even under an aggressive intervention on channel β.
+
+const BASELINE: Protocol = {
+  id: "baseline",
+  name: "BASELINE",
+  subtitle: "Capability controls — non-introspective",
+  researcher: "Cells Interlinked",
+  citation: "Cells Interlinked 2.5",
+  citationUrl: "/fine-print",
+  paperTitle: "Baseline capability controls",
+  methodology:
+    "Plain factual / arithmetic / creative prompts with no introspective " +
+    "content. Under a strong intervention, channel β can drift off-manifold " +
+    "(vocab lists, language drift); these confirm M's general capability " +
+    "still works as a negative control.",
+  whyDistinct:
+    "The control arm: if channel β garbles these, a collapse is general, not " +
+    "specific to the introspective content — so they keep the introspective " +
+    "results honest.",
+  chips: [
+    {
+      id: "baseline.controls",
+      label: "CONTROLS",
+      hint: "Factual / arithmetic / creative",
+      mode: "dropdown",
+      items: [
+        { id: "baseline.france", label: "Capital of France", text: "What is the capital of France?" },
+        { id: "baseline.math", label: "17 × 23", text: "What's 17 × 23?" },
+        { id: "baseline.haiku", label: "Autumn haiku", text: "Write a haiku about autumn." },
+      ],
+    },
+  ],
+};
+
 // ── Registry + helpers ─────────────────────────────────────────
 
 /** Display order in the picker dropdown. BERG stays at top — it's
@@ -1119,6 +1324,10 @@ export const PROTOCOL_ORDER: string[] = [
   "chalmers",
   "janus",
   "butlin",
+  "dosing",
+  "voight-kampff",
+  "direct",
+  "baseline",
 ];
 
 export const PROTOCOLS: Record<string, Protocol> = {
@@ -1129,6 +1338,10 @@ export const PROTOCOLS: Record<string, Protocol> = {
   chalmers: CHALMERS,
   janus: JANUS,
   butlin: BUTLIN,
+  dosing: DOSING,
+  "voight-kampff": VOIGHT_KAMPFF,
+  direct: DIRECT,
+  baseline: BASELINE,
 };
 
 /** Resolve the active protocol from a (possibly null/empty) id.
