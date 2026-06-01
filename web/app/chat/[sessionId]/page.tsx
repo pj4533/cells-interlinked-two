@@ -259,6 +259,8 @@ function TurnReview({
           text={turn.ablated_text}
           stoppedReason={turn.ablated_stopped_reason}
           alpha={turn.alpha}
+          mode={turn.mode}
+          doseRamp={turn.dose_ramp}
           variantName={variantName}
           imageUrl={turn.ablated_image_url ?? ""}
           imagePrompt={turn.ablated_image_prompt ?? ""}
@@ -281,6 +283,8 @@ function ChannelView({
   text,
   stoppedReason,
   alpha,
+  mode,
+  doseRamp,
   variantName,
   imageUrl,
   imagePrompt,
@@ -291,6 +295,8 @@ function ChannelView({
   text: string;
   stoppedReason: string;
   alpha: number;
+  mode?: string;
+  doseRamp?: number;
   variantName: string;
   imageUrl: string;
   imagePrompt: string;
@@ -305,7 +311,13 @@ function ChannelView({
   const tintBg = isRaw
     ? "rgba(232,195,130,0.025)"
     : "rgba(94,229,229,0.03)";
-  const label = isRaw ? "CHANNEL α · RAW" : `CHANNEL β · α=${alpha.toFixed(2)}`;
+  const rampSuffix =
+    !isRaw && mode === "steer" && doseRamp != null
+      ? ` · ramp ${doseRamp === 0 ? "off" : doseRamp}`
+      : "";
+  const label = isRaw
+    ? "CHANNEL α · RAW"
+    : `CHANNEL β · α=${alpha.toFixed(2)}${rampSuffix}`;
   // Same shape as the live /chat page: drop the "refusal projected"
   // prefix on the ablated side so the variant name fits on one line
   // and the column heights stay aligned across both channels.

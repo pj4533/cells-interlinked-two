@@ -38,6 +38,7 @@ export interface ChatTurnView {
   alpha: number;
   mode?: ChatMode;
   dose_emotion?: string | null;
+  dose_ramp?: number;
   // Imagery state. Empty strings when imagery was off for the turn
   // or that side's Nano Banana call failed; *_image_url is the
   // /chat-images-mount relative path.

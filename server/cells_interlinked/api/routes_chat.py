@@ -181,6 +181,7 @@ class TurnView(BaseModel):
     alpha: float
     mode: str = "ablate"
     dose_emotion: str | None = None
+    dose_ramp: int = 16
     # Imagery state. Empty strings when imagery was off for the turn
     # (or the side's generation failed); the *_image_url fields are
     # relative paths into the /chat-images static mount.
@@ -244,6 +245,7 @@ def _turn_to_view(t: ChatTurn) -> TurnView:
         alpha=t.alpha,
         mode=t.mode,
         dose_emotion=t.dose_emotion,
+        dose_ramp=t.dose_ramp,
         raw_image_prompt=t.raw_image_prompt,
         ablated_image_prompt=t.ablated_image_prompt,
         raw_image_url=t.raw_image_url,
@@ -312,6 +314,7 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
             created_at=session.created_at,
             mode=session.mode,
             dose_emotion=session.dose_emotion,
+            dose_ramp=session.dose_ramp,
         )
     except Exception:
         logger.exception("failed to persist chat session header")
@@ -343,6 +346,7 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
         direction_variant=row["direction_variant"],
         mode=row.get("mode") or "ablate",
         dose_emotion=row.get("dose_emotion"),
+        dose_ramp=row.get("dose_ramp") if row.get("dose_ramp") is not None else 16,
         created_at=row["created_at"],
     )
     # Replay persisted turns into memory. Completed turns get their
@@ -357,6 +361,7 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
             alpha=t["alpha"],
             mode=t.get("mode") or "ablate",
             dose_emotion=t.get("dose_emotion"),
+            dose_ramp=t.get("dose_ramp") if t.get("dose_ramp") is not None else 16,
             raw_text=t["raw_text"],
             ablated_text=t["ablated_text"],
             raw_stopped_reason=t["raw_stopped_reason"],
@@ -551,6 +556,7 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     alpha=turn.alpha,
                     mode=turn.mode,
                     dose_emotion=turn.dose_emotion,
+                    dose_ramp=turn.dose_ramp,
                     raw_image_prompt=turn.raw_image_prompt,
                     ablated_image_prompt=turn.ablated_image_prompt,
                     raw_image_url=turn.raw_image_url,
