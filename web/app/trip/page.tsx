@@ -1120,12 +1120,76 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
         </HelpItem>
 
         <HelpItem term="The α chips">
-          Tap a chip to overlay or hide that run — in both the 3-D scene and the
-          text panel. Compare where the ablated paths diverge from baseline, and
-          read what the model actually said at each strength. The{" "}
-          <b className="text-amber">by α / off-manifold</b> switch under the chips
+          Tap a chip to overlay or hide that run — everywhere at once: the 3-D
+          scene, the signature mandalas, and the measures table. Compare where
+          the ablated paths diverge from baseline, and read what the model
+          actually did at each strength. The{" "}
+          <b className="text-amber">by α / off-manifold</b> switch on the scene
           recolors the dots: by series hue, or by how far each token drifts off
           the model&apos;s normal manifold (see below).
+        </HelpItem>
+
+        <HelpItem
+          term="Signature mandalas — a readout when words fail"
+          science={
+            <>
+              The mandala is a glowing radial curve <code>r(θ)</code> drawn on a
+              canvas, computed <b>entirely client-side</b> from the series data
+              you already have — no extra model calls.
+              <br />
+              <br />
+              <b>Base shape</b> (lobe complexity ={" "}
+              <i>effective dimensionality</i>):{" "}
+              <code>r(θ) = 1 + Σᵢ √(λᵢ/λ₀)·cos((i+1)θ + φᵢ)</code>, where the{" "}
+              <code>λᵢ</code> are the trajectory&apos;s covariance eigenvalues — the
+              same spectrum that drives eff-dim. A collapsed run (few directions)
+              is a simple flower; a rich one is an intricate rosette. The base
+              phases <code>φᵢ</code> are golden-angle constants (orientation only,
+              not meaningful).
+              <br />
+              <br />
+              <b>Direction fingerprint</b> (the petals + hue): a SECOND set of
+              overtone harmonics whose amplitudes and phases come from the run&apos;s{" "}
+              <b>direction signature</b> — the centroid of its trajectory in the
+              shared raw-PCA frame (the mean of its 3-D coords). Different
+              intervention directions land in different parts of that frame →
+              different overtone pattern, and the hue is the signature&apos;s angle.
+              The <i>same</i> direction reproduces across prompts → the{" "}
+              <i>same</i> fingerprint (that reproducibility is the evidence it is a
+              real state, not prompt-noise).
+              <br />
+              <br />
+              <b>Dose strength</b> (<code>|α|/αmax</code>) scales the overtone
+              depth, the chirality (how hard it swirls), and a fine ripple — so
+              same-direction tiles at different α differ by how warped they are.{" "}
+              <b>Colour</b> is the α colour (amber raw → cyan/violet), matching the
+              chips and scene. Drawn with 5-fold symmetry, additive glow, and a
+              slow rotate/breathe.
+              <br />
+              <br />
+              <b>Honest caveat:</b> the eigenvalue amplitudes and the signature
+              overtones are <i>real measured quantities</i>; the base phases and
+              the fixed overtone harmonic numbers are aesthetic. It is a faithful
+              encoding of the state&apos;s <i>structure</i> — not a literal picture
+              of &ldquo;what the model feels.&rdquo;
+            </>
+          }
+        >
+          On the <b className="text-amber">Signatures</b> tab (and the desktop
+          rail) each run gets a <b className="text-cyan">signature mandala</b> — a
+          non-text picture of its internal structure. It exists because dosing an{" "}
+          <i>uncharted</i> direction often collapses the <b className="text-text">text</b>{" "}
+          into gibberish even though the underlying state is real and structured
+          (the token vocabulary just can&apos;t render it). The mandala draws that
+          structure so you still have a readout when words fail. At a glance:{" "}
+          <b className="text-amber">how intricate</b> = how many directions the
+          thought used (effective-dim); <b className="text-amber">the petal
+          pattern &amp; colour</b> = which intervention <i>direction</i> this is
+          (its fingerprint — same direction reproduces, different directions look
+          different); <b className="text-amber">how warped/swirled</b> = the dose
+          strength; the caption = verdict + eff-dim + off-manifold. Tap{" "}
+          <b className="text-cyan">≡ text</b> on any tile to read the raw output
+          instead.
         </HelpItem>
 
         <HelpItem
