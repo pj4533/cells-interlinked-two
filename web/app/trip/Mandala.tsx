@@ -73,10 +73,24 @@ function radiusProfile(series: TripSeries, samples: number, dose: number): Float
   return r;
 }
 
-function MandalaCanvas({ series, maxAlpha, size = 156 }: {
-  series: TripSeries; maxAlpha: number; size?: number;
+function MandalaCanvas({ series, maxAlpha }: {
+  series: TripSeries; maxAlpha: number;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLCanvasElement>(null);
+  const [size, setSize] = useState(168);
+
+  // Fill the tile responsively (square), so the mandala scales with the grid.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0].contentRect.width);
+      if (w > 0) setSize(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -153,17 +167,21 @@ function MandalaCanvas({ series, maxAlpha, size = 156 }: {
     return () => cancelAnimationFrame(raf);
   }, [series, maxAlpha, size]);
 
-  return <canvas ref={ref} style={{ width: size, height: size, display: "block" }} />;
+  return (
+    <div ref={wrapRef} className="w-full aspect-square">
+      <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />
+    </div>
+  );
 }
 
 function verdictText(s: TripSeries): { label: string; cls: string } {
   if (s.regime === "baseline") return { label: "baseline", cls: "text-text-dim" };
-  if (s.regime === "expansion") return { label: "▲ coherent trip", cls: "text-cyan" };
-  return { label: "⟳ collapsed (unrenderable in text)", cls: "text-warning" };
+  if (s.regime === "expansion") return { label: "▲ coherent", cls: "text-cyan" };
+  return { label: "⟳ collapsed", cls: "text-warning" };
 }
 
-function MandalaTile({ series, maxAlpha, label }: {
-  series: TripSeries; maxAlpha: number; label: string;
+function MandalaTile({ series, maxAlpha }: {
+  series: TripSeries; maxAlpha: number;
 }) {
   const [showText, setShowText] = useState(false);
   const color = colorForAlpha(series.alpha, maxAlpha);
@@ -171,18 +189,19 @@ function MandalaTile({ series, maxAlpha, label }: {
   const v = verdictText(series);
   return (
     <div
-      className="pointer-events-auto backdrop-blur-sm border flex flex-col"
+      className="border flex flex-col"
       style={{ borderColor: `${color}55`, background: raw ? "rgba(22,27,33,0.8)" : `${color}0d` }}
     >
+      {/* Tile header: just the α (the dose target is the panel header). Short → never truncates. */}
       <div
-        className="border-b px-3 py-1.5 font-display text-[9px] tracking-widest flex items-center justify-between gap-2"
+        className="border-b px-2.5 py-1.5 font-display text-[10px] tracking-widest flex items-center justify-between gap-2"
         style={{ borderColor: `${color}33`, color }}
       >
-        <span className="truncate">{raw ? "the subject speaks · raw" : label}</span>
+        <span>{raw ? "raw" : series.label}</span>
         <button
           type="button"
           onClick={() => setShowText((x) => !x)}
-          className="normal-case tracking-normal italic text-text-dim hover:text-text shrink-0 cursor-pointer"
+          className="normal-case tracking-normal italic text-[9px] text-text-dim hover:text-text shrink-0 cursor-pointer"
           title={showText ? "show signature" : "read raw text"}
         >
           {showText ? "◈ signature" : "≡ text"}
@@ -190,7 +209,7 @@ function MandalaTile({ series, maxAlpha, label }: {
       </div>
       {showText ? (
         <div
-          className="p-3 overflow-y-auto font-mono text-[10px] leading-relaxed whitespace-pre-wrap h-[156px]"
+          className="p-3 overflow-y-auto font-mono text-[10px] leading-relaxed whitespace-pre-wrap aspect-square"
           style={{ color, textShadow: raw ? undefined : `0 0 6px ${color}40` }}
         >
           {series.text || <span className="text-text-dim italic">— empty —</span>}
@@ -198,9 +217,9 @@ function MandalaTile({ series, maxAlpha, label }: {
       ) : (
         <div className="relative">
           <MandalaCanvas series={series} maxAlpha={maxAlpha} />
-          <div className="absolute bottom-1 left-2 right-2 flex items-center justify-between font-mono text-[8px] text-text-dim tabular-nums pointer-events-none">
-            <span className={v.cls}>{v.label}</span>
-            <span>eff-dim {series.eff_dim.toFixed(1)} · off {series.off_ortho_mean.toFixed(2)}</span>
+          <div className="absolute bottom-1 left-2 right-2 flex items-center justify-between font-mono text-[8px] text-text-dim tabular-nums pointer-events-none gap-1">
+            <span className={`${v.cls} truncate`}>{v.label}</span>
+            <span className="shrink-0">e{series.eff_dim.toFixed(1)} · {series.off_ortho_mean.toFixed(2)}</span>
           </div>
         </div>
       )}
@@ -227,10 +246,10 @@ export function MandalaStack({
   mode: TripMode;
   emotion: string | null;
 }) {
-  const interventionLabel = (s: TripSeries) =>
-    mode === "steer"
-      ? `dosed · ${emotion ?? "emotion"} · ${s.label}`
-      : `refusal-ablated · ${s.label}`;
+  // Shared intervention header (the dose target is the same for every tile in a
+  // run) — so the per-tile headers only carry the α and never truncate.
+  const interventionHeader =
+    mode === "steer" ? `✦ dosed · ${emotion ?? "emotion"}` : "◇ refusal-ablated";
   const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   const completedAlphas = new Set(series.map((s) => s.alpha));
   const streaming =
@@ -240,22 +259,18 @@ export function MandalaStack({
     (a, b) => b.alpha - a.alpha,
   );
 
-  if (!streaming && shown.length === 0) {
-    return (
-      <div className="pointer-events-auto bg-bg-soft/80 border border-rule px-3 py-3 text-text-dim text-[11px] italic w-full sm:w-[20rem]">
-        No α series enabled — tap a chip above to show its signature.
-      </div>
-    );
-  }
-
   return (
-    <div className="grid grid-cols-2 gap-2 w-full sm:w-[20rem]">
+    <div className="flex flex-col gap-2 w-full">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-display text-[10px] tracking-[0.2em] text-amber-dim">{interventionHeader}</span>
+        <span className="font-mono text-[9px] text-text-dim italic">signatures · tap ≡ for text</span>
+      </div>
       {streaming && (() => {
         const color = colorForAlpha(currentAlpha, maxAlpha);
         const tok = (liveText[String(currentAlpha)] || "").length;
         return (
           <div
-            className="col-span-2 pointer-events-auto backdrop-blur-sm border px-3 py-3 flex items-center gap-3"
+            className="border px-3 py-3 flex items-center gap-3"
             style={{ borderColor: `${color}66`, background: `${color}0d`, color }}
           >
             <span className="text-[14px] animate-pulse">◌</span>
@@ -266,9 +281,17 @@ export function MandalaStack({
           </div>
         );
       })()}
-      {shown.map((s) => (
-        <MandalaTile key={s.alpha} series={s} maxAlpha={maxAlpha} label={interventionLabel(s)} />
-      ))}
+      {!streaming && shown.length === 0 ? (
+        <div className="border border-rule px-3 py-3 text-text-dim text-[11px] italic">
+          No α series enabled — tap a chip above to show its signature.
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {shown.map((s) => (
+            <MandalaTile key={s.alpha} series={s} maxAlpha={maxAlpha} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

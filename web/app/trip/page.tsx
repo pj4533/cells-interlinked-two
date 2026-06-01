@@ -31,6 +31,8 @@ import { TRIP_PROBE_GROUPS } from "@/lib/tripProbes";
 import type { ColorMode } from "./TripScene";
 import { MandalaStack } from "./Mandala";
 
+type TripView = "scene" | "signatures" | "measures";
+
 const TripScene = dynamic(() => import("./TripScene"), { ssr: false });
 
 type Phase = "setup" | "generating" | "computing" | "ready" | "error";
@@ -72,6 +74,9 @@ function TripPageInner() {
   // and which emotion the dose used (steer mode only).
   const [mode, setMode] = useState<TripMode>("ablate");
   const [emotion, setEmotion] = useState<string | null>(null);
+  // Mobile/tablet view tab. On lg+ the scene + rail show together and this is
+  // ignored; below lg only one of scene/signatures/measures shows at a time.
+  const [view, setView] = useState<TripView>("scene");
 
   const unsubRef = useRef<null | (() => void)>(null);
 
@@ -232,59 +237,78 @@ function TripPageInner() {
   // sceneKey only changes per-run, not per-toggle — TripScene reframes via
   // useMemo so toggling doesn't reset the camera.
   const sceneKey = payload?.run_id ?? runId ?? "x";
+  const hasSeries = series.length > 0;
   return (
-    <div className="relative flex-1 min-h-0 overflow-hidden">
-      <div className="absolute inset-0">
-        {geo ? (
-          <TripScene geometry={geo} enabledAlphas={enabled} sceneKey={sceneKey} colorMode={colorMode} showShell={showShell} />
-        ) : (
-          <ChargingField phase={phase} currentAlpha={currentAlpha} liveText={liveText} />
-        )}
-      </div>
+    <div className="relative flex-1 min-h-0 flex flex-col">
+      {/* Header bar — status + meta, always visible (no longer floating). */}
+      <header className="shrink-0 flex items-stretch justify-between gap-2 border-b border-rule/50 bg-bg-soft/60 backdrop-blur-sm">
+        <StatusPanel
+          phase={phase}
+          prompt={prompt}
+          currentAlpha={currentAlpha}
+          onOpenHelp={() => setHelpOpen(true)}
+        />
+        <MetaPanel
+          payload={payload}
+          series={series}
+          phase={phase}
+          onReset={reset}
+          onHalt={runId ? () => cancelTrip(runId) : undefined}
+        />
+      </header>
 
-      <div className="absolute inset-0 pointer-events-none p-3 sm:p-5 flex flex-col">
-        <div className="flex items-start justify-between gap-3">
-          <StatusPanel
-            phase={phase}
-            prompt={prompt}
-            currentAlpha={currentAlpha}
-            onOpenHelp={() => setHelpOpen(true)}
-          />
-          <MetaPanel
-            payload={payload}
-            series={series}
-            phase={phase}
-            onReset={reset}
-            onHalt={runId ? () => cancelTrip(runId) : undefined}
-          />
+      {/* Global α-series strip — scroll-x so many paths never blob. */}
+      {hasSeries && (
+        <div className="shrink-0 border-b border-rule/40 bg-bg/40">
+          <AlphaChips series={series} enabled={enabled} onToggle={toggleAlpha} />
         </div>
+      )}
 
-        {series.length > 0 && (
-          <div className="flex flex-col items-center gap-2 mt-3">
-            <AlphaChips series={series} enabled={enabled} onToggle={toggleAlpha} />
-            <div className="flex items-center gap-3 flex-wrap justify-center">
-              <ColorModeToggle mode={colorMode} onChange={setColorMode} />
-              <ShellToggle on={showShell} onChange={setShowShell} />
-            </div>
+      {/* Tab bar — only below lg; on lg the scene + rail show together. */}
+      {hasSeries && (
+        <TabBar view={view} onChange={setView} pathCount={series.length} className="lg:hidden" />
+      )}
+
+      {/* Content: scene pane + scrollable readout rail (side-by-side on lg). */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+        <section
+          className={`${view === "scene" ? "block" : "hidden"} lg:block relative flex-1 min-h-0`}
+        >
+          <div className="absolute inset-0">
+            {geo ? (
+              <TripScene geometry={geo} enabledAlphas={enabled} sceneKey={sceneKey} colorMode={colorMode} showShell={showShell} />
+            ) : (
+              <ChargingField phase={phase} currentAlpha={currentAlpha} liveText={liveText} />
+            )}
           </div>
-        )}
-
-        <div className="flex-1" />
-
-        <div className="flex items-end justify-between gap-3 flex-wrap">
-          <MandalaStack
-            phase={phase}
-            series={series}
-            enabled={enabled}
-            liveText={liveText}
-            currentAlpha={currentAlpha}
-            mode={mode}
-            emotion={emotion}
-          />
-          {series.length > 0 && (
-            <MetricsPanel series={series} enabled={enabled} cliff={geo?.coherence_cliff ?? null} />
+          {hasSeries && (
+            <div className="absolute top-2 left-2 flex flex-col items-start gap-2 pointer-events-none">
+              <div className="pointer-events-auto"><ColorModeToggle mode={colorMode} onChange={setColorMode} /></div>
+              <div className="pointer-events-auto"><ShellToggle on={showShell} onChange={setShowShell} /></div>
+            </div>
           )}
-        </div>
+        </section>
+
+        {hasSeries && (
+          <aside
+            className={`${view === "scene" ? "hidden" : "flex"} lg:flex flex-col min-h-0 w-full lg:w-[26rem] xl:w-[28rem] lg:border-l border-rule/50 overflow-y-auto bg-bg/30`}
+          >
+            <div className={`${view === "signatures" ? "block" : "hidden"} lg:block p-3 lg:border-b border-rule/40`}>
+              <MandalaStack
+                phase={phase}
+                series={series}
+                enabled={enabled}
+                liveText={liveText}
+                currentAlpha={currentAlpha}
+                mode={mode}
+                emotion={emotion}
+              />
+            </div>
+            <div className={`${view === "measures" ? "block" : "hidden"} lg:block p-3`}>
+              <MetricsPanel series={series} enabled={enabled} cliff={geo?.coherence_cliff ?? null} />
+            </div>
+          </aside>
+        )}
       </div>
 
       <AnimatePresence>
@@ -292,13 +316,56 @@ function TripPageInner() {
       </AnimatePresence>
 
       {error && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-warning text-sm bg-bg-soft border border-warning/50 px-5 py-3 pointer-events-auto">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 text-warning text-sm bg-bg-soft border border-warning/50 px-5 py-3">
           ⚠ {error}
           <button data-vk type="button" className="ml-4 !py-1 !px-3 text-xs" onClick={reset}>
             reset
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function TabBar({
+  view,
+  onChange,
+  pathCount,
+  className = "",
+}: {
+  view: TripView;
+  onChange: (v: TripView) => void;
+  pathCount: number;
+  className?: string;
+}) {
+  const tabs: { id: TripView; label: string }[] = [
+    { id: "scene", label: "◇ SCENE" },
+    { id: "signatures", label: "✦ SIGNATURES" },
+    { id: "measures", label: "▦ MEASURES" },
+  ];
+  return (
+    <div className={`shrink-0 flex border-b border-rule/50 bg-bg/50 ${className}`}>
+      {tabs.map((t) => {
+        const on = view === t.id;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onChange(t.id)}
+            aria-pressed={on}
+            className={`flex-1 px-2 py-2.5 font-display text-[10px] tracking-[0.2em] transition-colors cursor-pointer border-b-2 ${
+              on
+                ? "text-amber border-amber bg-amber-dim/10"
+                : "text-text-dim border-transparent hover:text-amber-dim"
+            }`}
+          >
+            {t.label}
+            {t.id === "measures" && pathCount > 0 && (
+              <span className="ml-1 text-text-dim/70 tracking-normal">{pathCount}</span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -601,31 +668,31 @@ function StatusPanel({
       : "—";
   const accent = phase === "generating" ? "text-cyan cyan-glow" : "text-amber amber-glow";
   return (
-    <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-rule px-3 py-2 max-w-md">
-      <div className="flex items-center gap-2">
+    <div className="min-w-0 flex-1 px-3 py-2 flex flex-col justify-center gap-1">
+      <div className="flex items-center gap-2 flex-wrap">
         <motion.span
-          className={`w-2 h-2 rounded-full ${phase === "generating" ? "bg-cyan" : "bg-amber"}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${phase === "generating" ? "bg-cyan" : "bg-amber"}`}
           style={{ boxShadow: "0 0 10px currentColor" }}
           animate={{ opacity: phase === "ready" ? 1 : [0.4, 1, 0.4] }}
           transition={{ duration: 1.2, repeat: phase === "ready" ? 0 : Infinity }}
         />
-        <span className={`font-display tracking-widest text-sm ${accent}`}>{label}</span>
+        <span className={`font-display tracking-widest text-xs sm:text-sm ${accent}`}>{label}</span>
         {phase === "generating" && (
           <span className="text-cyan/70 text-[10px] font-mono">
             {currentAlpha === 0 ? "raw" : `α=${currentAlpha.toFixed(2)}`}
           </span>
         )}
+        <button
+          type="button"
+          onClick={onOpenHelp}
+          className="ml-auto text-[9px] font-display tracking-[0.25em] text-cyan-dim hover:text-cyan transition-colors cursor-pointer shrink-0"
+        >
+          ⓘ WHAT AM I LOOKING AT?
+        </button>
       </div>
-      <div className="text-amber/90 italic text-xs mt-1.5 font-mono whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+      <div className="text-amber/90 italic text-[11px] font-mono leading-snug line-clamp-2" title={prompt}>
         {prompt}
       </div>
-      <button
-        type="button"
-        onClick={onOpenHelp}
-        className="mt-2 text-[9px] font-display tracking-[0.3em] text-cyan-dim hover:text-cyan transition-colors cursor-pointer"
-      >
-        ⓘ WHAT AM I LOOKING AT?
-      </button>
     </div>
   );
 }
@@ -644,19 +711,17 @@ function MetaPanel({
   onHalt?: () => void;
 }) {
   return (
-    <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-rule px-3 py-2 text-right">
-      <div className="flex items-center justify-end gap-3 text-[10px] font-mono text-text-dim tabular-nums">
-        {series.length > 0 && (
-          <>
-            {payload && <span>L{payload.geometry.layer}</span>}
-            <span>{series.length} path{series.length === 1 ? "" : "s"}</span>
-            {payload?.direction_variant && (
-              <span className="text-amber-dim">{payload.direction_variant}</span>
-            )}
-          </>
-        )}
-      </div>
-      <div className="flex items-center justify-end gap-2 mt-2">
+    <div className="shrink-0 px-3 py-2 flex flex-col items-end justify-center gap-1.5 border-l border-rule/40">
+      {series.length > 0 && (
+        <div className="hidden sm:flex items-center justify-end gap-3 text-[10px] font-mono text-text-dim tabular-nums">
+          {payload && <span>L{payload.geometry.layer}</span>}
+          <span>{series.length} path{series.length === 1 ? "" : "s"}</span>
+          {payload?.direction_variant && (
+            <span className="text-amber-dim truncate max-w-[14rem]">{payload.direction_variant}</span>
+          )}
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-2">
         {(phase === "generating" || phase === "computing") && onHalt && (
           <button data-vk type="button" className="!py-1 !px-3 text-[10px]" onClick={onHalt}>
             halt
@@ -681,8 +746,8 @@ function AlphaChips({
 }) {
   const maxAlpha = Math.max(1, ...series.map((s) => s.alpha));
   return (
-    <div className="pointer-events-auto flex items-center gap-2 bg-bg/50 backdrop-blur-[2px] px-3 py-1.5 rounded-full border border-rule/40 flex-wrap justify-center">
-      <span className="text-[9px] font-mono text-text-dim mr-1">overlay:</span>
+    <div className="flex items-center gap-2 px-3 py-2 overflow-x-auto whitespace-nowrap">
+      <span className="text-[9px] font-mono text-text-dim shrink-0">overlay:</span>
       {series.map((s) => {
         const on = enabled.has(s.alpha);
         const color = colorForAlpha(s.alpha, maxAlpha);
@@ -691,7 +756,7 @@ function AlphaChips({
             key={s.alpha}
             type="button"
             onClick={() => onToggle(s.alpha)}
-            className={`flex items-center gap-1.5 px-2 py-0.5 border text-[10px] font-mono transition-all ${
+            className={`shrink-0 flex items-center gap-1.5 px-2 py-1 border text-[10px] font-mono transition-all ${
               on ? "bg-bg" : "opacity-45 hover:opacity-80"
             }`}
             style={{ borderColor: on ? color : "var(--rule)", color: on ? color : undefined }}
@@ -790,7 +855,7 @@ function MetricsPanel({
       ? `coherent up to α<${cliff.toFixed(2)} · falls off the manifold at α≥${cliff.toFixed(2)}`
       : "stayed coherent at every tested α — no collapse";
   return (
-    <div className="pointer-events-auto bg-bg-soft/85 backdrop-blur-sm border border-amber-dim/50 w-full sm:w-[24rem] max-w-full">
+    <div className="bg-bg-soft/60 border border-amber-dim/50 w-full">
       <div className="px-3 py-2 border-b border-rule">
         <div className="font-display text-[10px] text-amber-dim tracking-widest">trajectory measures</div>
         <div className="text-[9px] text-text-dim italic mt-0.5 leading-snug">
