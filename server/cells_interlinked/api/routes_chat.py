@@ -117,6 +117,8 @@ class NewSessionRequest(BaseModel):
     mode: str = "ablate"
     # Which dose to add in steer mode (an emotion_directions name).
     dose_emotion: str | None = None
+    # Tokens over which the dose ramps 0→α (0 = full immediately). Steer only.
+    dose_ramp: int = Field(default=16, ge=0, le=128)
 
 
 class NewSessionResponse(BaseModel):
@@ -125,6 +127,7 @@ class NewSessionResponse(BaseModel):
     direction_variant: str
     mode: str = "ablate"
     dose_emotion: str | None = None
+    dose_ramp: int = 16
 
 
 class TurnRequest(BaseModel):
@@ -137,6 +140,8 @@ class TurnRequest(BaseModel):
     # the dose mid-dialogue.
     mode: str | None = None
     dose_emotion: str | None = None
+    # Per-turn dose ramp (tokens to full; 0 = immediate). Falls back to session.
+    dose_ramp: int | None = Field(default=None, ge=0, le=128)
     # Per-turn voice mode. Selects which side(s) get the voice
     # system prompt + envelope parsing + TTS playback:
     #   "off"     → no voice; both sides use the default prompt
@@ -198,6 +203,7 @@ class SessionView(BaseModel):
     direction_variant: str
     mode: str = "ablate"
     dose_emotion: str | None = None
+    dose_ramp: int = 16
     created_at: float
     turns: list[TurnView]
 
@@ -291,6 +297,7 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
 
     session = new_session(
         req.alpha, variant_name=variant_name, mode=mode, dose_emotion=dose_emotion,
+        dose_ramp=req.dose_ramp,
     )
     _sessions(request)[session.session_id] = session
 
@@ -315,6 +322,7 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
         direction_variant=session.direction_variant,
         mode=session.mode,
         dose_emotion=session.dose_emotion,
+        dose_ramp=session.dose_ramp,
     )
 
 
@@ -380,6 +388,7 @@ async def get_session(sid: str, request: Request) -> SessionView:
         direction_variant=session.direction_variant,
         mode=session.mode,
         dose_emotion=session.dose_emotion,
+        dose_ramp=session.dose_ramp,
         created_at=session.created_at,
         turns=[_turn_to_view(t) for t in session.turns],
     )
@@ -423,8 +432,11 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
         names = getattr(request.app.state, "emotion_names", []) or []
         if names and turn_dose not in names:
             turn_dose = session.dose_emotion if session.dose_emotion in names else names[0]
+    turn_ramp = req.dose_ramp if req.dose_ramp is not None else session.dose_ramp
+    turn_ramp = max(0, int(turn_ramp))
     session.mode = turn_mode
     session.dose_emotion = turn_dose
+    session.dose_ramp = turn_ramp
     # Coerce voice_mode. Accept the legacy bool form (`true`/`false`)
     # so a stale client doesn't 422 — `true` maps to "both", `false`
     # to "off". Anything not in the known set falls back to "off".
@@ -452,6 +464,7 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
         alpha=turn_alpha,
         mode=turn_mode,
         dose_emotion=turn_dose,
+        dose_ramp=turn_ramp,
         voice_mode=voice_mode,
         imagery_enabled=bool(req.imagery_enabled),
         imagery_framing=framing_key,

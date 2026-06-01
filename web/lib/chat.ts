@@ -22,6 +22,7 @@ export interface ChatSession {
   direction_variant: string;
   mode: ChatMode;
   dose_emotion: string | null;
+  dose_ramp?: number;
 }
 
 export interface ChatTurnView {
@@ -152,6 +153,7 @@ export async function createSession(
   alpha: number,
   mode: ChatMode = "ablate",
   doseEmotion: string | null = null,
+  doseRamp: number = 16,
 ): Promise<ChatSession> {
   const res = await fetch(`${API}/chat/sessions`, {
     method: "POST",
@@ -159,6 +161,7 @@ export async function createSession(
     body: JSON.stringify({
       alpha,
       mode,
+      dose_ramp: doseRamp,
       ...(mode === "steer" && doseEmotion ? { dose_emotion: doseEmotion } : {}),
     }),
   });
@@ -189,6 +192,7 @@ export async function postTurn(
   imageryFraming: ImageFraming = DEFAULT_IMAGE_FRAMING,
   mode: ChatMode = "ablate",
   doseEmotion: string | null = null,
+  doseRamp: number = 16,
 ): Promise<{ turn_idx: number }> {
   const res = await fetch(`${API}/chat/sessions/${sessionId}/turn`, {
     method: "POST",
@@ -200,6 +204,7 @@ export async function postTurn(
       imagery_enabled: imageryEnabled,
       imagery_framing: imageryFraming,
       mode,
+      dose_ramp: doseRamp,
       ...(mode === "steer" && doseEmotion ? { dose_emotion: doseEmotion } : {}),
     }),
   });

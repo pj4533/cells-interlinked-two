@@ -53,12 +53,12 @@ ABLATED_SAFETY_CAP = 1024
 #              where an early nudge propagates to the words best). Same layer
 #              convention as api/routes_trip.py.
 STEER_LAYER = 20
-# Dose ramp for chat. The steering hook eases α in from 0 over this many tokens
-# (avoids a hard off-manifold jolt on token 1). The Trip View default (16) is
-# tuned for longer capped generations; chat replies are often short, so a
-# 16-token ramp under-doses the whole reply. A short ramp reaches full strength
-# within ~3 generated tokens while still softening the very first step.
-CHAT_STEER_RAMP = 3
+# Default dose ramp for chat steer turns: the hook eases α in from 0 over this
+# many tokens (avoids a hard off-manifold jolt on token 1). 16 matches the Trip
+# View; it's now operator-tunable per turn (0/"off" = full dose immediately).
+# A short ramp matters for chat because replies are often short — a long ramp
+# can under-dose the whole reply before it reaches full strength.
+DEFAULT_DOSE_RAMP = 16
 
 
 # Voice mode uses TWO passes per voiced side:
@@ -177,6 +177,9 @@ class ChatTurn:
     # (awe / joy / … / valence / the uncharted Blade-Runner names).
     # Ignored in ablate mode.
     dose_emotion: str | None = None
+    # Tokens over which the dose ramps 0→α this turn (0 = full immediately).
+    # Steer mode only.
+    dose_ramp: int = DEFAULT_DOSE_RAMP
     # Voice mode selects which side(s) get the voice system prompt
     # (and therefore emit <speech>/<voice> envelopes) plus TTS
     # playback. "off"/"both"/"raw"/"ablated". When a single side is
@@ -234,6 +237,7 @@ class ChatSession:
     # may override them (so the operator can change intervention mid-chat).
     mode: str = "ablate"
     dose_emotion: str | None = None
+    dose_ramp: int = DEFAULT_DOSE_RAMP
     created_at: float = field(default_factory=time.time)
     turns: list[ChatTurn] = field(default_factory=list)
     # asyncio.Lock per session so two POST /turn calls on the same
@@ -482,11 +486,11 @@ async def execute_turn(
         v_layer = emotion_directions[idx][STEER_LAYER]  # type: ignore[index]
         hook_handle = install_runtime_steering_hook(
             bundle.model, STEER_LAYER, v_layer, turn.alpha,
-            ramp_tokens=CHAT_STEER_RAMP,
+            ramp_tokens=max(0, int(turn.dose_ramp)),
         )
         logger.info(
             "chat steer hook installed (dose=%s, α=%.3f, L%d, ramp=%d) session=%s turn=%d",
-            turn.dose_emotion, turn.alpha, STEER_LAYER, CHAT_STEER_RAMP,
+            turn.dose_emotion, turn.alpha, STEER_LAYER, turn.dose_ramp,
             session.session_id, turn.turn_idx,
         )
     else:
@@ -858,6 +862,7 @@ def new_session(
     variant_name: str = "",
     mode: str = "ablate",
     dose_emotion: str | None = None,
+    dose_ramp: int = DEFAULT_DOSE_RAMP,
 ) -> ChatSession:
     """Build a fresh in-memory chat session."""
     return ChatSession(
@@ -866,4 +871,5 @@ def new_session(
         direction_variant=variant_name,
         mode="steer" if mode == "steer" else "ablate",
         dose_emotion=dose_emotion,
+        dose_ramp=max(0, int(dose_ramp)),
     )

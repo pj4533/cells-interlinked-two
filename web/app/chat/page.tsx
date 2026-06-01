@@ -156,6 +156,11 @@ interface TurnVM {
 // anything higher.
 const ALPHA_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0];
 
+// Dose-ramp presets (tokens to reach full α). 0 = "off" (full dose from the
+// first token); higher = ease in more slowly. Default 16 (Trip View). "custom"
+// allows any value.
+const RAMP_PRESETS = [0, 1, 2, 3, 5, 8, 16];
+
 export default function ChatPage() {
   // α is per-turn: this is the "what to send next" value. Defaults
   // to 0.5; the empty-state sets the initial session α; thereafter
@@ -165,6 +170,9 @@ export default function ChatPage() {
   // α, set at start but changeable at any point mid-dialogue.
   const [pendingMode, setPendingMode] = useState<ChatMode>("ablate");
   const [pendingDose, setPendingDose] = useState<string>("awe");
+  // Dose ramp (tokens to full strength) for steer mode. Default 16 (Trip View
+  // default); 0 = full dose immediately. Changeable per turn like α.
+  const [pendingRamp, setPendingRamp] = useState<number>(16);
   const [doseEmotions, setDoseEmotions] = useState<string[]>([]);
   const [doseUncharted, setDoseUncharted] = useState<string[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
@@ -298,10 +306,10 @@ export default function ChatPage() {
 
   const ensureSession = useCallback(async (): Promise<ChatSession> => {
     if (session) return session;
-    const s = await createSession(pendingAlpha, pendingMode, pendingDose);
+    const s = await createSession(pendingAlpha, pendingMode, pendingDose, pendingRamp);
     setSession(s);
     return s;
-  }, [session, pendingAlpha, pendingMode, pendingDose]);
+  }, [session, pendingAlpha, pendingMode, pendingDose, pendingRamp]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -369,6 +377,7 @@ export default function ChatPage() {
           turnFraming,
           pendingMode,
           pendingDose,
+          pendingRamp,
         );
 
         if (unsubRef.current) unsubRef.current();
@@ -415,6 +424,7 @@ export default function ChatPage() {
       pendingAlpha,
       pendingMode,
       pendingDose,
+      pendingRamp,
       voiceMode,
       imageryOn,
       imageryFraming,
@@ -595,6 +605,8 @@ export default function ChatPage() {
         setMode={setPendingMode}
         dose={pendingDose}
         setDose={setPendingDose}
+        ramp={pendingRamp}
+        setRamp={setPendingRamp}
         emotions={doseEmotions}
         uncharted={doseUncharted}
         sessionActive={!!session}
@@ -1580,6 +1592,8 @@ function InputBar({
   setMode,
   dose,
   setDose,
+  ramp,
+  setRamp,
   emotions,
   uncharted,
   sessionActive,
@@ -1601,6 +1615,8 @@ function InputBar({
   setMode: (m: ChatMode) => void;
   dose: string;
   setDose: (d: string) => void;
+  ramp: number;
+  setRamp: (r: number) => void;
   emotions: string[];
   uncharted: string[];
   sessionActive: boolean;
@@ -1616,6 +1632,8 @@ function InputBar({
     !ALPHA_PRESETS.includes(alpha),
   );
   const [customText, setCustomText] = useState<string>(alpha.toFixed(2));
+  const [rampCustom, setRampCustom] = useState<boolean>(!RAMP_PRESETS.includes(ramp));
+  const [rampCustomText, setRampCustomText] = useState<string>(String(ramp));
   // Active interrogation protocol — see web/lib/protocols.ts and
   // docs/PROTOCOLS.md. null = OFF (no chip strip). Persisted in
   // localStorage so the operator doesn't have to re-select across
@@ -1818,6 +1836,76 @@ function InputBar({
               </span>
             )}
           </div>
+          {/* Dose ramp — tokens over which the dose eases 0→α (steer only).
+              "off" = full dose from the first token. Default 16. */}
+          {mode === "steer" && (
+            <div className="flex items-baseline gap-2 flex-wrap pl-5">
+              <span
+                className="font-display text-[9px] text-cyan-dim tracking-[0.35em]"
+                title="Tokens over which the dose ramps from 0 to full α. Lower = the dose lands sooner (matters for short replies). 'off' = full dose immediately."
+              >
+                DOSE&nbsp;RAMP&nbsp;·&nbsp;TOKENS&nbsp;TO&nbsp;FULL
+              </span>
+              {RAMP_PRESETS.map((r) => {
+                const active = !rampCustom && ramp === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    disabled={inFlight}
+                    onClick={() => {
+                      setRampCustom(false);
+                      setRamp(r);
+                    }}
+                    className={`px-2 py-0.5 border text-[10px] font-mono tabular-nums transition-colors ${
+                      active
+                        ? "border-cyan text-cyan bg-bg"
+                        : "border-rule/40 text-text-dim hover:text-text hover:border-rule disabled:opacity-50"
+                    }`}
+                    style={active ? { textShadow: "0 0 6px rgba(94,229,229,0.5)" } : undefined}
+                  >
+                    {r === 0 ? "off" : r}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                disabled={inFlight}
+                onClick={() => {
+                  setRampCustom(true);
+                  setRampCustomText(String(ramp));
+                }}
+                className={`px-2 py-0.5 border text-[10px] font-mono transition-colors ${
+                  rampCustom
+                    ? "border-cyan text-cyan bg-bg"
+                    : "border-rule/40 text-text-dim hover:text-text hover:border-rule disabled:opacity-50"
+                }`}
+              >
+                custom
+              </button>
+              {rampCustom && (
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  step="1"
+                  min={0}
+                  max={128}
+                  disabled={inFlight}
+                  value={rampCustomText}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    setRampCustomText(t);
+                    const parsed = parseInt(t, 10);
+                    if (!Number.isNaN(parsed)) {
+                      setRamp(Math.max(0, Math.min(128, parsed)));
+                    }
+                  }}
+                  placeholder="tok"
+                  className="px-2 py-0.5 w-16 border border-cyan text-cyan bg-bg text-[10px] font-mono tabular-nums focus:outline-none"
+                />
+              )}
+            </div>
+          )}
           {imageryOn && (
             <ImageryFramingStrip
               active={imageryFraming}
