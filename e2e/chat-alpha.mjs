@@ -1,0 +1,11 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
+await page.goto("http://localhost:3001/chat", { waitUntil: "networkidle" });
+await page.locator("textarea").first().waitFor({ timeout: 8000 });
+await page.waitForTimeout(500);
+const presets = await page.locator("button", { hasText: /^[0-9]\.[0-9]{2}$/ }).allInnerTexts();
+console.log("[alpha] preset buttons:", presets.join("  "));
+await page.screenshot({ path: "screenshots/chat/12_alpha_presets.png", clip: { x: 0, y: 770, width: 1000, height: 90 } });
+console.log("[alpha] 📸 12_alpha_presets.png");
+await browser.close();

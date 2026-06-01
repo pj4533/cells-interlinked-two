@@ -152,7 +152,9 @@ interface TurnVM {
   ablatedImageError: string;
 }
 
-const ALPHA_PRESETS = [0.25, 0.5, 0.75, 1.0];
+// Presets span 0.25 → 3.0 (the backend clamps to [0,5]); "custom" handles
+// anything higher.
+const ALPHA_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0];
 
 export default function ChatPage() {
   // α is per-turn: this is the "what to send next" value. Defaults
