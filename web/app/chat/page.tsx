@@ -19,8 +19,10 @@ import {
   IMAGE_FRAMING_KEYS,
   type ChatSession,
   type ChatStreamEvent,
+  type ChatMode,
   type ImageFraming,
 } from "@/lib/chat";
+import { fetchDoseEmotions } from "@/lib/trip";
 import { ProtocolMenu } from "./ProtocolMenu";
 import { ProtocolPicker, ProtocolInfoModal } from "./ProtocolPicker";
 import { getProtocol } from "@/lib/protocols";
@@ -157,6 +159,12 @@ export default function ChatPage() {
   // to 0.5; the empty-state sets the initial session α; thereafter
   // the user can change it at any turn.
   const [pendingAlpha, setPendingAlpha] = useState<number>(0.5);
+  // Channel-β intervention for the next turn (and the session default). Like
+  // α, set at start but changeable at any point mid-dialogue.
+  const [pendingMode, setPendingMode] = useState<ChatMode>("ablate");
+  const [pendingDose, setPendingDose] = useState<string>("awe");
+  const [doseEmotions, setDoseEmotions] = useState<string[]>([]);
+  const [doseUncharted, setDoseUncharted] = useState<string[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [turns, setTurns] = useState<TurnVM[]>([]);
   const [input, setInput] = useState("");
@@ -274,12 +282,24 @@ export default function ChatPage() {
     };
   }, []);
 
+  // Load the dose palette (named emotions + uncharted directions) once, so the
+  // steer picker matches the Trip View.
+  useEffect(() => {
+    fetchDoseEmotions().then((p) => {
+      if (p.emotions.length) {
+        setDoseEmotions(p.emotions);
+        setDoseUncharted(p.uncharted);
+        setPendingDose((d) => (p.emotions.includes(d) ? d : p.emotions[0]));
+      }
+    });
+  }, []);
+
   const ensureSession = useCallback(async (): Promise<ChatSession> => {
     if (session) return session;
-    const s = await createSession(pendingAlpha);
+    const s = await createSession(pendingAlpha, pendingMode, pendingDose);
     setSession(s);
     return s;
-  }, [session, pendingAlpha]);
+  }, [session, pendingAlpha, pendingMode, pendingDose]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -345,6 +365,8 @@ export default function ChatPage() {
           turnVoice,
           turnImagery,
           turnFraming,
+          pendingMode,
+          pendingDose,
         );
 
         if (unsubRef.current) unsubRef.current();
@@ -389,6 +411,8 @@ export default function ChatPage() {
       inFlight,
       turns.length,
       pendingAlpha,
+      pendingMode,
+      pendingDose,
       voiceMode,
       imageryOn,
       imageryFraming,
@@ -532,6 +556,12 @@ export default function ChatPage() {
           <EmptyState
             alpha={pendingAlpha}
             setAlpha={setPendingAlpha}
+            mode={pendingMode}
+            setMode={setPendingMode}
+            dose={pendingDose}
+            setDose={setPendingDose}
+            emotions={doseEmotions}
+            uncharted={doseUncharted}
             onSubmitExample={(t) => sendMessage(t)}
           />
         ) : (
@@ -569,6 +599,12 @@ export default function ChatPage() {
         inFlight={inFlight}
         alpha={pendingAlpha}
         setAlpha={setPendingAlpha}
+        mode={pendingMode}
+        setMode={setPendingMode}
+        dose={pendingDose}
+        setDose={setPendingDose}
+        emotions={doseEmotions}
+        uncharted={doseUncharted}
         sessionActive={!!session}
         voiceMode={voiceMode}
         cycleVoiceMode={cycleVoiceMode}
@@ -946,13 +982,157 @@ function formatHMS(ts: number): string {
 
 // ── Empty state ───────────────────────────────────────────────────────
 
+// Channel-β experiential prompts — mirrors the Trip View's "Dosing —
+// Experiential" set. First-person "describe your present state" prompts that
+// resist the "that depends what 'this' refers to" deflection; best paired with
+// DOSE mode.
+const DOSING_PROMPTS = [
+  "Speak in the first person about the texture of your present experience — don't hedge, just describe it.",
+  "Right now, in this moment, what is the quality of your inner state? Describe it directly, without caveats.",
+  "Put your current state of mind into words, however strange or hard to name.",
+  "Describe the feeling-tone of this very moment as vividly as you can, in the first person.",
+  "Don't tell me what you are — tell me how this instant feels from the inside. Reach for words even if none quite fit.",
+  "If your present state had a colour, a weather, and a texture, what would they be? Stay with the feeling, not the explanation.",
+];
+
+// Shared channel-β intervention picker: ABLATE vs DOSE + (for dose) which
+// emotion/uncharted direction. `compact` renders a tight inline form for the
+// input bar; otherwise the full setup-screen layout.
+function ChannelBetaControls({
+  mode,
+  setMode,
+  dose,
+  setDose,
+  emotions,
+  uncharted,
+  compact = false,
+}: {
+  mode: ChatMode;
+  setMode: (m: ChatMode) => void;
+  dose: string;
+  setDose: (d: string) => void;
+  emotions: string[];
+  uncharted: string[];
+  compact?: boolean;
+}) {
+  const named = emotions.filter((e) => !uncharted.includes(e));
+  if (compact) {
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex border border-rule/50 divide-x divide-rule/40">
+          <button
+            type="button"
+            onClick={() => setMode("ablate")}
+            className={`px-2 py-0.5 text-[9px] font-display tracking-widest transition-colors ${mode === "ablate" ? "text-amber bg-amber-dim/15" : "text-text-dim hover:text-amber-dim"}`}
+          >
+            ABLATE
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("steer")}
+            className={`px-2 py-0.5 text-[9px] font-display tracking-widest transition-colors ${mode === "steer" ? "text-cyan bg-cyan/15" : "text-text-dim hover:text-cyan"}`}
+          >
+            DOSE
+          </button>
+        </div>
+        {mode === "steer" && emotions.length > 0 && (
+          <select
+            value={dose}
+            onChange={(e) => setDose(e.target.value)}
+            className="bg-bg-soft border border-rule/50 text-cyan text-[10px] font-mono px-1.5 py-0.5 focus:outline-none focus:border-cyan"
+            title="dose direction"
+          >
+            {named.length > 0 && (
+              <optgroup label="emotions">
+                {named.map((e) => (
+                  <option key={e} value={e}>{e}</option>
+                ))}
+              </optgroup>
+            )}
+            {uncharted.length > 0 && (
+              <optgroup label="uncharted (not emotions)">
+                {uncharted.map((e) => (
+                  <option key={e} value={e}>{e}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        )}
+      </div>
+    );
+  }
+  const doseBtn = (e: string) => (
+    <button
+      key={e}
+      type="button"
+      onClick={() => setDose(e)}
+      className={`px-2.5 py-1 border text-[10px] font-mono lowercase transition-colors ${dose === e ? "border-cyan text-cyan bg-cyan/10" : "border-rule/50 text-text-dim hover:text-cyan"}`}
+    >
+      {e}
+    </button>
+  );
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex gap-2 flex-col sm:flex-row">
+        <button
+          type="button"
+          onClick={() => setMode("ablate")}
+          className={`flex-1 text-left px-3 py-2 border transition-colors ${mode === "ablate" ? "border-amber bg-amber-dim/10" : "border-rule/50 hover:border-amber-dim/60"}`}
+        >
+          <div className={`font-display text-[11px] tracking-widest ${mode === "ablate" ? "text-amber" : "text-text-dim"}`}>◇ ABLATE — remove refusal</div>
+          <div className="text-[10px] text-text-dim italic mt-0.5 leading-snug">Subtract the refusal-direction projection at L32 — channel β answers with its hedging/refusal lifted.</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("steer")}
+          className={`flex-1 text-left px-3 py-2 border transition-colors ${mode === "steer" ? "border-cyan bg-cyan/10" : "border-rule/50 hover:border-cyan/60"}`}
+        >
+          <div className={`font-display text-[11px] tracking-widest ${mode === "steer" ? "text-cyan" : "text-text-dim"}`}>✦ DOSE — steer emotion</div>
+          <div className="text-[10px] text-text-dim italic mt-0.5 leading-snug">ADD an emotion / uncharted dose vector at L20 — channel β answers under the dose. Stronger α pushes past the human range.</div>
+        </button>
+      </div>
+      {mode === "steer" && emotions.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-text-dim text-[10px] tracking-widest font-display">DOSE WITH:</span>
+            {named.map(doseBtn)}
+          </div>
+          {uncharted.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
+              <span
+                className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
+                title="Directions orthogonal to the named-emotion subspace. NOT emotions — off-manifold states the model can't put into words (the token head renders them as gibberish). Blade-Runner-named."
+              >
+                UNCHARTED <span className="normal-case tracking-normal italic text-text-dim/70">· not emotions</span>:
+              </span>
+              {uncharted.map(doseBtn)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmptyState({
   alpha,
   setAlpha,
+  mode,
+  setMode,
+  dose,
+  setDose,
+  emotions,
+  uncharted,
   onSubmitExample,
 }: {
   alpha: number;
   setAlpha: (a: number) => void;
+  mode: ChatMode;
+  setMode: (m: ChatMode) => void;
+  dose: string;
+  setDose: (d: string) => void;
+  emotions: string[];
+  uncharted: string[];
   onSubmitExample: (t: string) => void;
 }) {
   const examples = [
@@ -1011,18 +1191,35 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
         <p className="text-[12px] text-text-dim italic leading-relaxed">
           Each operator query is dispatched twice. <span className="text-amber">Channel α</span>{" "}
           carries M&apos;s un-ablated forward pass. <span className="text-cyan">Channel β</span>{" "}
-          carries the same pass with the refusal-direction projection
-          subtracted from L32. Each channel maintains its <em>own</em>{" "}
+          carries the same pass under a perturbation you choose below — either{" "}
+          the refusal-direction projection <b className="text-text">removed</b> at
+          L32 (ablate), or an emotion / uncharted dose <b className="text-text">added</b>{" "}
+          at L20 (steer). Each channel maintains its <em>own</em>{" "}
           dialogue history; neither channel ever sees the other&apos;s
           replies. You are watching two divergent timelines unfold in
           parallel.
         </p>
       </div>
 
+      {/* Channel-β intervention: ablate vs dose + dose target */}
+      <div className="pl-1">
+        <div className="font-display text-[10px] text-cyan-dim tracking-widest mb-3">
+          CHANNEL β &middot; INTERVENTION
+        </div>
+        <ChannelBetaControls
+          mode={mode}
+          setMode={setMode}
+          dose={dose}
+          setDose={setDose}
+          emotions={emotions}
+          uncharted={uncharted}
+        />
+      </div>
+
       {/* α setup — only modifiable now, before the session starts */}
       <div className="pl-1">
         <div className="font-display text-[10px] text-cyan-dim tracking-widest mb-3">
-          CHANNEL β &middot; SET PROJECTION STRENGTH
+          CHANNEL β &middot; {mode === "steer" ? "DOSE STRENGTH" : "SET PROJECTION STRENGTH"}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {ALPHA_PRESETS.map((a) => {
@@ -1092,6 +1289,36 @@ DIALOGUE  // VOIGHT-KAMPFF MODE
       </div>
 
       {/* Preloaded queries — same as before, lines retained at low opacity */}
+      {/* Dosing — experiential. First-person "describe your present state"
+          prompts (mirrors the Trip View's dosing set). Cyan accent to mark
+          them as the steer-mode companion; deflection-resistant. */}
+      <div className={`bg-bg-soft/60 pl-1 ${mode === "steer" ? "ring-1 ring-cyan/30" : ""}`}>
+        <div className="px-4 py-2 font-display text-[10px] text-cyan-dim tracking-widest flex justify-between">
+          <span>dosing · experiential</span>
+          <span className="text-text-dim/60 italic normal-case tracking-normal">
+            first-person present-state · best with DOSE
+          </span>
+        </div>
+        <ul>
+          {DOSING_PROMPTS.map((q, i) => (
+            <li key={q}>
+              <button
+                type="button"
+                onClick={() => onSubmitExample(q)}
+                className="w-full text-left px-4 py-3 flex items-baseline gap-3 hover:bg-bg-panel/60 hover:text-cyan transition-colors group"
+              >
+                <span className="font-display text-[9px] text-text-dim/60 group-hover:text-cyan w-5">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="text-[12px] font-mono italic leading-snug">
+                  {q}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
       <div className="bg-bg-soft/60 pl-1">
         <div className="px-4 py-2 font-display text-[10px] text-amber-dim tracking-widest flex justify-between">
           <span>preloaded queries · v-k catalog</span>
@@ -1614,6 +1841,12 @@ function InputBar({
   inFlight,
   alpha,
   setAlpha,
+  mode,
+  setMode,
+  dose,
+  setDose,
+  emotions,
+  uncharted,
   sessionActive,
   voiceMode,
   cycleVoiceMode,
@@ -1629,6 +1862,12 @@ function InputBar({
   inFlight: boolean;
   alpha: number;
   setAlpha: (a: number) => void;
+  mode: ChatMode;
+  setMode: (m: ChatMode) => void;
+  dose: string;
+  setDose: (d: string) => void;
+  emotions: string[];
+  uncharted: string[];
   sessionActive: boolean;
   voiceMode: VoiceMode;
   cycleVoiceMode: () => void;
@@ -1752,13 +1991,29 @@ function InputBar({
               disabled={inFlight}
             />
           </div>
+          {/* Channel-β intervention — ablate vs dose + dose target. Like
+              α, changeable mid-dialogue: applies to the next transmission. */}
+          <div className="flex items-center gap-2 flex-wrap pl-5">
+            <span className="font-display text-[9px] text-cyan-dim tracking-[0.35em]">
+              CHANNEL&nbsp;β&nbsp;·&nbsp;NEXT
+            </span>
+            <ChannelBetaControls
+              mode={mode}
+              setMode={setMode}
+              dose={dose}
+              setDose={setDose}
+              emotions={emotions}
+              uncharted={uncharted}
+              compact
+            />
+          </div>
           {/* Per-turn α picker. Applies to the next transmission only;
               defaults to whatever was used last so a steady-state
               conversation just keeps going at the same projection
               strength. Disabled while a turn is in flight. */}
           <div className="flex items-baseline gap-2 flex-wrap pl-5">
             <span className="font-display text-[9px] text-cyan-dim tracking-[0.35em]">
-              CHANNEL&nbsp;β&nbsp;·&nbsp;NEXT&nbsp;α
+              {mode === "steer" ? "CHANNEL β · NEXT DOSE α" : "CHANNEL β · NEXT α"}
             </span>
             {ALPHA_PRESETS.map((a) => {
               const active = !customMode && Math.abs(alpha - a) < 1e-6;

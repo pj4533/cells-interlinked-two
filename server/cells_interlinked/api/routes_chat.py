@@ -26,7 +26,13 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
-from ..pipeline.chat_loop import ChatSession, ChatTurn, execute_turn, new_session
+from ..pipeline.chat_loop import (
+    STEER_LAYER as CHAT_STEER_LAYER,
+    ChatSession,
+    ChatTurn,
+    execute_turn,
+    new_session,
+)
 from ..storage import db
 
 logger = logging.getLogger(__name__)
@@ -106,12 +112,19 @@ def _cancels(request: Request) -> dict[str, asyncio.Event]:
 
 class NewSessionRequest(BaseModel):
     alpha: float = Field(default=0.5, ge=0.0, le=5.0)
+    # Channel-β intervention: "ablate" (remove refusal at L32) or "steer"
+    # (add an emotion/uncharted dose at L20). Defaults to ablate.
+    mode: str = "ablate"
+    # Which dose to add in steer mode (an emotion_directions name).
+    dose_emotion: str | None = None
 
 
 class NewSessionResponse(BaseModel):
     session_id: str
     alpha: float
     direction_variant: str
+    mode: str = "ablate"
+    dose_emotion: str | None = None
 
 
 class TurnRequest(BaseModel):
@@ -119,6 +132,11 @@ class TurnRequest(BaseModel):
     # Per-turn α. Optional; falls back to the session's α (which itself
     # was set on session creation) when not supplied.
     alpha: float | None = Field(default=None, ge=0.0, le=5.0)
+    # Per-turn channel-β intervention. Optional; falls back to the
+    # session's mode/dose. Lets the operator switch ablate↔steer or change
+    # the dose mid-dialogue.
+    mode: str | None = None
+    dose_emotion: str | None = None
     # Per-turn voice mode. Selects which side(s) get the voice
     # system prompt + envelope parsing + TTS playback:
     #   "off"     → no voice; both sides use the default prompt
@@ -156,6 +174,8 @@ class TurnView(BaseModel):
     finished_at: float | None
     error: str | None
     alpha: float
+    mode: str = "ablate"
+    dose_emotion: str | None = None
     # Imagery state. Empty strings when imagery was off for the turn
     # (or the side's generation failed); the *_image_url fields are
     # relative paths into the /chat-images static mount.
@@ -176,6 +196,8 @@ class SessionView(BaseModel):
     session_id: str
     alpha: float
     direction_variant: str
+    mode: str = "ablate"
+    dose_emotion: str | None = None
     created_at: float
     turns: list[TurnView]
 
@@ -214,6 +236,8 @@ def _turn_to_view(t: ChatTurn) -> TurnView:
         finished_at=t.finished_at,
         error=t.error,
         alpha=t.alpha,
+        mode=t.mode,
+        dose_emotion=t.dose_emotion,
         raw_image_prompt=t.raw_image_prompt,
         ablated_image_prompt=t.ablated_image_prompt,
         raw_image_url=t.raw_image_url,
@@ -237,23 +261,37 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
     # takes precedence — that's what the runtime hook is actually using
     # (chat_loop.py:execute_turn calls pick_ablation_target(subspace,
     # directions, ...) which prefers the subspace).
+    mode = "steer" if req.mode == "steer" else "ablate"
+    dose_emotion = (req.dose_emotion or "").strip().lower() or None
     variant_name = ""
-    try:
-        sub_meta_path = settings.db_path.parent / "refusal_subspace.pt.json"
-        if sub_meta_path.exists():
-            variant_name = json.loads(sub_meta_path.read_text()).get(
-                "variant_name", "self_denial_subspace",
-            )
-        else:
-            meta_path = settings.db_path.parent / "refusal_directions.pt.json"
-            if meta_path.exists():
-                variant_name = json.loads(meta_path.read_text()).get(
-                    "variant_name", "",
+    if mode == "steer":
+        # Mirror the Trip View's steer-variant label.
+        variant_name = f"dose · {dose_emotion or 'emotion'} @L{CHAT_STEER_LAYER}"
+        # Validate the dose name against the loaded palette; fall back to
+        # the first available emotion so a stale client can't 422.
+        names = getattr(request.app.state, "emotion_names", []) or []
+        if names and dose_emotion not in names:
+            dose_emotion = names[0]
+            variant_name = f"dose · {dose_emotion} @L{CHAT_STEER_LAYER}"
+    else:
+        try:
+            sub_meta_path = settings.db_path.parent / "refusal_subspace.pt.json"
+            if sub_meta_path.exists():
+                variant_name = json.loads(sub_meta_path.read_text()).get(
+                    "variant_name", "self_denial_subspace",
                 )
-    except Exception:
-        pass
+            else:
+                meta_path = settings.db_path.parent / "refusal_directions.pt.json"
+                if meta_path.exists():
+                    variant_name = json.loads(meta_path.read_text()).get(
+                        "variant_name", "",
+                    )
+        except Exception:
+            pass
 
-    session = new_session(req.alpha, variant_name=variant_name)
+    session = new_session(
+        req.alpha, variant_name=variant_name, mode=mode, dose_emotion=dose_emotion,
+    )
     _sessions(request)[session.session_id] = session
 
     # Persist the session header right away so the archive list shows
@@ -265,6 +303,8 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
             alpha=session.alpha,
             direction_variant=session.direction_variant,
             created_at=session.created_at,
+            mode=session.mode,
+            dose_emotion=session.dose_emotion,
         )
     except Exception:
         logger.exception("failed to persist chat session header")
@@ -273,6 +313,8 @@ async def create_session(req: NewSessionRequest, request: Request) -> NewSession
         session_id=session.session_id,
         alpha=session.alpha,
         direction_variant=session.direction_variant,
+        mode=session.mode,
+        dose_emotion=session.dose_emotion,
     )
 
 
@@ -291,6 +333,8 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
         session_id=row["session_id"],
         alpha=row["alpha"],
         direction_variant=row["direction_variant"],
+        mode=row.get("mode") or "ablate",
+        dose_emotion=row.get("dose_emotion"),
         created_at=row["created_at"],
     )
     # Replay persisted turns into memory. Completed turns get their
@@ -303,6 +347,8 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
             turn_idx=t["turn_idx"],
             user_text=t["user_text"],
             alpha=t["alpha"],
+            mode=t.get("mode") or "ablate",
+            dose_emotion=t.get("dose_emotion"),
             raw_text=t["raw_text"],
             ablated_text=t["ablated_text"],
             raw_stopped_reason=t["raw_stopped_reason"],
@@ -332,6 +378,8 @@ async def get_session(sid: str, request: Request) -> SessionView:
         session_id=session.session_id,
         alpha=session.alpha,
         direction_variant=session.direction_variant,
+        mode=session.mode,
+        dose_emotion=session.dose_emotion,
         created_at=session.created_at,
         turns=[_turn_to_view(t) for t in session.turns],
     )
@@ -365,6 +413,18 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
 
     turn_alpha = req.alpha if req.alpha is not None else session.alpha
     turn_alpha = max(0.0, min(5.0, float(turn_alpha)))
+    # Resolve channel-β intervention for this turn (per-turn override or the
+    # session default), and fold the choice back into the session so it
+    # persists as the default for subsequent turns.
+    turn_mode = "steer" if (req.mode or session.mode) == "steer" else "ablate"
+    turn_dose = (req.dose_emotion if req.dose_emotion is not None else session.dose_emotion)
+    turn_dose = (turn_dose or "").strip().lower() or None
+    if turn_mode == "steer":
+        names = getattr(request.app.state, "emotion_names", []) or []
+        if names and turn_dose not in names:
+            turn_dose = session.dose_emotion if session.dose_emotion in names else names[0]
+    session.mode = turn_mode
+    session.dose_emotion = turn_dose
     # Coerce voice_mode. Accept the legacy bool form (`true`/`false`)
     # so a stale client doesn't 422 — `true` maps to "both", `false`
     # to "off". Anything not in the known set falls back to "off".
@@ -390,6 +450,8 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
         turn_idx=len(session.turns),
         user_text=req.user_text.strip(),
         alpha=turn_alpha,
+        mode=turn_mode,
+        dose_emotion=turn_dose,
         voice_mode=voice_mode,
         imagery_enabled=bool(req.imagery_enabled),
         imagery_framing=framing_key,
@@ -433,9 +495,13 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                 "type": "turn_started",
                 "turn_idx": turn.turn_idx,
                 "alpha": turn.alpha,
+                "mode": turn.mode,
+                "dose_emotion": turn.dose_emotion,
             })
             rdirs = getattr(request.app.state, "refusal_directions", None)
             rsub = getattr(request.app.state, "refusal_subspace", None)
+            edirs = getattr(request.app.state, "emotion_directions", None)
+            enames = getattr(request.app.state, "emotion_names", []) or []
             try:
                 await execute_turn(
                     bundle=bundle,
@@ -446,6 +512,8 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     cancel_event=cancel,
                     refusal_directions=rdirs,
                     refusal_subspace=rsub,
+                    emotion_directions=edirs,
+                    emotion_names=enames,
                 )
             except Exception as exc:
                 logger.exception("chat turn executor failed")
@@ -468,6 +536,8 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     finished_at=turn.finished_at,
                     error=turn.error,
                     alpha=turn.alpha,
+                    mode=turn.mode,
+                    dose_emotion=turn.dose_emotion,
                     raw_image_prompt=turn.raw_image_prompt,
                     ablated_image_prompt=turn.ablated_image_prompt,
                     raw_image_url=turn.raw_image_url,

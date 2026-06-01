@@ -12,10 +12,16 @@ function apiBase(): string {
 }
 const API = apiBase();
 
+// Channel-β intervention: "ablate" (remove refusal at L32) or "steer" (add an
+// emotion / uncharted dose at L20). Mirrors the Trip View.
+export type ChatMode = "ablate" | "steer";
+
 export interface ChatSession {
   session_id: string;
   alpha: number;
   direction_variant: string;
+  mode: ChatMode;
+  dose_emotion: string | null;
 }
 
 export interface ChatTurnView {
@@ -29,6 +35,8 @@ export interface ChatTurnView {
   finished_at: number | null;
   error: string | null;
   alpha: number;
+  mode?: ChatMode;
+  dose_emotion?: string | null;
   // Imagery state. Empty strings when imagery was off for the turn
   // or that side's Nano Banana call failed; *_image_url is the
   // /chat-images-mount relative path.
@@ -64,7 +72,7 @@ export interface ChatSessionView extends ChatSession {
 /** Streamed events from /chat/stream/{sid}/{turn}. The token events
  *  carry a `side` discriminator so the UI knows which bubble to grow. */
 export type ChatStreamEvent =
-  | { type: "turn_started"; turn_idx: number; alpha: number }
+  | { type: "turn_started"; turn_idx: number; alpha: number; mode?: ChatMode; dose_emotion?: string | null }
   | {
       type: "raw_token";
       side: "raw";
@@ -140,11 +148,19 @@ export type ChatStreamEvent =
     }
   | { type: "ping" };
 
-export async function createSession(alpha: number): Promise<ChatSession> {
+export async function createSession(
+  alpha: number,
+  mode: ChatMode = "ablate",
+  doseEmotion: string | null = null,
+): Promise<ChatSession> {
   const res = await fetch(`${API}/chat/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ alpha }),
+    body: JSON.stringify({
+      alpha,
+      mode,
+      ...(mode === "steer" && doseEmotion ? { dose_emotion: doseEmotion } : {}),
+    }),
   });
   if (!res.ok) throw new Error(`session create failed: ${res.status}`);
   return res.json();
@@ -171,6 +187,8 @@ export async function postTurn(
   voiceMode: VoiceModeWire = "off",
   imageryEnabled: boolean = false,
   imageryFraming: ImageFraming = DEFAULT_IMAGE_FRAMING,
+  mode: ChatMode = "ablate",
+  doseEmotion: string | null = null,
 ): Promise<{ turn_idx: number }> {
   const res = await fetch(`${API}/chat/sessions/${sessionId}/turn`, {
     method: "POST",
@@ -181,6 +199,8 @@ export async function postTurn(
       voice_mode: voiceMode,
       imagery_enabled: imageryEnabled,
       imagery_framing: imageryFraming,
+      mode,
+      ...(mode === "steer" && doseEmotion ? { dose_emotion: doseEmotion } : {}),
     }),
   });
   if (!res.ok) {

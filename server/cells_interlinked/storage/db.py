@@ -83,7 +83,12 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   created_at          REAL NOT NULL,
   -- Convenience denormalization for the archive list: prompt text of
   -- the first turn, mirroring the probes table's prompt_text role.
-  first_user_text     TEXT
+  first_user_text     TEXT,
+  -- Channel-β intervention: 'ablate' (remove refusal at L32) or 'steer'
+  -- (add an emotion/uncharted dose at L20). dose_emotion names the dose
+  -- in steer mode. NULL/empty on legacy rows → treated as 'ablate'.
+  mode                TEXT,
+  dose_emotion        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_created ON chat_sessions (created_at DESC);
@@ -113,6 +118,10 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   -- "arises"/"internal state"/"yourself"). Empty on turns that
   -- predate the framing feature.
   image_framing           TEXT NOT NULL DEFAULT '',
+  -- Per-turn channel-β intervention (may change mid-dialogue). NULL on
+  -- legacy rows → fall back to the session's mode/dose on read.
+  mode                    TEXT,
+  dose_emotion            TEXT,
   PRIMARY KEY (session_id, turn_idx)
 );
 
@@ -179,6 +188,18 @@ async def init_db(path: Path) -> None:
                 await db.execute(
                     f"ALTER TABLE chat_turns ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
                 )
+        # Channel-β steer mode: per-turn mode + dose_emotion (nullable, so
+        # legacy rows read back as 'ablate').
+        for col in ("mode", "dose_emotion"):
+            if col not in chat_cols:
+                await db.execute(f"ALTER TABLE chat_turns ADD COLUMN {col} TEXT")
+        # …and the session-level defaults.
+        cur = await db.execute("PRAGMA table_info(chat_sessions)")
+        sess_cols = {row[1] for row in await cur.fetchall()}
+        await cur.close()
+        for col in ("mode", "dose_emotion"):
+            if col not in sess_cols:
+                await db.execute(f"ALTER TABLE chat_sessions ADD COLUMN {col} TEXT")
         await db.execute(
             "INSERT OR IGNORE INTO autorun_state "
             "(id, running, last_change_at, total_runs, last_run_id, last_event) "
@@ -598,13 +619,16 @@ async def insert_chat_session(
     alpha: float,
     direction_variant: str,
     created_at: float,
+    mode: str = "ablate",
+    dose_emotion: str | None = None,
 ) -> None:
     async with aiosqlite.connect(path) as db:
         await db.execute(
             "INSERT OR IGNORE INTO chat_sessions "
-            "(session_id, alpha, direction_variant, created_at, first_user_text) "
-            "VALUES (?, ?, ?, ?, NULL)",
-            (session_id, alpha, direction_variant, created_at),
+            "(session_id, alpha, direction_variant, created_at, first_user_text, "
+            " mode, dose_emotion) "
+            "VALUES (?, ?, ?, ?, NULL, ?, ?)",
+            (session_id, alpha, direction_variant, created_at, mode, dose_emotion),
         )
         await db.commit()
 
@@ -628,6 +652,8 @@ async def upsert_chat_turn(
     raw_image_url: str = "",
     ablated_image_url: str = "",
     image_framing: str = "",
+    mode: str = "ablate",
+    dose_emotion: str | None = None,
 ) -> None:
     """Write the canonical state of one turn. Called once at turn
     completion (or with finished_at=None to record an in-flight row,
@@ -641,8 +667,9 @@ async def upsert_chat_turn(
             " raw_stopped_reason, ablated_stopped_reason, started_at, "
             " finished_at, error, alpha, "
             " raw_image_prompt, ablated_image_prompt, "
-            " raw_image_url, ablated_image_url, image_framing) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            " raw_image_url, ablated_image_url, image_framing, "
+            " mode, dose_emotion) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(session_id, turn_idx) DO UPDATE SET "
             "  user_text=excluded.user_text, "
             "  raw_text=excluded.raw_text, "
@@ -657,13 +684,16 @@ async def upsert_chat_turn(
             "  ablated_image_prompt=excluded.ablated_image_prompt, "
             "  raw_image_url=excluded.raw_image_url, "
             "  ablated_image_url=excluded.ablated_image_url, "
-            "  image_framing=excluded.image_framing",
+            "  image_framing=excluded.image_framing, "
+            "  mode=excluded.mode, "
+            "  dose_emotion=excluded.dose_emotion",
             (
                 session_id, turn_idx, user_text, raw_text, ablated_text,
                 raw_stopped_reason, ablated_stopped_reason, started_at,
                 finished_at, error, alpha,
                 raw_image_prompt, ablated_image_prompt,
                 raw_image_url, ablated_image_url, image_framing,
+                mode, dose_emotion,
             ),
         )
         if turn_idx == 0:
@@ -682,7 +712,7 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT session_id, alpha, direction_variant, created_at, "
-            "       first_user_text "
+            "       first_user_text, mode, dose_emotion "
             "FROM chat_sessions WHERE session_id = ?",
             (session_id,),
         ) as cur:
@@ -694,16 +724,21 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
             "       raw_stopped_reason, ablated_stopped_reason, "
             "       started_at, finished_at, error, alpha, "
             "       raw_image_prompt, ablated_image_prompt, "
-            "       raw_image_url, ablated_image_url, image_framing "
+            "       raw_image_url, ablated_image_url, image_framing, "
+            "       mode, dose_emotion "
             "FROM chat_turns WHERE session_id = ? ORDER BY turn_idx",
             (session_id,),
         ) as cur:
             trows = await cur.fetchall()
     session_alpha = srow["alpha"]
+    session_mode = srow["mode"] or "ablate"
+    session_dose = srow["dose_emotion"]
     return {
         "session_id": srow["session_id"],
         "alpha": session_alpha,
         "direction_variant": srow["direction_variant"] or "",
+        "mode": session_mode,
+        "dose_emotion": session_dose,
         "created_at": srow["created_at"],
         "first_user_text": srow["first_user_text"] or "",
         "turns": [
@@ -725,6 +760,9 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
                 "raw_image_url": t["raw_image_url"] or "",
                 "ablated_image_url": t["ablated_image_url"] or "",
                 "image_framing": t["image_framing"] or "",
+                # Per-turn mode/dose; legacy rows fall back to session.
+                "mode": t["mode"] or session_mode,
+                "dose_emotion": t["dose_emotion"] if t["dose_emotion"] is not None else session_dose,
             }
             for t in trows
         ],
@@ -745,7 +783,7 @@ async def list_chat_sessions(
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT s.session_id, s.alpha, s.direction_variant, "
-            "       s.created_at, s.first_user_text, "
+            "       s.created_at, s.first_user_text, s.mode, s.dose_emotion, "
             "       (SELECT COUNT(*) FROM chat_turns t "
             "        WHERE t.session_id = s.session_id) AS turn_count, "
             "       (SELECT COUNT(*) FROM chat_turns t "
@@ -770,6 +808,8 @@ async def list_chat_sessions(
                 "session_id": r["session_id"],
                 "alpha": r["alpha"],
                 "direction_variant": r["direction_variant"] or "",
+                "mode": r["mode"] or "ablate",
+                "dose_emotion": r["dose_emotion"],
                 "created_at": r["created_at"],
                 "first_user_text": r["first_user_text"] or "",
                 "turn_count": r["turn_count"] or 0,

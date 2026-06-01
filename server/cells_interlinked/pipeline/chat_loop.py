@@ -32,7 +32,11 @@ from dataclasses import dataclass, field
 import torch
 
 from ..config import settings
-from .abliteration import install_runtime_ablation_hook, pick_ablation_target
+from .abliteration import (
+    install_runtime_ablation_hook,
+    install_runtime_steering_hook,
+    pick_ablation_target,
+)
 from .generation_loop import ProbeConfig, run_probe
 from .model_loader import DEFAULT_SYSTEM_PROMPT, ModelBundle
 
@@ -42,6 +46,13 @@ logger = logging.getLogger(__name__)
 # Phase 1b safety cap also applies to chat ablation: no-EOS loops at
 # strong α would tie up the model.
 ABLATED_SAFETY_CAP = 1024
+
+# Channel β can be driven two ways, mirroring the Trip View:
+#   "ablate" → remove the refusal projection at the extraction layer (L32);
+#   "steer"  → ADD an emotion/uncharted dose vector at L20 (the steering layer,
+#              where an early nudge propagates to the words best). Same layer
+#              convention as api/routes_trip.py.
+STEER_LAYER = 20
 
 
 # Voice mode uses TWO passes per voiced side:
@@ -148,10 +159,18 @@ class ChatTurn:
     generations stream in."""
     turn_idx: int
     user_text: str
-    # α applied to the ablated pass for THIS turn only. Set per-turn
-    # by the client so the user can dial projection strength up or
-    # down mid-conversation; defaults to the session's α at creation.
+    # α applied to channel β for THIS turn only. Set per-turn by the
+    # client so the user can dial strength up or down mid-conversation;
+    # defaults to the session's α at creation.
     alpha: float = 0.5
+    # Channel-β intervention for THIS turn: "ablate" (remove refusal at
+    # L32) or "steer" (add a dose at L20). Both default from the session
+    # but can change per-turn, so the operator can switch mid-dialogue.
+    mode: str = "ablate"
+    # Which dose to add when mode == "steer" — an emotion_directions name
+    # (awe / joy / … / valence / the uncharted Blade-Runner names).
+    # Ignored in ablate mode.
+    dose_emotion: str | None = None
     # Voice mode selects which side(s) get the voice system prompt
     # (and therefore emit <speech>/<voice> envelopes) plus TTS
     # playback. "off"/"both"/"raw"/"ablated". When a single side is
@@ -205,6 +224,10 @@ class ChatSession:
     session_id: str
     alpha: float
     direction_variant: str = ""
+    # Session-level defaults for channel β; each turn inherits these but
+    # may override them (so the operator can change intervention mid-chat).
+    mode: str = "ablate"
+    dose_emotion: str | None = None
     created_at: float = field(default_factory=time.time)
     turns: list[ChatTurn] = field(default_factory=list)
     # asyncio.Lock per session so two POST /turn calls on the same
@@ -253,6 +276,8 @@ async def execute_turn(
     cancel_event: asyncio.Event,
     refusal_directions: torch.Tensor | None,
     refusal_subspace: torch.Tensor | None = None,
+    emotion_directions: torch.Tensor | None = None,
+    emotion_names: list[str] | None = None,
 ) -> None:
     """Run both passes for one turn. `raw_emit` and `ablated_emit` are
     async callables taking a token-event dict (the route layer adapts
@@ -393,9 +418,21 @@ async def execute_turn(
         turn.finished_at = time.time()
         return
 
-    # ─── Ablated pass ────────────────────────────────────────────
-    if refusal_directions is None and refusal_subspace is None:
-        turn.ablated_text = "[refusal directions not loaded — ablated pass skipped]"
+    # ─── Channel-β pass (ablate at L32, or steer/dose at L20) ────
+    names = emotion_names or []
+    steer = turn.mode == "steer"
+    if steer:
+        unavailable = (
+            emotion_directions is None
+            or not turn.dose_emotion
+            or turn.dose_emotion not in names
+        )
+        skip_msg = "[dose direction unavailable — steer pass skipped]"
+    else:
+        unavailable = refusal_directions is None and refusal_subspace is None
+        skip_msg = "[refusal directions not loaded — ablated pass skipped]"
+    if unavailable:
+        turn.ablated_text = skip_msg
         turn.ablated_stopped_reason = "skipped"
         await ablated_emit({
             "type": "token", "position": 0,
@@ -429,22 +466,38 @@ async def execute_turn(
 
     ablated_forwarder_task = asyncio.create_task(ablated_forwarder())
     abl_cfg = _dc.replace(raw_cfg, safety_cap=ABLATED_SAFETY_CAP)
-    r_target = pick_ablation_target(
-        refusal_subspace, refusal_directions, bundle.extraction_layer,
-    )
-    # r_target is either [d_model] (single) or [K, d_model] (subspace);
-    # install_runtime_ablation_hook routes on dim().
     pre_install_hooks = _l32_hook_count(bundle)
-    hook_handle = install_runtime_ablation_hook(
-        bundle.model, bundle.extraction_layer, r_target, turn.alpha,
-    )
-    target_kind = "subspace[K=%d]" % r_target.shape[0] if r_target.dim() == 2 else "single"
-    logger.info(
-        "chat ablated hook installed (mode=%s, α=%.3f, L%d hook count: %d → %d) "
-        "session=%s turn=%d",
-        target_kind, turn.alpha, bundle.extraction_layer, pre_install_hooks,
-        _l32_hook_count(bundle), session.session_id, turn.turn_idx,
-    )
+    if steer:
+        # Steering / dose: ADD α·v at L20 (gradual ramp), where v is the
+        # selected emotion / uncharted direction at the steer layer. Same
+        # mechanism the Trip View uses; an early-layer nudge propagates to
+        # the words far better than injecting at the L32 readout.
+        idx = names.index(turn.dose_emotion)
+        v_layer = emotion_directions[idx][STEER_LAYER]  # type: ignore[index]
+        hook_handle = install_runtime_steering_hook(
+            bundle.model, STEER_LAYER, v_layer, turn.alpha,
+        )
+        logger.info(
+            "chat steer hook installed (dose=%s, α=%.3f, L%d) session=%s turn=%d",
+            turn.dose_emotion, turn.alpha, STEER_LAYER,
+            session.session_id, turn.turn_idx,
+        )
+    else:
+        r_target = pick_ablation_target(
+            refusal_subspace, refusal_directions, bundle.extraction_layer,
+        )
+        # r_target is either [d_model] (single) or [K, d_model] (subspace);
+        # install_runtime_ablation_hook routes on dim().
+        hook_handle = install_runtime_ablation_hook(
+            bundle.model, bundle.extraction_layer, r_target, turn.alpha,
+        )
+        target_kind = "subspace[K=%d]" % r_target.shape[0] if r_target.dim() == 2 else "single"
+        logger.info(
+            "chat ablated hook installed (mode=%s, α=%.3f, L%d hook count: %d → %d) "
+            "session=%s turn=%d",
+            target_kind, turn.alpha, bundle.extraction_layer, pre_install_hooks,
+            _l32_hook_count(bundle), session.session_id, turn.turn_idx,
+        )
     # Two-stage critical section. The inner try drives the content
     # generation + forwarder cleanup. The voice-direction pass (also
     # under the hook, by design) runs AFTER the content but BEFORE
@@ -793,10 +846,17 @@ async def _generate_image_prompt(
     return cleaned
 
 
-def new_session(alpha: float, variant_name: str = "") -> ChatSession:
+def new_session(
+    alpha: float,
+    variant_name: str = "",
+    mode: str = "ablate",
+    dose_emotion: str | None = None,
+) -> ChatSession:
     """Build a fresh in-memory chat session."""
     return ChatSession(
         session_id=uuid.uuid4().hex[:12],
         alpha=max(0.0, min(5.0, float(alpha))),
         direction_variant=variant_name,
+        mode="steer" if mode == "steer" else "ablate",
+        dose_emotion=dose_emotion,
     )
