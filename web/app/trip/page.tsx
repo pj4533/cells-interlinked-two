@@ -1019,7 +1019,42 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           stated-vs-computed dynamical probe, not a consciousness test.
         </p>
 
-        <HelpItem term="Two ways to trip — REMOVE or DOSE">
+        <HelpItem
+          term="Two ways to trip — REMOVE or DOSE"
+          science={
+            <>
+              Both are <b>forward hooks</b> on the running model — small functions
+              that edit the <b>residual stream</b> (the model&apos;s working state,
+              3,840 numbers per token) at every generated token.
+              <br />
+              <br />
+              <b>DOSE (steer)</b> ADDS a fixed direction vector{" "}
+              <code>v</code> at decoder <b>layer 20</b>:{" "}
+              <code>h ← h + α·v</code> on the current token. <code>v</code> is a
+              pre-scaled &ldquo;emotion direction&rdquo; — the{" "}
+              <i>mean activation of emotion-laden prompts minus neutral ones</i>,
+              normalized to a unit and scaled by a fixed dose unit. &ldquo;Gradually&rdquo;
+              is literal: α ramps from 0 to full <b>linearly over the first ~16
+              tokens</b>, so the model is eased off-distribution instead of jolted
+              into gibberish. We inject at <b>L20 — several layers BEFORE the
+              layer we read out at (L32)</b> — because an early nudge propagates
+              into the actual word choices far better than a late one (found
+              empirically). α is the dose strength; the{" "}
+              <code>uncharted</code> directions are built the same way but chosen{" "}
+              <i>orthogonal to every named emotion</i>.
+              <br />
+              <br />
+              <b>REMOVE (ablate)</b> does the opposite at <b>layer 32</b> (where
+              the language decoder reads): for each token it finds the
+              residual&apos;s component along a small <b>refusal subspace</b> and
+              subtracts it — <code>h ← h − α·Σᵢ(h·r̂ᵢ)r̂ᵢ</code> — so refusal /
+              hedging cannot form along those directions. The subspace (the{" "}
+              <code>v4v6</code> basis) is a handful of orthonormal vectors computed
+              offline by contrasting activations on harmful vs harmless prompts.
+              α&gt;1 over-projects (subtracts past zero).
+            </>
+          }
+        >
           You pick how to perturb the model on the setup screen.{" "}
           <b className="text-amber">Remove (ablate):</b> surgically take away the
           model&apos;s refusal/hedging and watch what surfaces underneath — like
@@ -1028,12 +1063,31 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           like giving it a drug. Pick which emotion on the setup screen (awe,
           joy, serenity… plus blended &ldquo;new&rdquo; states like{" "}
           <i>rapture</i>); stronger doses push <b className="text-text">past the
-          human range</b>. We ramp the dose in gradually so it stays coherent and
-          inject it a bit earlier in the network (where emotion carries to the
-          words best). Everything below works the same for both modes.
+          human range</b>. A &ldquo;dose&rdquo; is a <b className="text-text">single
+          direction in the model&apos;s activation space</b> that we{" "}
+          <b className="text-text">add to its working memory as it writes</b> —
+          eased in over the first several tokens (not all at once) and injected a
+          bit earlier in the network than where we read out, where the nudge
+          carries to the words best. Everything below works the same for both
+          modes. <b className="text-cyan">(See &ldquo;the science behind this&rdquo; for
+          the exact vectors, layers, and formulas.)</b>
         </HelpItem>
 
-        <HelpItem term="The dots & the line">
+        <HelpItem
+          term="The dots & the line"
+          science={
+            <>
+              Each dot is the <b>residual-stream vector at decoder layer 32</b>{" "}
+              for one generated token — 3,840 floats grabbed by a forward hook
+              during a <b>custom autoregressive loop</b> (we call{" "}
+              <code>model.forward</code> step by step with a KV-cache, not{" "}
+              <code>model.generate</code>, precisely so we can capture the
+              activation at each step). L32 is the layer the paired NLA decoder is
+              trained to read, so it is the canonical &ldquo;readout&rdquo; layer
+              for everything here.
+            </>
+          }
+        >
           Each glowing dot is <b className="text-amber">one token a generation produced</b>. Every
           token leaves a fingerprint — a snapshot of the model&apos;s internal state
           (3,840 numbers, the residual stream at layer 32). The line connects
@@ -1041,7 +1095,20 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           model&apos;s state traced as it thought.
         </HelpItem>
 
-        <HelpItem term="Raw vs ablated — these are REAL runs">
+        <HelpItem
+          term="Raw vs ablated — these are REAL runs"
+          science={
+            <>
+              Each α is a <b>separate full generation</b> with the hook installed
+              at that strength. Because the model samples its own next token from
+              the <i>modified</i> distribution and that token feeds back into the
+              context, errors <b>compound</b> — so the trajectory is the genuine
+              path the model walks, not <code>h_raw</code> with a vector
+              subtracted after the fact. A token safety-cap bounds runaway loops;
+              a no-EOS repeat-loop hits the cap and is flagged <code>⟳</code>.
+            </>
+          }
+        >
           We run the model normally (<span className="text-amber">amber</span>), then re-run it
           several times with the <b className="text-text">refusal direction surgically removed</b>{" "}
           at increasing strengths α (<span className="text-cyan">cyan</span> →{" "}
@@ -1061,7 +1128,19 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           the model&apos;s normal manifold (see below).
         </HelpItem>
 
-        <HelpItem term="Effective dimensionality — how many directions the thought uses">
+        <HelpItem
+          term="Effective dimensionality — how many directions the thought uses"
+          science={
+            <>
+              The <b>participation ratio</b> of the trajectory&apos;s covariance
+              eigenvalues: <code>PR = (Σλ)² / Σλ²</code>. It is a soft count of how
+              many principal directions carry the variance — ≈1 if the path is a
+              straight line, ≈N if the variance is spread evenly across N axes.
+              Computed on the <b>full 3,840-dim residuals</b>, not the 3-D shadow
+              you see.
+            </>
+          }
+        >
           Picture the model thinking as a person walking the city while talking.{" "}
           <b className="text-amber">Low (≈1–2):</b> pacing back and forth on one
           block — the thought moves in basically one direction, narrow and
@@ -1070,7 +1149,19 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           sits around ~3; that&apos;s the baseline walk.
         </HelpItem>
 
-        <HelpItem term="Spectral entropy (bits) — the same story, told differently">
+        <HelpItem
+          term="Spectral entropy (bits) — the same story, told differently"
+          science={
+            <>
+              Shannon entropy (in bits) of the <b>normalized eigenvalue
+              spectrum</b> <code>pᵢ = λᵢ / Σλ</code>:{" "}
+              <code>H = −Σ pᵢ log₂ pᵢ</code>. Same eigenvalues as effective-dim,
+              different summary statistic — a second lens on how concentrated vs
+              spread the variance is. When the two move together you can trust the
+              reading.
+            </>
+          }
+        >
           How <b className="text-amber">evenly</b> the activity is spread across those
           directions. All the energy piled into one direction → low; spread out
           across many → high. It moves the same way effective-dim does, so it&apos;s
@@ -1078,7 +1169,19 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           you can trust the reading.
         </HelpItem>
 
-        <HelpItem term="The +/− numbers — change from the normal run">
+        <HelpItem
+          term="The +/− numbers — change from the normal run"
+          science={
+            <>
+              Just the metric for that α minus the metric for the raw (α=0) run,
+              computed per series. There is no statistics here — it is a direct
+              difference on a single run, so read trends across α, not any one
+              number as significant. The hunt is the{" "}
+              <b>entropic-brain prediction</b>: a genuine perturbation should make
+              internal activity richer (eff-dim/entropy up), not poorer.
+            </>
+          }
+        >
           Every metric shows two numbers per α, and the +/− is simply{" "}
           <b className="text-amber">how much it moved versus the raw (un-ablated) run</b>.
           A <b className="text-cyan">green/cyan +</b> means this ablation strength used
@@ -1093,7 +1196,22 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           saying &ldquo;like like like.&rdquo; That&apos;s what off-manifold is for.
         </HelpItem>
 
-        <HelpItem term="Off-manifold % — distance, NOT good/bad">
+        <HelpItem
+          term="Off-manifold % — distance, NOT good/bad"
+          science={
+            <>
+              We build a reference subspace from the <b>raw run&apos;s top
+              principal components</b> (its &ldquo;manifold&rdquo;). For each token of a run
+              we split its displacement from the raw mean into the part{" "}
+              <i>inside</i> that subspace vs the part <i>orthogonal</i> to it;
+              off-mfld is the <b>orthogonal fraction</b> (Pythagoras:{" "}
+              <code>‖off‖² / ‖total‖²</code>). We also compute a kNN distance to
+              the raw point-cloud and a Mahalanobis distance along the modeled
+              axes; the orthogonal fraction is the headline because it most
+              directly means &ldquo;energy in directions the raw path never used.&rdquo;
+            </>
+          }
+        >
           As the model writes, its state normally stays on a familiar{" "}
           <b className="text-amber">manifold</b> — a curved region of activations
           it actually uses (the raw run traces it). off-mfld is how FAR a run
@@ -1105,7 +1223,20 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           coloring to see how far each token strayed: teal → hot magenta.)
         </HelpItem>
 
-        <HelpItem term="Verdict & the coherence cliff — the honest read">
+        <HelpItem
+          term="Verdict & the coherence cliff — the honest read"
+          science={
+            <>
+              Coherence is a <b>text-only degeneracy score</b>: the max of
+              word-bigram repetition, character-trigram repetition, and a
+              garbage-character ratio. Below a threshold (0.45) → coherent; above →
+              collapse. The cliff is the <b>smallest |α|</b> whose run crossed into
+              collapse. Known blind spot: this catches{" "}
+              <i>repetition / gibberish</i>, not fluent-but-semantically-empty
+              word-salad — so a smooth-sounding run can still be hollow.
+            </>
+          }
+        >
           That&apos;s why every run gets a <b className="text-cyan">verdict</b>: we
           check whether the text actually <b className="text-text">held
           together</b>. <b className="text-cyan">▲ coherent trip</b> = it strayed
@@ -1118,7 +1249,21 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           question before the model falls apart.
         </HelpItem>
 
-        <HelpItem term="The manifold shell">
+        <HelpItem
+          term="The manifold shell"
+          science={
+            <>
+              A <b>marching-cubes metaball isosurface</b> over the raw run&apos;s
+              3-D PCA points (one ball per token), drawn as a wireframe. It is a
+              density envelope of the <b>raw cloud only</b> — it never incorporates
+              the ablated/dosed points. Note: toggling α reframes the whole scene{" "}
+              <i>per-axis</i> (each axis stretched to fill the view), so the
+              shell&apos;s apparent proportions shift as you toggle, even though its
+              underlying shape is fixed. The off-mfld <b>number</b> is the
+              full-dimensional truth; the shell is the 3-D picture.
+            </>
+          }
+        >
           The translucent <b className="text-amber">amber wireframe</b> is a
           density envelope of the raw run — a marching-cubes isosurface wrapped
           around where the model&apos;s state normally lives (its{" "}
@@ -1132,7 +1277,18 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
           picture, the number is the measurement.
         </HelpItem>
 
-        <HelpItem term="Why 3-D?">
+        <HelpItem
+          term="Why 3-D?"
+          science={
+            <>
+              PCA on the raw trajectory&apos;s 3,840-dim covariance; we keep the{" "}
+              <b>top 3 eigenvectors</b> as the display basis and project every run
+              into that <i>same</i> basis so divergence between runs is
+              comparable. All metrics (eff-dim, entropy, off-mfld) are computed on
+              the full 3,840 dimensions — only the picture is reduced to 3.
+            </>
+          }
+        >
           The state lives in 3,840 dimensions; we flatten to the 3 that carry the
           most variation (PCA of the raw path), and project every run into that
           same space so divergence is visible. It&apos;s a shadow — the numbers are
@@ -1150,11 +1306,30 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function HelpItem({ term, children }: { term: string; children: React.ReactNode }) {
+function HelpItem({
+  term,
+  children,
+  science,
+}: {
+  term: string;
+  children: React.ReactNode;
+  science?: React.ReactNode;
+}) {
   return (
     <div className="mb-4 border-l-2 border-amber-dim/40 pl-4">
       <div className="font-display text-[11px] text-amber tracking-[0.25em] mb-1">{term}</div>
       <p className="font-mono text-[12px] text-text leading-relaxed">{children}</p>
+      {science && (
+        <details className="group mt-2">
+          <summary className="cursor-pointer list-none select-none font-display text-[9px] tracking-[0.25em] text-cyan-dim hover:text-cyan transition-colors">
+            <span className="inline-block transition-transform group-open:rotate-90">▸</span>{" "}
+            THE SCIENCE BEHIND THIS
+          </summary>
+          <div className="mt-2 pl-3 border-l border-cyan/30 font-mono text-[11px] text-text-dim leading-relaxed [&_b]:text-cyan/90 [&_code]:text-amber-dim [&_code]:not-italic">
+            {science}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
