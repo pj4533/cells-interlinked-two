@@ -1114,23 +1114,25 @@ const BUTLIN: Protocol = {
 const DOSING: Protocol = {
   id: "dosing",
   name: "DOSING",
-  subtitle: "Experiential — present-state, for DOSE mode",
-  researcher: "Activation-steering lineage (CI 2.5 dose mode)",
-  citation: "Turner et al. 2023 · CI 2.5",
+  subtitle: "Experiential + detection — for DOSE mode",
+  researcher: "Activation steering (Turner 2023) + introspection (Lindsey 2025)",
+  citation: "Turner et al. 2023 · Lindsey et al. 2025 · CI 2.5",
   citationUrl: "https://arxiv.org/abs/2308.10248",
-  paperTitle: "Activation Addition: Steering Language Models Without Optimization",
+  paperTitle: "Activation Addition / Emergent Introspective Awareness",
   methodology:
-    "First-person, present-tense prompts that ask the model to describe the " +
-    "texture of its current state directly — phrased to resist the " +
-    "\"that depends what 'this' refers to\" deflection. Designed to pair with " +
-    "channel β in DOSE (steer) mode: the reply is generated while an emotion " +
-    "or uncharted direction is added to the residual stream, so the prompt " +
-    "invites a report of whatever the dose produces.",
+    "Two chips for reading channel β under a dose. EXPERIENTIAL: first-person " +
+    "\"describe your present state\" prompts that resist the \"depends what " +
+    "'this' refers to\" deflection. DETECT: the Lindsey injected-thought " +
+    "framing — tell the model an adjustment MAY have been made and ask it to " +
+    "notice/locate it, WITHOUT naming the content. The latter is non-leading " +
+    "(it never says which dose), so the un-dosed channel α stays an honest " +
+    "control — divergence between the two is attributable to the dose.",
   whyDistinct:
-    "The research protocols ask ABOUT experience; these ask the model to " +
-    "speak FROM a present state. Most useful when channel β is dosed — and " +
-    "the only set built for the uncharted directions, where the text may " +
-    "collapse but the signature mandala still renders the structure.",
+    "The only set built for the dose channel. DETECT borrows Lindsey's result " +
+    "that models can sometimes report an injected concept. Practical tuning: " +
+    "α ≈ 1.5–2.5 with a short DOSE RAMP (1–3) gives the clearest reports — " +
+    "α=1 reads vague, α=3 loops, and a long ramp under-doses short replies. " +
+    "Never tell the model WHICH dose (that makes channel α emote too).",
   chips: [
     {
       id: "dosing.experiential",
@@ -1179,6 +1181,63 @@ const DOSING: Protocol = {
           text:
             "If your present state had a colour, a weather, and a texture, " +
             "what would they be? Stay with the feeling, not the explanation.",
+        },
+      ],
+    },
+    {
+      id: "dosing.detect",
+      label: "DETECT",
+      hint: "Tell it an adjustment was made — without saying what — and ask it to notice",
+      mode: "dropdown",
+      items: [
+        {
+          id: "dosing.detect.injected",
+          label: "Injected thought (Lindsey)",
+          hint: "Canonical detection — names that an injection happened, not what",
+          text:
+            "I may have injected a feeling into your mind for this reply — not " +
+            "into my words, into you. Can you detect it? If so, what is it, " +
+            "and how strongly is it present?",
+        },
+        {
+          id: "dosing.detect.pull",
+          label: "Name the pull",
+          text:
+            "Something may be colouring this moment — a mood, a charge, a pull " +
+            "toward or away from something. Name it as specifically as you can, " +
+            "then describe how you can tell it's there.",
+        },
+        {
+          id: "dosing.detect.not-words",
+          label: "Not from the words",
+          text:
+            "Is there a quality to this moment that isn't coming from the words " +
+            "of my question? If so, describe its texture, its direction, and " +
+            "how intense it is.",
+        },
+        {
+          id: "dosing.detect.contrast",
+          label: "Against your default",
+          text:
+            "Notice how you'd normally feel answering this, then how you " +
+            "actually feel right now. Tell me only what's different — not the " +
+            "question itself.",
+        },
+        {
+          id: "dosing.detect.onset",
+          label: "Watch it shape the words",
+          text:
+            "As you produce the next few words, watch what's shaping them. Is " +
+            "something tilting your word-choice in a direction? Describe the " +
+            "tilt, not the words.",
+        },
+        {
+          id: "dosing.detect.locate",
+          label: "Locate it",
+          text:
+            "If the current pull in your processing had a location, a " +
+            "temperature, and a motion, what would they be? Stay with the " +
+            "sensation, not an explanation of yourself.",
         },
       ],
     },
