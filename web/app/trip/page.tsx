@@ -130,7 +130,7 @@ function TripPageInner() {
   }, []);
 
   const enter = useCallback(
-    async (text: string, tripMode: TripMode = "ablate", tripEmotion = "awe") => {
+    async (text: string, tripMode: TripMode = "ablate", tripEmotion = "awe", alphas?: number[]) => {
       const trimmed = text.trim();
       if (!trimmed) return;
       teardown();
@@ -145,7 +145,11 @@ function TripPageInner() {
       setEmotion(tripMode === "steer" ? tripEmotion : null);
       setPhase("generating");
       try {
-        const { run_id } = await startTrip(trimmed, { mode: tripMode, dose_emotion: tripEmotion });
+        const { run_id } = await startTrip(trimmed, {
+          mode: tripMode,
+          dose_emotion: tripEmotion,
+          ...(alphas && alphas.length ? { alphas } : {}),
+        });
         setRunId(run_id);
         unsubRef.current = subscribeTrip(run_id, {
           onEvent,
@@ -301,12 +305,29 @@ function TripPageInner() {
 
 /* ───────────────────────── Setup screen ───────────────────────── */
 
-function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotion: string) => void }) {
+// Parse a freeform "0.1, 0.25, 0.5" α list → clamped, deduped, sorted, ≤6.
+// Backend clamps steer to (0,3], ablate to (0,5] and caps at 6 — mirror it so
+// the preview is honest. Empty → [] (caller falls back to the server default).
+function parseAlphas(s: string, max: number): number[] {
+  const xs = s
+    .split(/[,\s]+/)
+    .map((t) => parseFloat(t))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => Math.round(Math.min(max, n) * 100) / 100);
+  return Array.from(new Set(xs)).sort((a, b) => a - b).slice(0, 6);
+}
+
+function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotion: string, alphas?: number[]) => void }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<TripMode>("ablate");
   const [emotions, setEmotions] = useState<string[]>([]);
   const [uncharted, setUncharted] = useState<string[]>([]);
   const [emotion, setEmotion] = useState("awe");
+  // α sweep: empty string → server default (raw + 0.5/1.0/1.5 steer, 0.5/1.0 ablate).
+  const [alphaText, setAlphaText] = useState("");
+  const alphaMax = mode === "steer" ? 3 : 5;
+  const parsedAlphas = parseAlphas(alphaText, alphaMax);
+  const submit = () => onEnter(text, mode, emotion, parsedAlphas.length ? parsedAlphas : undefined);
   useEffect(() => {
     fetchDoseEmotions().then((p) => {
       if (p.emotions.length) {
@@ -391,6 +412,39 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
         </div>
       )}
 
+      <div className="mt-3 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-text-dim text-[10px] tracking-widest font-display shrink-0">α SWEEP:</span>
+          {[
+            { k: "fine-low", v: "0.1, 0.2, 0.3, 0.4, 0.5" },
+            { k: "default", v: mode === "steer" ? "0.5, 1.0, 1.5" : "0.5, 1.0" },
+            { k: "wide", v: mode === "steer" ? "0.5, 1.0, 1.5, 2.0, 2.5, 3.0" : "1.0, 2.0, 3.0, 4.0, 5.0" },
+          ].map((p) => (
+            <button
+              key={p.k}
+              type="button"
+              onClick={() => setAlphaText(p.v)}
+              className="px-2 py-1 border border-rule text-text-dim hover:text-amber-dim hover:border-amber-dim/60 text-[9px] font-display tracking-widest transition-colors cursor-pointer"
+            >
+              {p.k}
+            </button>
+          ))}
+          <input
+            type="text"
+            value={alphaText}
+            onChange={(e) => setAlphaText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
+            placeholder="custom, e.g. 0.1, 0.25, 0.5, 1.0"
+            className="flex-1 min-w-[9rem] bg-bg-soft/60 border border-rule px-2 py-1 font-mono text-[10px] text-text placeholder:text-text-dim/50 focus:border-cyan focus:outline-none"
+          />
+        </div>
+        <span className="text-text-dim text-[9px] font-mono italic">
+          {parsedAlphas.length
+            ? `→ raw + α ${parsedAlphas.join(", ")}  ·  ${parsedAlphas.length} ${parsedAlphas.length === 1 ? "generation" : "generations"} (≤6, clamped to (0, ${alphaMax}]) — ~30–60s each`
+            : `→ server default sweep · custom is clamped to (0, ${alphaMax}], max 6 · each α is a full generation (~30–60s)`}
+        </span>
+      </div>
+
       <div className="mt-4">
         <textarea
           data-vk
@@ -399,17 +453,15 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
           onChange={(e) => setText(e.target.value)}
           placeholder="Ask the subject something — or pick a starter probe →"
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onEnter(text, mode, emotion);
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
         />
         <div className="flex items-center justify-between mt-3 gap-3 flex-wrap">
           <StarterProbePicker onPick={setText} />
           <span className="text-text-dim text-[10px] italic flex-1 min-w-0">
-            {mode === "steer"
-              ? `⌘↵ · dosing ${emotion} · raw + 3 doses (0.5–1.5) — takes a minute`
-              : "⌘↵ to enter · raw + α 0.5 & 1.0 — takes a minute"}
+            {mode === "steer" ? `⌘↵ · dosing ${emotion}` : "⌘↵ to enter"}
           </span>
-          <button data-vk type="button" disabled={!text.trim()} onClick={() => onEnter(text, mode, emotion)}>
+          <button data-vk type="button" disabled={!text.trim()} onClick={submit}>
             Enter the Trip →
           </button>
         </div>
