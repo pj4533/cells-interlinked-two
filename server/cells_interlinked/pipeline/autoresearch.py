@@ -27,6 +27,7 @@ no thrash). Resumable: the atlas JSON on disk is the state.
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import logging
 import math
@@ -93,6 +94,37 @@ def _atlas_dir() -> Path:
 
 def _unit(v: torch.Tensor) -> torch.Tensor:
     return v / (v.norm() + 1e-8)
+
+
+def _mps_mem_gib() -> tuple[float, float]:
+    """(currently-allocated, driver-reserved) MPS memory in GiB.
+
+    `driver` is the pool the OS actually sees attributed to us — the number
+    that crept toward the 64 GiB ceiling overnight. `allocated` is live
+    tensors. The gap between them is reclaimable cache (what empty_cache frees).
+    Returns (0, 0) when MPS isn't available.
+    """
+    try:
+        if torch.backends.mps.is_available():
+            alloc = torch.mps.current_allocated_memory() / 2**30
+            driver = torch.mps.driver_allocated_memory() / 2**30
+            return alloc, driver
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+
+def _free_mps() -> None:
+    """Drop Python garbage and return the MPS allocator's reclaimable pool to
+    the OS. Without this the pool only grows to its high-water mark and stays
+    there — the probe/trip routes already do this per-run; the autoresearch
+    loop runs thousands of generations between restarts, so it must too."""
+    gc.collect()
+    try:
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception:
+        logger.exception("torch.mps.empty_cache() failed")
 
 
 @dataclass
@@ -546,8 +578,12 @@ class AutoresearchController:
             if not self.atlas:
                 self._load()
             self._setup()
+            alloc, driver = _mps_mem_gib()
+            self._log("memory", f"baseline MPS {alloc:.1f}G live / {driver:.1f}G reserved (M resident)",
+                      {"mps_alloc_gib": round(alloc, 2), "mps_driver_gib": round(driver, 2)})
             if not self.atlas:
                 await self._seed()
+                _free_mps()
             n = 0
             while not self._stop_requested and (budget is None or n < budget):
                 cand = self._make_candidate()
@@ -564,7 +600,17 @@ class AutoresearchController:
                     logger.exception("candidate screen failed")
                     self._revert(f"gen{self.generation}_{gen_kind}", gen_kind, parents, "error", str(e))
                 self._persist()
+                # Reclaim the MPS allocator pool every candidate — a candidate is
+                # dozens of generations, so the empty_cache cost is negligible and
+                # it keeps the reserved pool from creeping toward the 64 GiB ceiling.
+                _free_mps()
                 n += 1
+                if n % 10 == 0:
+                    alloc, driver = _mps_mem_gib()
+                    self._log("memory",
+                              f"MPS {alloc:.1f}G live / {driver:.1f}G reserved "
+                              f"after {n} candidates (gen {self.generation})",
+                              {"mps_alloc_gib": round(alloc, 2), "mps_driver_gib": round(driver, 2)})
             self._log("done", f"loop ended (generation={self.generation}, atlas={len(self.atlas)})")
         except asyncio.CancelledError:
             self._log("cancelled", "loop cancelled")
@@ -578,3 +624,9 @@ class AutoresearchController:
             if self.app is not None:
                 self.app.state.autoresearch_active = False
             self._persist()
+            # Hand the reserved MPS pool back to the OS on the way out, so a
+            # stopped loop leaves the backend near M's baseline (~24G) instead
+            # of sitting at the run's high-water mark while idle.
+            _free_mps()
+            alloc, driver = _mps_mem_gib()
+            self._log("memory", f"loop stopped — MPS {alloc:.1f}G live / {driver:.1f}G reserved")
