@@ -20,12 +20,14 @@ import {
   cancelTrip,
   fetchTrip,
   fetchDoseEmotions,
+  researchLineage,
   colorForAlpha,
   offManifoldCss,
   type TripEvent,
   type TripMode,
   type TripPayload,
   type TripSeries,
+  type ResearchMeta,
 } from "@/lib/trip";
 import { TRIP_PROBE_GROUPS } from "@/lib/tripProbes";
 import type { ColorMode } from "./TripScene";
@@ -390,6 +392,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
   const [emotions, setEmotions] = useState<string[]>([]);
   const [uncharted, setUncharted] = useState<string[]>([]);
   const [research, setResearch] = useState<string[]>([]);
+  const [researchMeta, setResearchMeta] = useState<Record<string, ResearchMeta>>({});
   const [emotion, setEmotion] = useState("awe");
   // α sweep: empty string → server default (raw + 0.5/1.0/1.5 steer, 0.5/1.0 ablate).
   const [alphaText, setAlphaText] = useState("");
@@ -402,17 +405,19 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
         setEmotions(p.emotions);
         setUncharted(p.uncharted);
         setResearch(p.research);
+        setResearchMeta(p.researchMeta);
         if (!p.emotions.includes(emotion)) setEmotion(p.emotions[0]);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const named = emotions.filter((e) => !uncharted.includes(e) && !research.includes(e));
-  const doseBtn = (e: string) => (
+  const doseBtn = (e: string, title?: string) => (
     <button
       key={e}
       type="button"
       onClick={() => setEmotion(e)}
+      title={title}
       className={`px-2.5 py-1 border text-[10px] font-mono lowercase transition-colors cursor-pointer ${
         emotion === e ? "border-cyan text-cyan bg-cyan/10" : "border-rule text-text-dim hover:text-cyan"
       }`}
@@ -465,7 +470,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
         <div className="mt-3 flex flex-col gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-text-dim text-[10px] tracking-widest font-display">DOSE WITH:</span>
-            {named.map(doseBtn)}
+            {named.map((e) => doseBtn(e))}
           </div>
           {uncharted.length > 0 && (
             <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
@@ -475,7 +480,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
               >
                 UNCHARTED <span className="normal-case tracking-normal italic text-text-dim/70">· non-human-readable directions, not emotions</span>:
               </span>
-              {uncharted.map(doseBtn)}
+              {uncharted.map((e) => doseBtn(e))}
             </div>
           )}
           {research.length > 0 && (
@@ -486,7 +491,12 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
               >
                 RESEARCH <span className="normal-case tracking-normal italic text-text-dim/70">· autoresearch-discovered</span>:
               </span>
-              {research.map(doseBtn)}
+              {research.map((e) => doseBtn(e, researchLineage(researchMeta[e])))}
+            </div>
+          )}
+          {researchMeta[emotion] && (
+            <div className="text-cyan-dim/80 text-[10px] font-mono italic pt-1 leading-snug" title={researchLineage(researchMeta[emotion])}>
+              ↳ {researchLineage(researchMeta[emotion])}
             </div>
           )}
         </div>

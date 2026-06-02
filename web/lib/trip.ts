@@ -82,25 +82,50 @@ export type TripEvent =
   | { type: "error"; message?: string }
   | { type: string; [k: string]: unknown };
 
+// Provenance for one exported autoresearch direction (research-N).
+export interface ResearchMeta {
+  atlas_id: string;
+  parents: string[];
+  generator: string;
+  off_ortho: number;
+  alpha_star: number;
+}
+
 export interface DosePalette {
   emotions: string[]; // all selectable dose names
   uncharted: string[]; // subset that are NON-emotion, non-human-readable directions
   research: string[]; // subset discovered + exported by the autoresearch loop
+  researchMeta: Record<string, ResearchMeta>; // research-N -> lineage
 }
 
 export async function fetchDoseEmotions(): Promise<DosePalette> {
+  const empty: DosePalette = { emotions: [], uncharted: [], research: [], researchMeta: {} };
   try {
     const res = await fetch(`${API}/dose_emotions`);
-    if (!res.ok) return { emotions: [], uncharted: [], research: [] };
+    if (!res.ok) return empty;
     const j = await res.json();
     return {
       emotions: Array.isArray(j.emotions) ? j.emotions : [],
       uncharted: Array.isArray(j.uncharted) ? j.uncharted : [],
       research: Array.isArray(j.research) ? j.research : [],
+      researchMeta: j.research_meta && typeof j.research_meta === "object" ? j.research_meta : {},
     };
   } catch {
-    return { emotions: [], uncharted: [], research: [] };
+    return empty;
   }
+}
+
+// One-line human lineage for a research direction, e.g.
+// "gen34_crossover · blend of love + tears-in-rain · off-manifold 0.954 · α*=0.81".
+export function researchLineage(meta: ResearchMeta | undefined): string {
+  if (!meta) return "";
+  const p = meta.parents ?? [];
+  let origin: string;
+  if (meta.generator === "crossover" && p.length >= 2) origin = `blend of ${p[0]} + ${p[1]}`;
+  else if (meta.generator === "mutate" && p.length >= 1) origin = `mutation of ${p[0]}`;
+  else if (meta.generator === "inject") origin = "fresh direction (⊥ all emotions)";
+  else origin = p.length ? p.join(" + ") : meta.generator;
+  return `${meta.atlas_id} · ${origin} · off-manifold ${meta.off_ortho.toFixed(3)} · α*=${meta.alpha_star.toFixed(2)}`;
 }
 
 export async function startTrip(

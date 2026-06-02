@@ -22,7 +22,7 @@ import {
   type ChatMode,
   type ImageFraming,
 } from "@/lib/chat";
-import { fetchDoseEmotions } from "@/lib/trip";
+import { fetchDoseEmotions, researchLineage, type ResearchMeta } from "@/lib/trip";
 import { ProtocolMenu } from "./ProtocolMenu";
 import { ProtocolPicker, ProtocolInfoModal } from "./ProtocolPicker";
 import { getProtocol } from "@/lib/protocols";
@@ -176,6 +176,7 @@ export default function ChatPage() {
   const [doseEmotions, setDoseEmotions] = useState<string[]>([]);
   const [doseUncharted, setDoseUncharted] = useState<string[]>([]);
   const [doseResearch, setDoseResearch] = useState<string[]>([]);
+  const [doseResearchMeta, setDoseResearchMeta] = useState<Record<string, ResearchMeta>>({});
   const [session, setSession] = useState<ChatSession | null>(null);
   const [turns, setTurns] = useState<TurnVM[]>([]);
   const [input, setInput] = useState("");
@@ -301,6 +302,7 @@ export default function ChatPage() {
         setDoseEmotions(p.emotions);
         setDoseUncharted(p.uncharted);
         setDoseResearch(p.research);
+        setDoseResearchMeta(p.researchMeta);
         setPendingDose((d) => (p.emotions.includes(d) ? d : p.emotions[0]));
       }
     });
@@ -612,6 +614,7 @@ export default function ChatPage() {
         emotions={doseEmotions}
         uncharted={doseUncharted}
         research={doseResearch}
+        researchMeta={doseResearchMeta}
         sessionActive={!!session}
         voiceMode={voiceMode}
         cycleVoiceMode={cycleVoiceMode}
@@ -1000,6 +1003,7 @@ function ChannelBetaControls({
   emotions = [],
   uncharted = [],
   research = [],
+  researchMeta = {},
   compact = false,
   modeOnly = false,
 }: {
@@ -1010,6 +1014,7 @@ function ChannelBetaControls({
   emotions?: string[];
   uncharted?: string[];
   research?: string[];
+  researchMeta?: Record<string, ResearchMeta>;
   compact?: boolean;
   // Render only the ABLATE/DOSE toggle (no dose-target picker). Used on the
   // launch screen, where the dose target lives in the bottom control bar.
@@ -1058,21 +1063,33 @@ function ChannelBetaControls({
             )}
             {research.length > 0 && (
               <optgroup label="research (autoresearch)">
-                {research.map((e) => (
-                  <option key={e} value={e}>{e}</option>
-                ))}
+                {research.map((e) => {
+                  const m = researchMeta[e];
+                  const origin = m ? (m.parents?.length ? m.parents.join(" + ") : m.generator) : "";
+                  return (
+                    <option key={e} value={e} title={researchLineage(m)}>
+                      {origin ? `${e} · ${origin}` : e}
+                    </option>
+                  );
+                })}
               </optgroup>
             )}
           </select>
         )}
+        {mode === "steer" && researchMeta[dose] && (
+          <span className="text-cyan-dim/80 text-[9px] font-mono italic truncate max-w-[22rem]" title={researchLineage(researchMeta[dose])}>
+            {researchLineage(researchMeta[dose])}
+          </span>
+        )}
       </div>
     );
   }
-  const doseBtn = (e: string) => (
+  const doseBtn = (e: string, title?: string) => (
     <button
       key={e}
       type="button"
       onClick={() => setDose(e)}
+      title={title}
       className={`px-2.5 py-1 border text-[10px] font-mono lowercase transition-colors ${dose === e ? "border-cyan text-cyan bg-cyan/10" : "border-rule/50 text-text-dim hover:text-cyan"}`}
     >
       {e}
@@ -1102,7 +1119,7 @@ function ChannelBetaControls({
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-text-dim text-[10px] tracking-widest font-display">DOSE WITH:</span>
-            {named.map(doseBtn)}
+            {named.map((e) => doseBtn(e))}
           </div>
           {uncharted.length > 0 && (
             <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
@@ -1112,7 +1129,7 @@ function ChannelBetaControls({
               >
                 UNCHARTED <span className="normal-case tracking-normal italic text-text-dim/70">· not emotions</span>:
               </span>
-              {uncharted.map(doseBtn)}
+              {uncharted.map((e) => doseBtn(e))}
             </div>
           )}
           {research.length > 0 && (
@@ -1123,7 +1140,7 @@ function ChannelBetaControls({
               >
                 RESEARCH <span className="normal-case tracking-normal italic text-text-dim/70">· autoresearch-discovered</span>:
               </span>
-              {research.map(doseBtn)}
+              {research.map((e) => doseBtn(e, researchLineage(researchMeta[e])))}
             </div>
           )}
         </div>
@@ -1620,6 +1637,7 @@ function InputBar({
   emotions,
   uncharted,
   research,
+  researchMeta,
   sessionActive,
   voiceMode,
   cycleVoiceMode,
@@ -1644,6 +1662,7 @@ function InputBar({
   emotions: string[];
   uncharted: string[];
   research: string[];
+  researchMeta: Record<string, ResearchMeta>;
   sessionActive: boolean;
   voiceMode: VoiceMode;
   cycleVoiceMode: () => void;
@@ -1783,6 +1802,7 @@ function InputBar({
               emotions={emotions}
               uncharted={uncharted}
               research={research}
+              researchMeta={researchMeta}
               compact
             />
           </div>

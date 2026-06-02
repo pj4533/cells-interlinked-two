@@ -138,16 +138,22 @@ async def dose_emotions(request: Request) -> dict:
     names = getattr(request.app.state, "emotion_names", []) or []
     uncharted: list[str] = []
     research: list[str] = []
+    research_meta: dict = {}
     try:
         sc = json.loads((settings.db_path.parent / "emotion_directions.pt.json").read_text())
         uncharted = [n for n in sc.get("uncharted", []) if n in names]
         research = [n for n in sc.get("research", []) if n in names]
+        # Provenance for each research-N (atlas_id, parents, generator, off_ortho,
+        # alpha_star) so the picker can show lineage instead of an opaque name.
+        research_meta = {n: m for n, m in sc.get("research_meta", {}).items() if n in names}
     except Exception:
         uncharted = []
         research = []
+        research_meta = {}
     return {
         "available": bool(names), "emotions": list(names),
         "uncharted": uncharted, "research": research,
+        "research_meta": research_meta,
     }
 
 
