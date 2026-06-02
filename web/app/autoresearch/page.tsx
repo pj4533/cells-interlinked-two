@@ -56,6 +56,16 @@ function fmtDateTime(ts: number): string {
   }
 }
 
+// "5m ago" — time elapsed since ts (Unix seconds). Re-renders on each ~1.5s poll.
+function fmtRelative(ts: number): string {
+  const seconds = Math.floor(Date.now() / 1000 - ts);
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
 const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
   "T1-incoherent": "no coherent operating point",
@@ -74,6 +84,7 @@ export default function AutoresearchPage() {
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"events" | "reverts">("events");
+  const [commitRel, setCommitRel] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = useCallback(async () => {
@@ -220,12 +231,23 @@ export default function AutoresearchPage() {
             <aside className="min-h-0 flex flex-col bg-bg/30">
               {/* Glanceable headline, split in half: LAST COMMIT · EXPORTABLE. */}
               <div className="shrink-0 flex border-b border-rule/40 divide-x divide-rule/40">
-                <div className="flex-1 px-3 py-2 min-w-0">
-                  <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">LAST COMMIT</div>
+                <div className="flex-1 px-3 py-2 min-w-0 relative">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">LAST COMMIT</div>
+                    {lastCommit ? (
+                      <button
+                        onClick={() => setCommitRel((v) => !v)}
+                        className="text-[8px] font-display tracking-[0.2em] text-text-dim/50 hover:text-cyan transition-colors uppercase"
+                        title="toggle absolute time / time since commit"
+                      >
+                        {commitRel ? "relative" : "absolute"}
+                      </button>
+                    ) : null}
+                  </div>
                   {lastCommit ? (
                     <>
                       <div className="font-mono text-[26px] text-cyan tabular-nums leading-none mt-0.5" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
-                        {fmtTime(lastCommit.committed_at)}
+                        {commitRel ? fmtRelative(lastCommit.committed_at) : fmtTime(lastCommit.committed_at)}
                       </div>
                       <div className="text-[10px] font-mono text-text-dim truncate mt-1">
                         {lastCommit.id}
