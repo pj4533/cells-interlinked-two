@@ -298,10 +298,9 @@ function AtlasRow({ e, maxOff }: { e: AtlasEntry; maxOff: number }) {
           {e.generator === "seed" ? (
             <span className="text-text-dim/45 italic text-[9px]" title={`seeded ${fmtDateTime(e.committed_at)}`}>◦ original</span>
           ) : (
-            <span className="text-cyan-dim text-[8px] block" title={`discovered by autoresearch · ${fmtDateTime(e.committed_at)}`}>
+            <span className="text-cyan-dim text-[8px] block leading-none" title={`discovered by autoresearch · ${fmtDateTime(e.committed_at)}`}>
               <span className="tracking-widest">▲ ADDED</span>
-              <br />
-              <span className="text-text-dim/60">{fmtTime(e.committed_at)}</span>
+              <span className="block mt-0.5 text-text-dim/60">{fmtTime(e.committed_at)}</span>
             </span>
           )}
         </span>
