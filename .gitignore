@@ -117,3 +117,6 @@ logs/
 
 # Local experimentation scripts kept on disk but not part of the repo
 server/scripts/sweep_ablation_variants.py
+
+# Autoresearch atlas — generated runtime state (resumable, not source)
+server/data/atlas/

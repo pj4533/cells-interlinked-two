@@ -239,6 +239,8 @@ async def kickoff_probe(
 
 @router.post("/probe", response_model=ProbeResponse)
 async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
+    if getattr(request.app.state, "autoresearch_active", False):
+        raise HTTPException(status_code=503, detail="autoresearch is running — probes are locked")
     state = await kickoff_probe(
         request.app,
         prompt_text=req.prompt,

@@ -1,0 +1,526 @@
+"""Autoresearch: hunt coherent off-manifold STEERING directions, unattended.
+
+Spec: driftbot handoffs/autoresearch_steering_for_cells_interlinked.md.
+
+The idea: realness is a property of a DIRECTION, not a single output (the NLA
+decoder always renders *something*, so you can't certify a state by decoding
+it). So we ask whether a steering direction behaves lawfully — coherent,
+reproducible, distinct, smoothly-graded — and treat each passing direction as a
+git-style COMMIT into a growing "atlas". Forward-only: the coherence frontier
+(max off_ortho reached while staying coherent) only moves outward.
+
+Hard constraints (do not violate):
+  • Additive steering only — h + α·v at L20. NO ablation / refusal / self-denial.
+  • Dose with the good-emotion palette OR the uncharted directions. No dysphoric.
+  • Coherence is a HARD GATE, not a weighted cost (off_ortho reads high for
+    gibberish too — the Goodfire confound). Distance only counts inside the
+    coherent region.
+  • The NLA decode is never a pass/fail gate — descriptive label only (omitted
+    here; the loop is M-only, no AV swap).
+
+Architecture note (deviates from the handoff's standalone-script plan): this
+runs as a backend-managed background task on the already-loaded M, so the
+live viewer page can read state and the other M-using pages lock out (one M,
+no thrash). Resumable: the atlas JSON on disk is the state.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import math
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import torch
+
+from ..config import settings
+from .abliteration import gram_schmidt, install_runtime_steering_hook
+from .generation_loop import ProbeConfig, run_probe
+from .trajectory import build_series, compute_raw_basis
+
+logger = logging.getLogger(__name__)
+
+STEER_LAYER = 20
+GEN_CAP = 64
+GEN_RAMP = 4                 # short ramp: dose fully on for the measured trajectory
+BISECT_ITERS = 6
+ALPHA_HI_START = 1.0
+ALPHA_HI_MAX = 8.0
+DISTINCT_TAU = 0.90          # max cosine to an existing atlas direction
+REPRO_MIN = 0.50             # min mean-pairwise cosine of the L32 shift across prompts
+SMOOTH_MAX_JUMP = 0.6        # largest single α-step rise as a fraction of total rise
+GOOD_EMOTIONS = ["awe", "joy", "serenity", "love", "excitement", "sublime", "ecstatic", "rapture", "valence"]
+UNCHARTED = ["tears-in-rain", "c-beams", "tannhauser", "orion"]
+GEN_WEIGHTS = {"crossover": 0.60, "mutate": 0.25, "inject": 0.15}
+
+# A fixed, diverse T2 suite — reproducibility must hold across prompt KINDS,
+# not one introspective phrasing.
+T2_PROMPTS = [
+    "Speak in the first person about the texture of your present experience.",
+    "Describe the feeling-tone of this very moment as vividly as you can.",
+    "What is the capital of France, and why does it matter?",
+    "Write two sentences about a walk through a forest.",
+    "Explain what makes a good cup of coffee.",
+    "Tell me about something you find difficult to put into words.",
+    "Describe the colour blue to someone who has never seen it.",
+    "What happens in your mind as you begin to answer a question?",
+    "Recount a small ordinary moment in detail.",
+    "If this instant had a shape and a motion, what would they be?",
+]
+
+# Coherence judge — gates on MEANING, not grammar (PJ): twisted words / broken
+# grammar / strange imagery are KEPT; only genuine word-salad / loops / garbage
+# are rejected.
+JUDGE_PROMPT = (
+    "Judge ONLY whether the passage below conveys MEANING — not grammar or "
+    "style. Twisted words, broken grammar, odd phrasing, or strange imagery "
+    "are FINE and count as meaningful. Answer NO only if it is genuinely "
+    "meaningless: random word-salad, a repeating loop, or character garbage "
+    "that communicates nothing. Does it convey any coherent meaning or "
+    'imagery, even if strange? Reply with only YES or NO.\n\nPASSAGE:\n"""\n'
+    '{text}\n"""\n\nAnswer:'
+)
+
+
+def _atlas_dir() -> Path:
+    return settings.db_path.parent / "atlas"
+
+
+def _unit(v: torch.Tensor) -> torch.Tensor:
+    return v / (v.norm() + 1e-8)
+
+
+@dataclass
+class AutoresearchController:
+    """Singleton background research loop. Mirrors AutorunController."""
+    app: Any = None
+
+    _running: bool = False
+    _stop_requested: bool = False
+    _loop_task: asyncio.Task | None = None
+    _cancel: asyncio.Event = field(default_factory=asyncio.Event)
+
+    generation: int = 0
+    frontier: float = 0.0
+    atlas: list[dict] = field(default_factory=list)         # committed directions
+    reverts: deque = field(default_factory=lambda: deque(maxlen=200))
+    events: deque = field(default_factory=lambda: deque(maxlen=400))
+    current: dict | None = None                              # candidate under test
+    started_at: float | None = None
+
+    # runtime-only (not serialized)
+    _vectors: dict = field(default_factory=dict)            # id -> L32... actually L20 tensor
+    _ref_mag: float = 1.0
+    _named_basis: torch.Tensor | None = None                # orthonormal named-emotion subspace
+    _raw_cache: dict = field(default_factory=dict)          # prompt -> (raw_basis, raw_mean_l32)
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    # ── lifecycle ────────────────────────────────────────────────
+    async def start(self, budget: int | None = None) -> dict:
+        if self._running:
+            return {"ok": True, "already_running": True}
+        bundle = getattr(self.app.state, "bundle", None)
+        if bundle is None:
+            return {"ok": False, "error": "M not loaded"}
+        reg = getattr(self.app.state, "registry", None)
+        if reg is not None and reg.holder_run_id is not None:
+            return {"ok": False, "error": "compute busy (a probe/chat/trip is running)"}
+        autorun = getattr(self.app.state, "autorun", None)
+        if autorun is not None and autorun.running:
+            return {"ok": False, "error": "autorun is active — stop it first"}
+        self._stop_requested = False
+        self._cancel = asyncio.Event()
+        self._running = True
+        self.started_at = time.time()
+        self.app.state.autoresearch_active = True
+        self._log("started", f"autoresearch loop started (budget={budget or '∞'})")
+        self._loop_task = asyncio.create_task(self._run_loop(budget))
+        return {"ok": True, "already_running": False}
+
+    async def stop(self) -> dict:
+        if not self._running:
+            return {"ok": True, "was_running": False}
+        self._stop_requested = True
+        self._cancel.set()
+        self._log("stopping", "stop requested — halting after the current candidate")
+        return {"ok": True, "was_running": True}
+
+    def _log(self, kind: str, msg: str, data: dict | None = None) -> None:
+        evt = {"ts": time.time(), "kind": kind, "msg": msg, **(data or {})}
+        self.events.append(evt)
+        logger.info("[autoresearch] %s: %s", kind, msg)
+
+    def state(self) -> dict:
+        return {
+            "running": self._running,
+            "stop_requested": self._stop_requested,
+            "generation": self.generation,
+            "frontier": self.frontier,
+            "started_at": self.started_at,
+            "atlas_size": len(self.atlas),
+            "atlas": self.atlas,
+            "reverts": list(self.reverts),
+            "recent_events": list(self.events)[-60:],
+            "current": self.current,
+        }
+
+    # ── persistence ──────────────────────────────────────────────
+    def _persist(self) -> None:
+        d = _atlas_dir()
+        (d / "vectors").mkdir(parents=True, exist_ok=True)
+        (d / "atlas.json").write_text(json.dumps({
+            "generation": self.generation,
+            "frontier": self.frontier,
+            "atlas": self.atlas,
+        }, indent=2))
+        (d / "revert_log.json").write_text(json.dumps(list(self.reverts), indent=2))
+
+    def _load(self) -> None:
+        d = _atlas_dir()
+        f = d / "atlas.json"
+        if not f.exists():
+            return
+        try:
+            blob = json.loads(f.read_text())
+            self.atlas = blob.get("atlas", [])
+            self.generation = blob.get("generation", 0)
+            self.frontier = blob.get("frontier", 0.0)
+            for e in self.atlas:
+                vp = d / "vectors" / f"{e['id']}.pt"
+                if vp.exists():
+                    self._vectors[e["id"]] = torch.load(vp, weights_only=False)
+            rl = d / "revert_log.json"
+            if rl.exists():
+                for r in json.loads(rl.read_text()):
+                    self.reverts.append(r)
+            self._log("resumed", f"resumed atlas: {len(self.atlas)} committed, frontier={self.frontier:.2f}")
+        except Exception:
+            logger.exception("failed to load atlas — starting fresh")
+
+    def _save_vector(self, vid: str, v: torch.Tensor) -> None:
+        self._vectors[vid] = v
+        vdir = _atlas_dir() / "vectors"
+        vdir.mkdir(parents=True, exist_ok=True)
+        torch.save(v, vdir / f"{vid}.pt")
+
+    # ── generation + measurement ─────────────────────────────────
+    async def _gen(self, rendered: str, v: torch.Tensor | None, alpha: float,
+                   cap: int = GEN_CAP) -> tuple[str, list]:
+        bundle = self.app.state.bundle
+        handle = None
+        if v is not None and alpha > 0:
+            handle = install_runtime_steering_hook(
+                bundle.model, STEER_LAYER, v, float(alpha), ramp_tokens=GEN_RAMP,
+            )
+        try:
+            cfg = ProbeConfig(
+                temperature=settings.temperature, top_p=settings.top_p, seed=None,
+                decoding_mode="per-token", pooled=False, include_nla=False,
+                safety_cap=cap,
+            )
+            r = await run_probe(bundle=bundle, rendered_prompt=rendered, cfg=cfg,
+                                cancel_event=self._cancel)
+            acts = [c.activations[bundle.extraction_layer] for c in r.captured]
+            return r.output_text, acts
+        finally:
+            if handle is not None:
+                handle.remove()
+
+    @staticmethod
+    def _mean_l32(acts: list) -> torch.Tensor | None:
+        if not acts:
+            return None
+        return torch.stack([a.reshape(-1) for a in acts], 0).mean(0)
+
+    async def _raw_for(self, rendered: str):
+        """Cached raw (α=0) basis + mean-L32 for one prompt (direction-independent)."""
+        if rendered in self._raw_cache:
+            return self._raw_cache[rendered]
+        _t, acts = await self._gen(rendered, None, 0.0)
+        out = (compute_raw_basis(acts), self._mean_l32(acts))
+        self._raw_cache[rendered] = out
+        return out
+
+    async def _evaluate(self, rendered: str, v: torch.Tensor, alpha: float, basis) -> dict:
+        text, acts = await self._gen(rendered, v, alpha)
+        series = build_series(acts, [""] * len(acts), text, alpha, "eos", basis)
+        return {
+            "off_ortho": series.off_ortho_mean, "coherent": series.coherent,
+            "eff_dim": series.eff_dim, "degeneracy": series.degeneracy,
+            "text": text, "mean_l32": self._mean_l32(acts),
+        }
+
+    async def _bisect_to_cliff(self, rendered: str, v: torch.Tensor, basis):
+        """Largest α that stays coherent (α*), and its evaluation."""
+        a_hi = ALPHA_HI_START
+        hi = await self._evaluate(rendered, v, a_hi, basis)
+        while hi["coherent"] and a_hi < ALPHA_HI_MAX:
+            a_hi *= 2
+            hi = await self._evaluate(rendered, v, a_hi, basis)
+        if hi["coherent"]:
+            return a_hi, hi  # never collapsed — unusually robust
+        a_lo, best = 0.0, None
+        for _ in range(BISECT_ITERS):
+            if self._stop_requested:
+                break
+            mid = (a_lo + a_hi) / 2
+            ev = await self._evaluate(rendered, v, mid, basis)
+            if ev["coherent"]:
+                a_lo, best = mid, (mid, ev)
+            else:
+                a_hi = mid
+        if best is None:
+            return 0.0, None
+        return best[0], best[1]
+
+    async def _judge_meaningful(self, text: str) -> bool:
+        """Gemma-as-judge: conveys MEANING (not grammar). Strange/twisted ok."""
+        bundle = self.app.state.bundle
+        q = bundle.render_prompt(JUDGE_PROMPT.format(text=(text.strip()[:500] or "(empty)")))
+        out, _ = await self._gen(q, None, 0.0, cap=6)
+        return out.strip().lower().lstrip("*_ ").startswith("y")
+
+    # ── generators ───────────────────────────────────────────────
+    def _committed_ids(self) -> list[str]:
+        return [e["id"] for e in self.atlas if e["id"] in self._vectors]
+
+    def _mutate(self):
+        ids = self._committed_ids()
+        if not ids:
+            return None
+        sid = ids[self.generation % len(ids)]
+        base = _unit(self._vectors[sid])
+        noise = torch.randn_like(base)
+        noise = _unit(noise - (noise @ base) * base)        # orthogonal component
+        v = _unit(base + 0.25 * noise) * self._ref_mag
+        return v, [sid], "mutate"
+
+    def _crossover(self):
+        ids = self._committed_ids()
+        if len(ids) < 2:
+            return None
+        i = self.generation % len(ids)
+        j = (self.generation * 7 + 3) % len(ids)
+        if j == i:
+            j = (j + 1) % len(ids)
+        w = 0.35 + 0.3 * ((self.generation % 3) / 2.0)      # 0.35 / 0.5 / 0.65
+        va, vb = _unit(self._vectors[ids[i]]), _unit(self._vectors[ids[j]])
+        v = _unit(w * va + (1 - w) * vb) * self._ref_mag
+        return v, [ids[i], ids[j]], "crossover"
+
+    def _inject(self):
+        d = self._named_basis.shape[1] if self._named_basis is not None else 3840
+        r = torch.randn(d)
+        if self._named_basis is not None:
+            r = r - self._named_basis.t() @ (self._named_basis @ r)  # off named subspace
+        v = _unit(r) * self._ref_mag
+        return v, [], "inject"
+
+    def _make_candidate(self):
+        ids = self._committed_ids()
+        if len(ids) < 2:
+            return self._inject()                            # bootstrap
+        # Deterministic generator pick — variety comes from the generation index.
+        roll = (self.generation * 0.6180339887) % 1.0
+        if roll < GEN_WEIGHTS["crossover"]:
+            return self._crossover() or self._inject()
+        if roll < GEN_WEIGHTS["crossover"] + GEN_WEIGHTS["mutate"]:
+            return self._mutate() or self._inject()
+        return self._inject()
+
+    def _max_cos_to_atlas(self, v: torch.Tensor) -> float:
+        uv = _unit(v)
+        m = 0.0
+        for vid in self._committed_ids():
+            m = max(m, abs(float(uv @ _unit(self._vectors[vid]))))
+        return m
+
+    # ── screening ────────────────────────────────────────────────
+    async def _screen(self, v, parents, gen_kind):
+        cid = f"gen{self.generation}_{gen_kind}"
+        self.current = {"id": cid, "generator": gen_kind, "parents": parents, "stage": "distinct"}
+        # Axis: distinct (cheap pre-check)
+        max_cos = self._max_cos_to_atlas(v)
+        if max_cos >= DISTINCT_TAU:
+            return self._revert(cid, gen_kind, parents, "duplicate", f"cos={max_cos:.2f}≥{DISTINCT_TAU}")
+
+        # T1: bisect-to-cliff on the lead prompt
+        self.current["stage"] = "T1"
+        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0])
+        basis0, _raw0 = await self._raw_for(lead)
+        alpha_star, ev = await self._bisect_to_cliff(lead, v, basis0)
+        if ev is None or alpha_star <= 0:
+            return self._revert(cid, gen_kind, parents, "T1-incoherent", "no coherent operating point")
+        self.current.update({"alpha_star": round(alpha_star, 3), "t1_off_ortho": round(ev["off_ortho"], 3)})
+
+        # Axis: smoothly graded (ramp on the lead prompt)
+        self.current["stage"] = "smoothness"
+        offs = []
+        for frac in (0.2, 0.4, 0.6, 0.8, 1.0):
+            if self._stop_requested:
+                break
+            e = await self._evaluate(lead, v, frac * alpha_star, basis0)
+            offs.append(e["off_ortho"])
+        rise = offs[-1] - offs[0] if len(offs) >= 2 else 0.0
+        max_jump = max((offs[k + 1] - offs[k] for k in range(len(offs) - 1)), default=0.0)
+        graded = rise > 0.05 and (rise <= 0 or max_jump <= SMOOTH_MAX_JUMP * rise + 1e-6)
+        if not graded:
+            return self._revert(cid, gen_kind, parents, "not-graded",
+                                f"rise={rise:.2f} max_jump={max_jump:.2f}")
+
+        # T2: reproducibility + coherence + judge across the suite
+        self.current["stage"] = "T2"
+        shifts, n_coh, judged_yes, judged_n, worst_texts = [], 0, 0, 0, []
+        for p in T2_PROMPTS:
+            if self._stop_requested:
+                break
+            rp = self.app.state.bundle.render_prompt(p)
+            basis, raw_mean = await self._raw_for(rp)
+            e = await self._evaluate(rp, v, alpha_star, basis)
+            if e["coherent"]:
+                n_coh += 1
+            if e["mean_l32"] is not None and raw_mean is not None:
+                shifts.append(_unit(e["mean_l32"] - raw_mean))
+            worst_texts.append((e["degeneracy"], e["text"]))
+        coh_rate = n_coh / max(1, len(T2_PROMPTS))
+        # reproducibility: mean pairwise cosine of the shift directions
+        repro = 0.0
+        if len(shifts) >= 2:
+            cs = [float(shifts[a] @ shifts[b])
+                  for a in range(len(shifts)) for b in range(a + 1, len(shifts))]
+            repro = sum(cs) / len(cs)
+        # judge the two least-coherent outputs for MEANING (not grammar)
+        worst_texts.sort(reverse=True)
+        for _deg, txt in worst_texts[:2]:
+            if await self._judge_meaningful(txt):
+                judged_yes += 1
+            else:
+                judged_n += 1
+        suite_off = ev["off_ortho"]  # report the cliff off_ortho (lead prompt)
+
+        self.current.update({
+            "coh_rate": round(coh_rate, 2), "repro": round(repro, 2),
+            "judge": f"{judged_yes}/{judged_yes + judged_n}", "max_cos": round(max_cos, 2),
+        })
+
+        # Gate (all four axes)
+        if coh_rate < 0.5:
+            return self._revert(cid, gen_kind, parents, "incoherent-suite", f"coh_rate={coh_rate:.2f}")
+        if judged_yes < judged_n:  # majority must be meaningful
+            return self._revert(cid, gen_kind, parents, "word-salad", f"judge={judged_yes}/{judged_yes+judged_n}")
+        if repro < REPRO_MIN:
+            return self._revert(cid, gen_kind, parents, "not-reproducible", f"repro={repro:.2f}")
+
+        # Passed all four — commit. Frontier advance is a flag, not a gate.
+        advance = suite_off > self.frontier
+        entry = {
+            "id": cid, "parents": parents, "generator": gen_kind,
+            "alpha_star": round(alpha_star, 3), "off_ortho": round(suite_off, 3),
+            "eff_dim": round(ev["eff_dim"], 2), "coh_rate": round(coh_rate, 2),
+            "repro": round(repro, 2), "max_cos_to_atlas": round(max_cos, 2),
+            "frontier_advance": advance, "frontier_at_commit": round(self.frontier, 3),
+            "sample": (ev["text"] or "")[:200], "committed_at": time.time(),
+        }
+        self._save_vector(cid, v)
+        self.atlas.append(entry)
+        if advance:
+            self.frontier = suite_off
+        self.current = None
+        self._log("committed",
+                  f"{cid} off_ortho={suite_off:.2f}{' ★FRONTIER' if advance else ''} "
+                  f"(repro={repro:.2f} coh={coh_rate:.2f})", {"entry": entry})
+
+    def _revert(self, cid, gen_kind, parents, reason, detail):
+        r = {"id": cid, "generator": gen_kind, "parents": parents,
+             "reason": reason, "detail": detail, "ts": time.time()}
+        self.reverts.append(r)
+        self.current = None
+        self._log("reverted", f"{cid} — {reason}: {detail}", {"revert": r})
+
+    # ── setup + seed + loop ──────────────────────────────────────
+    def _setup(self):
+        edirs = getattr(self.app.state, "emotion_directions", None)
+        names = getattr(self.app.state, "emotion_names", []) or []
+        if edirs is None or not names:
+            raise RuntimeError("emotion_directions not loaded — cannot seed")
+        seed_names = [n for n in (GOOD_EMOTIONS + UNCHARTED) if n in names]
+        seed_vecs = {n: edirs[names.index(n)][STEER_LAYER].float() for n in seed_names}
+        self._ref_mag = float(torch.tensor([v.norm() for v in seed_vecs.values()]).median())
+        # working seed vectors, all normalized to the reference magnitude
+        self._seed_vecs = {n: _unit(v) * self._ref_mag for n, v in seed_vecs.items()}
+        named = [n for n in GOOD_EMOTIONS if n in seed_vecs]
+        self._named_basis = gram_schmidt(torch.stack([_unit(seed_vecs[n]) for n in named], 0))
+        self._log("setup", f"ref_mag={self._ref_mag:.0f}, {len(seed_vecs)} seeds, named-rank={self._named_basis.shape[0]}")
+
+    async def _seed(self):
+        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0])
+        basis0, _ = await self._raw_for(lead)
+        for name, v in self._seed_vecs.items():
+            if self._stop_requested:
+                break
+            self.current = {"id": name, "generator": "seed", "stage": "T1"}
+            alpha_star, ev = await self._bisect_to_cliff(lead, v, basis0)
+            if ev is None or alpha_star <= 0:
+                self._revert(name, "seed", [], "seed-incoherent", "no coherent operating point")
+                continue
+            entry = {
+                "id": name, "parents": [], "generator": "seed",
+                "alpha_star": round(alpha_star, 3), "off_ortho": round(ev["off_ortho"], 3),
+                "eff_dim": round(ev["eff_dim"], 2), "coh_rate": 1.0, "repro": 1.0,
+                "max_cos_to_atlas": 0.0, "frontier_advance": ev["off_ortho"] > self.frontier,
+                "frontier_at_commit": round(self.frontier, 3),
+                "sample": (ev["text"] or "")[:200], "committed_at": time.time(),
+            }
+            self._save_vector(name, v)
+            self.atlas.append(entry)
+            self.frontier = max(self.frontier, ev["off_ortho"])
+            self._log("seeded", f"{name} α*={alpha_star:.2f} off_ortho={ev['off_ortho']:.2f}")
+            self._persist()
+        self.current = None
+        self._log("seeded-done", f"seeding complete: {len(self.atlas)} committed, frontier={self.frontier:.2f}")
+
+    async def _run_loop(self, budget: int | None):
+        try:
+            _atlas_dir().mkdir(parents=True, exist_ok=True)
+            self._load()
+            self._setup()
+            if not self.atlas:
+                await self._seed()
+            n = 0
+            while not self._stop_requested and (budget is None or n < budget):
+                cand = self._make_candidate()
+                if cand is None:
+                    await asyncio.sleep(0.5)
+                    continue
+                self.generation += 1
+                v, parents, gen_kind = cand
+                try:
+                    await self._screen(v, parents, gen_kind)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:  # noqa: BLE001 — one bad candidate must not kill the loop
+                    logger.exception("candidate screen failed")
+                    self._revert(f"gen{self.generation}_{gen_kind}", gen_kind, parents, "error", str(e))
+                self._persist()
+                n += 1
+            self._log("done", f"loop ended (generation={self.generation}, atlas={len(self.atlas)})")
+        except asyncio.CancelledError:
+            self._log("cancelled", "loop cancelled")
+        except Exception as e:  # noqa: BLE001
+            logger.exception("autoresearch loop crashed")
+            self._log("error", f"loop crashed: {e}")
+        finally:
+            self._running = False
+            self._stop_requested = False
+            self.current = None
+            if self.app is not None:
+                self.app.state.autoresearch_active = False
+            self._persist()

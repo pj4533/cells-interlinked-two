@@ -20,8 +20,10 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import settings
 from ..pipeline.autorun import AutorunController
+from ..pipeline.autoresearch import AutoresearchController
 from ..storage import db
 from .routes_autorun import router as autorun_router
+from .routes_autoresearch import router as autoresearch_router
 from .routes_chat import router as chat_router
 from .routes_journal import router as journal_router
 from .routes_probe import router as probe_router
@@ -92,6 +94,13 @@ async def lifespan(app: FastAPI):
         settings.db_path, running=False, event="server-restart", ts=time.time()
     )
 
+    # Autoresearch (steering-direction hunt). Owns M while running, which locks
+    # out probe/chat/trip via app.state.autoresearch_active.
+    autoresearch = AutoresearchController()
+    autoresearch.app = app
+    app.state.autoresearch = autoresearch
+    app.state.autoresearch_active = False
+
     logger.info(
         "ready: M=%s | AV=%s | both unloaded (serial load on demand)",
         settings.model_name, settings.av_repo,
@@ -102,6 +111,8 @@ async def lifespan(app: FastAPI):
     finally:
         if autorun.running:
             await autorun.stop()
+        if autoresearch.running:
+            await autoresearch.stop()
         await manager.release_all()
         logger.info("shutting down")
 
@@ -127,6 +138,7 @@ def create_app() -> FastAPI:
     app.include_router(stream_router)
     app.include_router(trip_router)
     app.include_router(autorun_router)
+    app.include_router(autoresearch_router)
     app.include_router(journal_router)
     app.include_router(chat_router)
     app.include_router(tts_router)
