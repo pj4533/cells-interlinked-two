@@ -25,6 +25,16 @@ const GEN_COLOR: Record<string, string> = {
 };
 const genColor = (g: string) => GEN_COLOR[g] ?? "#9aa0a6";
 
+// Human-readable lineage: what base direction(s) a candidate is built from.
+function lineage(generator: string, parents?: string[]): string {
+  const p = parents ?? [];
+  if (generator === "crossover" && p.length >= 2) return `blend of ${p[0]} + ${p[1]}`;
+  if (generator === "mutate" && p.length >= 1) return `mutation of ${p[0]}`;
+  if (generator === "inject") return "fresh direction (⊥ all emotions)";
+  if (generator === "seed") return "starting seed";
+  return p.length ? p.join(" + ") : generator;
+}
+
 const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
   "T1-incoherent": "no coherent operating point",
@@ -132,7 +142,7 @@ export default function AutoresearchPage() {
         <div className="relative z-10 shrink-0 border-b border-cyan/20 bg-cyan/5 px-5 py-2 flex items-center gap-4 font-mono text-[11px] flex-wrap">
           <span className="font-display text-[9px] tracking-widest text-cyan-dim animate-pulse">◌ NOW TESTING</span>
           <span className="text-cyan">{st.current.id}</span>
-          <span className="text-text-dim">{st.current.generator}{st.current.parents?.length ? ` · ${st.current.parents.join(" + ")}` : ""}</span>
+          <span className="text-text-dim italic">— {lineage(st.current.generator, st.current.parents)}</span>
           <span className="px-1.5 border border-cyan/40 text-cyan text-[9px] tracking-widest font-display">{st.current.stage}</span>
           {st.current.alpha_star != null && <span className="text-text-dim tabular-nums">α*={st.current.alpha_star.toFixed(2)}</span>}
           {st.current.repro != null && <span className="text-text-dim tabular-nums">repro={st.current.repro.toFixed(2)}</span>}
@@ -147,6 +157,12 @@ export default function AutoresearchPage() {
           <div className="font-display text-[10px] tracking-widest text-amber-dim mb-1">THE ATLAS — committed directions</div>
           <p className="font-mono text-[10px] text-text-dim italic mb-3 leading-snug">
             Each is a steering direction that stayed coherent, reproduced across prompts, is distinct, and ramps smoothly. Bar length = how far off-manifold it reaches at its coherence cliff (α*). ★ = it pushed the frontier outward.
+            <br />
+            <span className="text-text-dim/70">ids = <b>gen{"{N}"}_{"{how}"}</b> · </span>
+            <span style={{ color: GEN_COLOR.seed }}>seed</span> = a starting direction ·{" "}
+            <span style={{ color: GEN_COLOR.crossover }}>crossover</span> = blend of two ·{" "}
+            <span style={{ color: GEN_COLOR.mutate }}>mutate</span> = perturb one ·{" "}
+            <span style={{ color: GEN_COLOR.inject }}>inject</span> = fresh direction. The line under each id names its parent(s).
           </p>
           {atlas.length === 0 ? (
             <div className="font-mono text-[11px] text-text-dim italic py-8 text-center">
@@ -185,16 +201,22 @@ export default function AutoresearchPage() {
           <div>
             <div className="font-display text-[10px] tracking-widest text-cyan-dim mb-2">EVENT FEED</div>
             <div className="flex flex-col gap-0.5 font-mono text-[9px] leading-snug">
-              {[...(st?.recent_events ?? [])].reverse().slice(0, 40).map((ev, i) => (
-                <div key={i} className="flex gap-2">
-                  <span className={
-                    ev.kind === "committed" || ev.kind === "seeded" ? "text-cyan shrink-0"
-                    : ev.kind === "reverted" ? "text-warning shrink-0"
-                    : "text-text-dim shrink-0"
-                  }>[{ev.kind}]</span>
-                  <span className="text-text-dim">{ev.msg}</span>
-                </div>
-              ))}
+              {[...(st?.recent_events ?? [])].reverse().slice(0, 40).map((ev, i) => {
+                const rec = ev.entry ?? ev.revert;
+                const lin = rec ? lineage(rec.generator, rec.parents) : null;
+                return (
+                  <div key={i} className="flex gap-2">
+                    <span className={
+                      ev.kind === "committed" || ev.kind === "seeded" ? "text-cyan shrink-0"
+                      : ev.kind === "reverted" ? "text-warning shrink-0"
+                      : "text-text-dim shrink-0"
+                    }>[{ev.kind}]</span>
+                    <span className="text-text-dim">
+                      {ev.msg}{lin && !lin.startsWith("starting") ? <span className="text-text-dim/60 italic"> — {lin}</span> : null}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </aside>
@@ -216,7 +238,10 @@ function AtlasRow({ e, maxOff }: { e: AtlasEntry; maxOff: number }) {
     <div className="border border-rule/40 bg-bg-soft/40">
       <button type="button" onClick={() => setOpen((x) => !x)} className="w-full text-left px-2.5 py-1.5 flex items-center gap-3 hover:bg-bg-soft/70 transition-colors">
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c, boxShadow: `0 0 6px ${c}` }} />
-        <span className="font-mono text-[11px] text-text shrink-0 w-44 truncate" title={e.id}>{e.id}</span>
+        <span className="shrink-0 w-44 flex flex-col leading-tight overflow-hidden">
+          <span className="font-mono text-[11px] text-text truncate" title={e.id}>{e.id}</span>
+          <span className="font-mono text-[8px] text-text-dim/70 truncate">{lineage(e.generator, e.parents)}</span>
+        </span>
         <div className="flex-1 h-2.5 bg-bg relative overflow-hidden">
           <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: `${c}55`, borderRight: `1px solid ${c}` }} />
         </div>

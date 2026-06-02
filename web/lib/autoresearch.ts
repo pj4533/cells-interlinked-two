@@ -41,6 +41,10 @@ export interface AREvent {
   ts: number;
   kind: string;
   msg: string;
+  // Committed/reverted events embed the full record, so the UI can surface
+  // lineage (parents) inline without expanding anything.
+  entry?: AtlasEntry;
+  revert?: RevertEntry;
 }
 
 export interface CurrentCandidate {
