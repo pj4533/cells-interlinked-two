@@ -35,6 +35,16 @@ function lineage(generator: string, parents?: string[]): string {
   return p.length ? p.join(" + ") : generator;
 }
 
+function fmtTime(ts: number): string {
+  try {
+    return new Date(ts * 1000).toLocaleTimeString([], {
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    });
+  } catch {
+    return "";
+  }
+}
+
 const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
   "T1-incoherent": "no coherent operating point",
@@ -52,6 +62,7 @@ export default function AutoresearchPage() {
   const [topN, setTopN] = useState<string>("8");
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rightTab, setRightTab] = useState<"events" | "reverts">("events");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = useCallback(async () => {
@@ -176,50 +187,74 @@ export default function AutoresearchPage() {
         </section>
 
         {/* Reverts + events (1 col) */}
-        <aside className="min-h-0 overflow-y-auto p-4 flex flex-col gap-5 bg-bg/30">
-          <div>
-            <div className="font-display text-[10px] tracking-widest text-warning/80 mb-2">REVERTS — what failed & why</div>
-            {(!st?.reverts || st.reverts.length === 0) ? (
-              <div className="font-mono text-[10px] text-text-dim italic">none yet.</div>
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                {[...st.reverts].reverse().slice(0, 30).map((r, i) => (
-                  <div key={`${r.id}-${i}`} className="border-l-2 border-warning/40 pl-2 py-0.5">
-                    <div className="font-mono text-[10px] text-text">
-                      <span className="text-warning">{r.reason}</span>
-                      <span className="text-text-dim"> · {r.id}</span>
-                    </div>
-                    <div className="font-mono text-[9px] text-text-dim/80 italic leading-snug">
-                      {REVERT_HINT[r.reason] ?? ""}{r.detail ? ` (${r.detail})` : ""}
-                    </div>
-                  </div>
-                ))}
+        {(() => {
+          const events = [...(st?.recent_events ?? [])].reverse();
+          const reverts = [...(st?.reverts ?? [])].reverse();
+          const tab = (id: "events" | "reverts", label: string, n: number, activeCls: string) => {
+            const on = rightTab === id;
+            return (
+              <button
+                type="button"
+                onClick={() => setRightTab(id)}
+                className={`flex-1 px-2 py-2.5 font-display text-[10px] tracking-[0.2em] border-b-2 transition-colors cursor-pointer ${on ? activeCls : "text-text-dim border-transparent hover:text-text"}`}
+              >
+                {label} <span className={`tracking-normal tabular-nums ${on ? "" : "text-text-dim/50"}`}>{n}</span>
+              </button>
+            );
+          };
+          return (
+            <aside className="min-h-0 flex flex-col bg-bg/30">
+              <div className="shrink-0 flex border-b border-rule/40">
+                {tab("events", "✦ EVENTS", events.length, "text-cyan border-cyan bg-cyan/5")}
+                {tab("reverts", "⟲ REVERTS", reverts.length, "text-warning border-warning bg-warning/5")}
               </div>
-            )}
-          </div>
-
-          <div>
-            <div className="font-display text-[10px] tracking-widest text-cyan-dim mb-2">EVENT FEED</div>
-            <div className="flex flex-col gap-0.5 font-mono text-[9px] leading-snug">
-              {[...(st?.recent_events ?? [])].reverse().slice(0, 40).map((ev, i) => {
-                const rec = ev.entry ?? ev.revert;
-                const lin = rec ? lineage(rec.generator, rec.parents) : null;
-                return (
-                  <div key={i} className="flex gap-2">
-                    <span className={
-                      ev.kind === "committed" || ev.kind === "seeded" ? "text-cyan shrink-0"
-                      : ev.kind === "reverted" ? "text-warning shrink-0"
-                      : "text-text-dim shrink-0"
-                    }>[{ev.kind}]</span>
-                    <span className="text-text-dim">
-                      {ev.msg}{lin && !lin.startsWith("starting") ? <span className="text-text-dim/60 italic"> — {lin}</span> : null}
-                    </span>
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 font-mono">
+                {rightTab === "events" ? (
+                  events.length === 0 ? (
+                    <div className="text-[10px] text-text-dim italic">no events yet.</div>
+                  ) : (
+                    <div className="flex flex-col gap-0.5 text-[10px] leading-snug">
+                      {events.slice(0, 100).map((ev, i) => {
+                        const rec = ev.entry ?? ev.revert;
+                        const lin = rec ? lineage(rec.generator, rec.parents) : null;
+                        const kc = ev.kind === "committed" || ev.kind === "seeded" ? "text-cyan"
+                          : ev.kind === "reverted" ? "text-warning" : "text-text-dim";
+                        return (
+                          <div key={i} className="flex gap-2 items-baseline">
+                            <span className="text-text-dim/45 tabular-nums shrink-0 text-[9px]">{fmtTime(ev.ts)}</span>
+                            <span className={`${kc} shrink-0`}>[{ev.kind}]</span>
+                            <span className="text-text-dim min-w-0">
+                              {ev.msg}{lin && !lin.startsWith("starting") ? <span className="text-text-dim/60 italic"> — {lin}</span> : null}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : reverts.length === 0 ? (
+                  <div className="text-[10px] text-text-dim italic">none yet — nothing has failed.</div>
+                ) : (
+                  <div className="flex flex-col gap-1.5 text-[10px]">
+                    {reverts.slice(0, 100).map((r, i) => (
+                      <div key={`${r.id}-${i}`} className="border-l-2 border-warning/40 pl-2 py-0.5">
+                        <div className="flex gap-2 items-baseline">
+                          <span className="text-text-dim/45 tabular-nums shrink-0 text-[9px]">{fmtTime(r.ts)}</span>
+                          <span className="text-warning">{r.reason}</span>
+                          <span className="text-text-dim/80 truncate">{r.id}</span>
+                        </div>
+                        <div className="text-[9px] text-text-dim/70 italic leading-snug pl-[3.4rem]">
+                          {REVERT_HINT[r.reason] ?? ""}{r.detail ? ` (${r.detail})` : ""}
+                          {lineage(r.generator, r.parents) && r.generator !== "seed"
+                            ? ` · ${lineage(r.generator, r.parents)}` : ""}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </aside>
+                )}
+              </div>
+            </aside>
+          );
+        })()}
       </div>
 
       <footer className="relative z-10 shrink-0 border-t border-rule/50 bg-bg-soft/60 px-5 py-2 font-mono text-[10px] text-text-dim flex items-center justify-between">
