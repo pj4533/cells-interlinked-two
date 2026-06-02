@@ -218,23 +218,34 @@ export default function AutoresearchPage() {
           };
           return (
             <aside className="min-h-0 flex flex-col bg-bg/30">
-              {/* Glanceable "last commit" headline — big timestamp, small what. */}
-              <div className="shrink-0 px-3 py-2 border-b border-rule/40">
-                <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">LAST COMMIT</div>
-                {lastCommit ? (
-                  <>
-                    <div className="font-mono text-[26px] text-cyan tabular-nums leading-none mt-0.5" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
-                      {fmtTime(lastCommit.committed_at)}
-                    </div>
-                    <div className="text-[10px] font-mono text-text-dim truncate mt-1">
-                      {lastCommit.id}
-                      {lastCommit.frontier_advance ? <span className="text-cyan"> ★</span> : null}
-                      <span className="text-text-dim/60"> · off {lastCommit.off_ortho.toFixed(3)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="font-mono text-[13px] text-text-dim italic mt-1">— nothing committed yet —</div>
-                )}
+              {/* Glanceable headline, split in half: LAST COMMIT · EXPORTABLE. */}
+              <div className="shrink-0 flex border-b border-rule/40 divide-x divide-rule/40">
+                <div className="flex-1 px-3 py-2 min-w-0">
+                  <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">LAST COMMIT</div>
+                  {lastCommit ? (
+                    <>
+                      <div className="font-mono text-[26px] text-cyan tabular-nums leading-none mt-0.5" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
+                        {fmtTime(lastCommit.committed_at)}
+                      </div>
+                      <div className="text-[10px] font-mono text-text-dim truncate mt-1">
+                        {lastCommit.id}
+                        {lastCommit.frontier_advance ? <span className="text-cyan"> ★</span> : null}
+                        <span className="text-text-dim/60"> · off {lastCommit.off_ortho.toFixed(3)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="font-mono text-[13px] text-text-dim italic mt-1">— nothing committed yet —</div>
+                  )}
+                </div>
+                <div className="flex-1 px-3 py-2 min-w-0">
+                  <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">EXPORTABLE</div>
+                  <div className="font-mono text-[26px] text-amber tabular-nums leading-none mt-0.5" style={{ textShadow: "0 0 10px rgba(232,195,130,0.3)" }}>
+                    {exportable}
+                  </div>
+                  <div className="text-[10px] font-mono text-text-dim/60 truncate mt-1" title="discovered (non-seed) directions — stop the loop, then ⇪ export → palette">
+                    discovered directions
+                  </div>
+                </div>
               </div>
               <div className="shrink-0 flex border-b border-rule/40">
                 {tab("events", "✦ EVENTS", events.length, "text-cyan border-cyan bg-cyan/5")}
