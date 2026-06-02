@@ -45,6 +45,17 @@ function fmtTime(ts: number): string {
   }
 }
 
+function fmtDateTime(ts: number): string {
+  try {
+    return new Date(ts * 1000).toLocaleString([], {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+      second: "2-digit", hour12: false,
+    });
+  } catch {
+    return "";
+  }
+}
+
 const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
   "T1-incoherent": "no coherent operating point",
@@ -281,7 +292,19 @@ function AtlasRow({ e, maxOff }: { e: AtlasEntry; maxOff: number }) {
           <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: `${c}55`, borderRight: `1px solid ${c}` }} />
         </div>
         <span className="font-mono text-[10px] tabular-nums shrink-0 w-16 text-right" style={{ color: c }}>{e.off_ortho.toFixed(3)}</span>
-        {e.frontier_advance && <span className="text-cyan text-[10px] shrink-0" title="advanced the frontier">★</span>}
+        <span className="shrink-0 w-3 text-center text-cyan text-[10px]" title={e.frontier_advance ? "advanced the frontier" : undefined}>{e.frontier_advance ? "★" : ""}</span>
+        {/* Origin: starting seed vs discovered-by-autoresearch (with when). */}
+        <span className="shrink-0 w-[5.25rem] text-right leading-none font-mono">
+          {e.generator === "seed" ? (
+            <span className="text-text-dim/45 italic text-[9px]" title={`seeded ${fmtDateTime(e.committed_at)}`}>◦ original</span>
+          ) : (
+            <span className="text-cyan-dim text-[8px] block" title={`discovered by autoresearch · ${fmtDateTime(e.committed_at)}`}>
+              <span className="tracking-widest">▲ ADDED</span>
+              <br />
+              <span className="text-text-dim/60">{fmtTime(e.committed_at)}</span>
+            </span>
+          )}
+        </span>
       </button>
       {open ? (
         <div className="px-3 py-2 border-t border-rule/30 font-mono text-[10px] text-text-dim space-y-1">
