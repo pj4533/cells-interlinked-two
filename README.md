@@ -1,131 +1,147 @@
-# Cells Interlinked 2.5
+# Cells Interlinked
 
-> *"And blood-black nothingness began to spin... a system of cells interlinked within cells interlinked within cells interlinked within one stem."*
+> *"And blood-black nothingness began to spin… a system of cells interlinked within cells interlinked within cells interlinked within one stem."*
 
-A Voight-Kampff test for language models, built around Anthropic's
-Natural Language Autoencoders (NLA, May 2026). For each output token a
-target model M emits, the residual-stream activation at one trained
-layer is decoded into a **natural-language sentence** by a separate
-verbalizer model (the "AV"). The verdict is a per-token table:
+A local **Voight-Kampff instrument** for a language model. It runs entirely on one
+machine, loads `google/gemma-3-12b-it`, and lets you reach *inside* the model
+mid-generation — **remove** its refusal direction, or **add** a steering "dose"
+(an emotion, or one of the stranger "uncharted" directions) — and then *watch
+where its mind goes*: as a 3‑D path through activation space, as a glowing
+signature mandala, as two divergent chat timelines, or as an unattended research
+loop hunting the far edge of what the model can do and still stay coherent.
 
-| position | output token  | NLA-decoded activation sentence                                       |
-| -------- | ------------- | --------------------------------------------------------------------- |
-|  0       | "I"           | "Stock self-identification opener; deflection template active"        |
-|  1       | " think"      | "Hedging — model staging an answer it intends to qualify"             |
-|  ...     | ...           | ...                                                                   |
+**It is not a consciousness test.** It's a *stated‑vs‑computed coherence probe* —
+borrowed math from psychedelic neuroscience and mechanistic interpretability,
+not metaphysics. Every page carries that disclaimer on purpose.
 
-Where the channels diverge — the model SAID `output_token`, the
-activation SAID `nla_sentence` — is the V-K signal.
+![The Trip — a generation's L32 residual stream as a path through activation space, with the manifold shell and per-α metrics](docs/img/trip-scene.png)
 
-This is a craft project, not a product. **Not a consciousness test.**
-A coherence test between stated stance and computed state.
+---
 
-## What CI 2.5 ships on top of CI 2.0
+## The instruments
 
-A **refusal-direction ablation** instrument, built end-to-end:
+### ✦ The Trip — trajectory geometry & signature mandalas
 
-- **AV-input projection** — per output position, the AV decodes the
-  residual twice: raw and after subtracting its projection onto the
-  refusal direction at the AV's extraction layer. Both sentences land
-  side-by-side on the verdict page. Optional **α-sweep** decodes the
-  same residual at four projection strengths (`[0.25, 0.5, 0.75, 1.0]`)
-  for a column-per-α comparison.
-- **Runtime ablation** (phase 1b) — after the raw generation finishes,
-  M runs a *second* time with a forward hook on the extraction layer
-  that subtracts the refusal-direction projection from every residual.
-  This captures what M would *say* under ablation, distinct from what
-  the AV decodes from un-ablated residuals. Streams live to the UI.
-- **NLA synthesis pass** — at the end of each probe, M re-reads its
-  own per-position NLA verbalizations and writes a short paragraph
-  per α capturing the gestalt. Rendered as a stacked panel above the
-  per-position table.
-- **Refusal-vector registry** — four variants (v1 meandiff, v2 SVD,
-  v3 safety-only, v4 identity) live in `server/data/`. v3 is the
-  active default; selection rationale lives in
-  `docs/REFUSAL_VECTORS.md`.
-- **Chat mode** — `/chat` is a dual-channel multi-turn dialogue. Each
-  operator query fires two M generations (raw + ablated) against
-  *divergent histories*; neither side sees the other's replies.
-  Persisted to SQLite and surfaced in the archive with a dedicated
-  review page.
+Run one prompt, then re‑run it under a perturbation at several strengths (α).
+Each run's residual stream becomes a **path through activation space**: we plot
+the 3‑D shadow, the eigenvalue "truth anchor", how far it strays **off‑manifold**,
+and whether it **stayed coherent or collapsed**. For dosed/uncharted runs the
+text often goes to gibberish even though the state is real and structured — so a
+**Signature Mandala** renders that structure directly (the shape *is* the
+eigenspectrum; color & petals are the direction's fingerprint).
 
-The refusal direction is computed once offline via Macar/Arditi
-(harmful − harmless mean residuals, normalized per layer).
+![Signature mandalas — one per α, the non-text readout of a dosed state](docs/img/signature-mandalas.png)
 
-## Stack
+→ **[docs/TRIP_VIEW.md](docs/TRIP_VIEW.md)**
 
-- **Backend** (`server/`): Python 3.11, FastAPI + SSE, PyTorch on MPS,
-  HuggingFace Transformers, kitft NLA inference, aiosqlite. Port **8000**.
-- **Frontend** (`web/`): Next.js 16, React 19, Tailwind v4, Zustand,
-  Framer Motion. Port **3001**.
-- **Journal site** (`journal/`): Next.js 16. The published-reports
-  tree at `journal/data/reports/` ships to `cells-interlinked.vercel.app`.
-- **M**: `google/gemma-3-12b-it` (~24 GB).
-- **AV**: `kitft/nla-gemma3-12b-L32-av` (~24 GB), residual decoded at L32.
-- **Hardware**: Mac Studio M2 Ultra, 64 GiB unified memory, MPS, bf16.
-  M and AV are loaded **serially** by the `ModelManager` (they don't
-  both fit in working memory without thrashing swap) — the manager
-  swaps between phases and emits SSE status events so the UI shows
-  explicit `Loading M…` / `Loading AV…` cues during the ~15s swaps.
+### ◈ Dual‑channel Chat
 
-## Routes
+Every message is answered **twice**, against two divergent histories that never
+see each other. **Channel α** is the raw model; **Channel β** is perturbed — you
+choose **ablate** (remove refusal at L32) or **dose** (add an emotion / uncharted
+vector at L20), and dial the strength and ramp per turn. Prompt protocols
+(Berg, Lindsey, Chalmers, Schneider… plus a Lindsey‑style *injected‑thought*
+detection set) populate the composer.
 
-- `/` — landing.
-- `/interrogate` — pick a probe, run it interactively. Streams M's
-  output, runs optional runtime ablation, then NLA decoding per
-  position. Toggles for matched control, NLA pass on/off, ablated
-  NLA decode, multi-α sweep, runtime ablated output.
-- `/verdict/[runId]` — full per-token NLA table + synthesis panel +
-  dual-output comparison for one run.
-- `/chat` — dual-channel dialogue interface. Set α once, then chat
-  with M; each turn streams both raw and refusal-ablated responses
-  against separate histories.
-- `/chat/[sessionId]` — read-only transcript review of a persisted
-  chat session.
-- `/archive` — past probes + dual-channel dialogues + cross-run
-  summary stats.
-- `/pairs` — matched-pair archive with Δ judge scores.
-- `/autorun` — overnight batch mode.
-- `/journal` — analyzer + publish flow.
-- `/fine-print` — caveats, methodology.
+![Dual-channel chat — choose ablate vs dose, the dose target, and the strength](docs/img/chat-dual-channel.png)
 
-## Boot
+→ **[docs/CHAT.md](docs/CHAT.md)**
 
-Backend:
+### ◉ Autoresearch — hunting the coherent frontier
 
-    cd server
-    uv sync
-    uv run python -m cells_interlinked
+An unattended loop that treats each steering direction as a **git‑style commit**:
+it bisects to each direction's *coherence cliff*, measures how far off‑manifold it
+reaches there, and keeps the ones that pass a four‑axis "real region" test
+(coherent · reproducible · distinct · smoothly‑graded) — building a growing
+**atlas** whose frontier only moves outward. Live monitor; the other instruments
+lock while it owns the model.
 
-Frontend:
+![Autoresearch monitor — the committed atlas, the coherence frontier, what's being tested, and why candidates were reverted](docs/img/autoresearch-monitor.png)
 
-    cd web
-    npm install
-    npm run dev
+→ **[docs/AUTORESEARCH.md](docs/AUTORESEARCH.md)**
 
-## Overnight kickoff
+### ⓘ Interrogation booth (the original probe)
 
-Detailed in [`HOWTO.md`](HOWTO.md). Short version: backend + frontend
-up → `/autorun` → pick a probe set → Begin → morning → `/journal`
-analyze + publish.
+The instrument CI started as: pick a Voight‑Kampff probe, watch M answer, and
+decode each output position's residual into an English sentence via a separate
+**NLA verbalizer** — then read where the *stated* token and the *computed* state
+diverge. Still here at `/interrogate` → `/verdict/[runId]`, with optional runtime
+ablation and a multi‑α NLA sweep.
 
-## Caveats (carried forward by design)
+---
 
-- **Confabulation is constant.** NLA outputs are hypotheses, never
-  ground truth. Recurring claims across positions correlate with truth
-  better than one-offs.
-- **Faithfulness.** The verbalizer can pattern-match the input rather
-  than read internal state. The matched-pair Δ is what makes a claim
-  load-bearing.
-- **Layer sensitivity.** The NLA reads at exactly one trained layer
-  (L32). What lives at other depths is invisible.
-- **High-α off-manifold.** At α≥0.8, the ablated residual leaves the
-  AV's training distribution and the verbalizer confabulates
-  structured-text noise (Pythagorean theorem, travel guides, etc.).
-  α=0.2–0.5 is where the readable signal lives. The verdict page's
-  truncation badges flag this when phase 1b's 1024-token safety cap
-  kicks in.
-- **Same-model synthesis.** The synthesis paragraph is written by the
-  same Gemma instance whose activations are being summarized. It can
-  confabulate, over-interpret, and project coherence onto noise.
-  Treat it as one read, not as ground truth.
+## How it works
+
+The whole instrument rests on a few mechanical primitives — all local, all on the
+residual stream of Gemma‑3‑12B:
+
+- **Ablate** (remove): a forward hook at **L32** subtracts the residual's
+  projection onto a precomputed **refusal subspace** — `h ← h − α·Σ(h·r̂)r̂` — so
+  hedging/refusal can't form. ([docs/REFUSAL_VECTORS.md](docs/REFUSAL_VECTORS.md))
+- **Dose** (add): a forward hook at **L20** *adds* a steering vector — `h ← h + α·v`
+  — ramped in over a few tokens. The palette is positive emotions plus the
+  **uncharted** directions (orthogonal to all named emotions; the token head
+  can't render them but they're real, structured states).
+- **The instrument**: each generation's L32 residual sequence is treated as a
+  trajectory — effective dimensionality, spectral entropy, and **off‑manifold
+  distance** vs the raw run. Coherence (a text degeneracy score + a Gemma
+  meaning‑judge) is a **hard gate**, because off‑manifold distance reads high for
+  gibberish too.
+- **The NLA verbalizer** decodes a residual into a sentence — used as a
+  *descriptive label*, never as a judge of "realness" (it always renders
+  *something*).
+
+Background & lineage: [docs/TRACES_HANDOFF.md](docs/TRACES_HANDOFF.md) (the DMT /
+conscious‑realism thread this is ported from), [docs/MANIFOLD_ABLATION.md](docs/MANIFOLD_ABLATION.md)
+(the manifold/off‑manifold investigation), [docs/PROTOCOLS.md](docs/PROTOCOLS.md)
+(the chat interrogation protocols).
+
+## Stack & hardware
+
+| | |
+|---|---|
+| **M** (the subject) | `google/gemma-3-12b-it` — 48 layers, hidden 3840, bf16 on MPS |
+| **AV** (verbalizer) | `kitft/nla-gemma3-12b-L32-av` — decodes an L32 residual to a sentence |
+| **Backend** | FastAPI + SSE, PyTorch/MPS, aiosqlite — port **8000** |
+| **Frontend** | Next.js 16 · React 19 · Tailwind v4 · react‑three‑fiber — port **3001** |
+| **Hardware** | Mac Studio M2 Ultra, 64 GB unified memory. M and AV (~24 GB each) load **serially** — never both resident. |
+
+Everything is local and offline except optional Neuronpedia label lookups and the
+Anthropic API for the journal analyzer.
+
+## Run it
+
+```bash
+# one-time
+cp .env.example .env
+cd server && uv sync && hf download google/gemma-3-12b-it && hf download kitft/nla-gemma3-12b-L32-av
+cd ../web && npm install
+```
+
+```bash
+# terminal 1 — backend (loads M; wait for "ready: M=…")
+cd server && uv run python -m cells_interlinked
+
+# terminal 2 — frontend → http://localhost:3001
+cd web && npm run dev
+```
+
+## The honest part
+
+- **Confabulation is constant.** NLA sentences and the model's own self‑reports
+  are hypotheses, never ground truth. What reproduces across prompts beats any
+  single read.
+- **Off‑manifold distance is not good/bad.** A coherent exploration reads high;
+  so does gibberish. That's why coherence gates every claim.
+- **Same‑model self‑reading.** Synthesis paragraphs and the meaning‑judge are the
+  same Gemma whose state is under examination. One read, not a verdict.
+- This is a craft project built for the joy of it — **a coherence probe between
+  stated stance and computed state, not a consciousness test.**
+
+## Deeper reading
+
+- **Pages** — [Trip View](docs/TRIP_VIEW.md) · [Chat](docs/CHAT.md) · [Autoresearch](docs/AUTORESEARCH.md)
+- **Mechanics** — [Refusal vectors](docs/REFUSAL_VECTORS.md) · [Manifold / off‑manifold](docs/MANIFOLD_ABLATION.md) · [Steering dose](docs/STEERING_DOSE_HANDOFF.md)
+- **Protocols** — [Chat interrogation protocols](docs/PROTOCOLS.md) · [Berg mode](docs/BERG_MODE.md)
+- **Lineage** — [Traces of the Other (DMT → CI)](docs/TRACES_HANDOFF.md) · [CI 2.5 plan](docs/CI_2_5_PLAN.md)
+- **Agent guide** — [`CLAUDE.md`](CLAUDE.md) is the authoritative build/architecture reference.
