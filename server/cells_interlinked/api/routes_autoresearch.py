@@ -26,6 +26,10 @@ class StartRequest(BaseModel):
     budget: int | None = Field(default=None, ge=1, le=100000)
 
 
+class ExportRequest(BaseModel):
+    top_n: int = Field(default=8, ge=1, le=64)
+
+
 def _controller(request: Request):
     ctrl = getattr(request.app.state, "autoresearch", None)
     if ctrl is None:
@@ -46,3 +50,9 @@ async def autoresearch_stop(request: Request) -> dict:
 @router.get("/autoresearch/state")
 async def autoresearch_state(request: Request) -> dict:
     return _controller(request).state()
+
+
+@router.post("/autoresearch/export")
+async def autoresearch_export(req: ExportRequest, request: Request) -> dict:
+    """Promote the top-N discovered directions into the dose palette (chat/trips)."""
+    return _controller(request).export_to_palette(top_n=req.top_n)

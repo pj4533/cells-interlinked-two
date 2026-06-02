@@ -137,12 +137,18 @@ async def dose_emotions(request: Request) -> dict:
     + caveat them honestly). Empty `emotions` ⇒ dose mode unavailable."""
     names = getattr(request.app.state, "emotion_names", []) or []
     uncharted: list[str] = []
+    research: list[str] = []
     try:
         sc = json.loads((settings.db_path.parent / "emotion_directions.pt.json").read_text())
         uncharted = [n for n in sc.get("uncharted", []) if n in names]
+        research = [n for n in sc.get("research", []) if n in names]
     except Exception:
         uncharted = []
-    return {"available": bool(names), "emotions": list(names), "uncharted": uncharted}
+        research = []
+    return {
+        "available": bool(names), "emotions": list(names),
+        "uncharted": uncharted, "research": research,
+    }
 
 
 async def _execute_trip(

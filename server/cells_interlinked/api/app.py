@@ -98,6 +98,10 @@ async def lifespan(app: FastAPI):
     # out probe/chat/trip via app.state.autoresearch_active.
     autoresearch = AutoresearchController()
     autoresearch.app = app
+    try:
+        autoresearch._load()  # surface any persisted atlas to /state + export before a run
+    except Exception:
+        logger.exception("failed to preload autoresearch atlas")
     app.state.autoresearch = autoresearch
     app.state.autoresearch_active = False
 

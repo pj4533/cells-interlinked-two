@@ -170,7 +170,60 @@ class AutoresearchController:
             "reverts": list(self.reverts),
             "recent_events": list(self.events)[-60:],
             "current": self.current,
+            "exportable": len([e for e in self.atlas if e["generator"] != "seed"]),
         }
+
+    # ── export discovered directions into the dose palette ───────
+    def export_to_palette(self, top_n: int = 8) -> dict:
+        """Promote the top‑N committed NON‑seed directions (by off‑manifold
+        reach) into emotion_directions.pt under a `research:` group, so they
+        become selectable doses in Chat and the Trip View. Idempotent: replaces
+        any prior research entries. Hot‑reloads the running backend."""
+        if self._running:
+            return {"ok": False, "error": "stop autoresearch first"}
+        cands = sorted(
+            [e for e in self.atlas if e.get("generator") != "seed" and e["id"] in self._vectors],
+            key=lambda e: -e["off_ortho"],
+        )
+        if not cands:
+            return {"ok": False, "error": "no discovered (non-seed) directions to export yet"}
+        chosen = cands[: max(1, top_n)]
+        d = settings.db_path.parent
+        edir = torch.load(d / "emotion_directions.pt", weights_only=False)  # [E, L1, D]
+        sc = json.loads((d / "emotion_directions.pt.json").read_text())
+        names = list(sc.get("emotions", []))
+        prior_research = set(sc.get("research", []))
+        L1, D = edir.shape[1], edir.shape[2]
+        # Drop any prior research rows so re-export doesn't accumulate stale ones.
+        keep = [i for i, n in enumerate(names) if n not in prior_research]
+        edir = edir[keep]
+        names = [names[i] for i in keep]
+        rows, new_names, meta = [], [], {}
+        for rank, e in enumerate(chosen, 1):
+            vec = self._vectors[e["id"]].float()
+            row = torch.zeros(L1, D, dtype=edir.dtype)
+            row[STEER_LAYER] = vec.to(edir.dtype)
+            rows.append(row)
+            rname = f"research-{rank}"
+            new_names.append(rname)
+            meta[rname] = {
+                "atlas_id": e["id"], "off_ortho": e["off_ortho"],
+                "alpha_star": e["alpha_star"], "parents": e.get("parents", []),
+                "generator": e.get("generator"),
+            }
+        edir = torch.cat([edir, torch.stack(rows, 0)], 0)
+        names = names + new_names
+        sc["emotions"] = names
+        sc["research"] = new_names
+        sc["research_meta"] = meta
+        torch.save(edir, d / "emotion_directions.pt")
+        (d / "emotion_directions.pt.json").write_text(json.dumps(sc, indent=2))
+        # Hot-reload into the live backend (routes read app.state).
+        if self.app is not None:
+            self.app.state.emotion_directions = edir
+            self.app.state.emotion_names = names
+        self._log("exported", f"exported {len(new_names)} directions to palette: {new_names}")
+        return {"ok": True, "exported": new_names, "meta": meta, "count": len(new_names)}
 
     # ── persistence ──────────────────────────────────────────────
     def _persist(self) -> None:
@@ -490,7 +543,8 @@ class AutoresearchController:
     async def _run_loop(self, budget: int | None):
         try:
             _atlas_dir().mkdir(parents=True, exist_ok=True)
-            self._load()
+            if not self.atlas:
+                self._load()
             self._setup()
             if not self.atlas:
                 await self._seed()

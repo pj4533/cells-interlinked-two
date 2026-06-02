@@ -92,3 +92,12 @@ export async function stopAutoresearch(): Promise<{ ok: boolean; was_running?: b
   const res = await fetch(`${API}/autoresearch/stop`, { method: "POST" });
   return res.json();
 }
+
+export async function exportAutoresearch(topN: number): Promise<{ ok: boolean; error?: string; exported?: string[]; count?: number }> {
+  const res = await fetch(`${API}/autoresearch/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ top_n: topN }),
+  });
+  return res.json();
+}

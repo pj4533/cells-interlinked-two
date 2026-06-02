@@ -389,6 +389,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
   const [mode, setMode] = useState<TripMode>("ablate");
   const [emotions, setEmotions] = useState<string[]>([]);
   const [uncharted, setUncharted] = useState<string[]>([]);
+  const [research, setResearch] = useState<string[]>([]);
   const [emotion, setEmotion] = useState("awe");
   // α sweep: empty string → server default (raw + 0.5/1.0/1.5 steer, 0.5/1.0 ablate).
   const [alphaText, setAlphaText] = useState("");
@@ -400,12 +401,13 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
       if (p.emotions.length) {
         setEmotions(p.emotions);
         setUncharted(p.uncharted);
+        setResearch(p.research);
         if (!p.emotions.includes(emotion)) setEmotion(p.emotions[0]);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const named = emotions.filter((e) => !uncharted.includes(e));
+  const named = emotions.filter((e) => !uncharted.includes(e) && !research.includes(e));
   const doseBtn = (e: string) => (
     <button
       key={e}
@@ -474,6 +476,17 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
                 UNCHARTED <span className="normal-case tracking-normal italic text-text-dim/70">· non-human-readable directions, not emotions</span>:
               </span>
               {uncharted.map(doseBtn)}
+            </div>
+          )}
+          {research.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
+              <span
+                className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
+                title="Directions discovered by the autoresearch loop and exported into the palette, ranked by how far off-manifold they reach while staying coherent."
+              >
+                RESEARCH <span className="normal-case tracking-normal italic text-text-dim/70">· autoresearch-discovered</span>:
+              </span>
+              {research.map(doseBtn)}
             </div>
           )}
         </div>

@@ -12,6 +12,7 @@ import {
   fetchAutoresearchState,
   startAutoresearch,
   stopAutoresearch,
+  exportAutoresearch,
   type ARState,
   type AtlasEntry,
 } from "@/lib/autoresearch";
@@ -38,7 +39,9 @@ const REVERT_HINT: Record<string, string> = {
 export default function AutoresearchPage() {
   const [st, setSt] = useState<ARState | null>(null);
   const [budget, setBudget] = useState<string>("");
+  const [topN, setTopN] = useState<string>("8");
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = useCallback(async () => {
@@ -59,8 +62,15 @@ export default function AutoresearchPage() {
     poll();
   };
   const onStop = async () => { await stopAutoresearch(); poll(); };
+  const onExport = async () => {
+    setErr(null); setNotice(null);
+    const r = await exportAutoresearch(topN ? parseInt(topN, 10) : 8);
+    if (!r.ok) setErr(r.error ?? "export failed");
+    else setNotice(`exported ${r.count} → palette (${(r.exported ?? []).join(", ")}). Now selectable in chat & trips under RESEARCH.`);
+  };
 
   const running = st?.running ?? false;
+  const exportable = (st as ARState & { exportable?: number })?.exportable ?? 0;
   const atlas = [...(st?.atlas ?? [])].sort((a, b) => b.off_ortho - a.off_ortho);
   const maxOff = Math.max(0.001, ...atlas.map((e) => e.off_ortho));
 
@@ -96,11 +106,25 @@ export default function AutoresearchPage() {
           ) : (
             <button type="button" onClick={onStop} data-vk className="!py-1 !px-3 text-[10px]">■ stop</button>
           )}
+          {!running && exportable > 0 && (
+            <>
+              <span className="w-px h-5 bg-rule/50 mx-1" />
+              <input
+                type="number" min={1} value={topN} onChange={(e) => setTopN(e.target.value)}
+                className="w-12 bg-bg-soft border border-rule px-1.5 py-1 font-mono text-[10px] text-text focus:border-cyan focus:outline-none"
+                title="how many top directions to export"
+              />
+              <button type="button" onClick={onExport} data-vk className="!py-1 !px-3 text-[10px]" title="promote the top discovered directions into the dose palette (chat & trips)">⇪ export → palette</button>
+            </>
+          )}
         </div>
       </header>
 
       {err && (
         <div className="relative z-10 bg-warning/10 px-5 py-1.5 text-[11px] text-warning font-mono">⚠ {err}</div>
+      )}
+      {notice && (
+        <div className="relative z-10 bg-cyan/10 px-5 py-1.5 text-[11px] text-cyan font-mono">✓ {notice}</div>
       )}
 
       {/* Now-testing strip */}

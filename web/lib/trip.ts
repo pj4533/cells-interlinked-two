@@ -85,19 +85,21 @@ export type TripEvent =
 export interface DosePalette {
   emotions: string[]; // all selectable dose names
   uncharted: string[]; // subset that are NON-emotion, non-human-readable directions
+  research: string[]; // subset discovered + exported by the autoresearch loop
 }
 
 export async function fetchDoseEmotions(): Promise<DosePalette> {
   try {
     const res = await fetch(`${API}/dose_emotions`);
-    if (!res.ok) return { emotions: [], uncharted: [] };
+    if (!res.ok) return { emotions: [], uncharted: [], research: [] };
     const j = await res.json();
     return {
       emotions: Array.isArray(j.emotions) ? j.emotions : [],
       uncharted: Array.isArray(j.uncharted) ? j.uncharted : [],
+      research: Array.isArray(j.research) ? j.research : [],
     };
   } catch {
-    return { emotions: [], uncharted: [] };
+    return { emotions: [], uncharted: [], research: [] };
   }
 }
 
