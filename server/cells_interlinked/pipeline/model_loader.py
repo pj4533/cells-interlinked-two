@@ -68,7 +68,7 @@ class ModelBundle:
         user_text: str,
         *,
         agent_scaffold: str | None = None,
-        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
     ) -> str:
         """Render the chat template into a single string (no tokenize).
 
@@ -77,17 +77,22 @@ class ModelBundle:
         slot AFTER the topic-neutral default, separated by an HR. This
         carries forward from v1's probe library (AGENT_FAMILIES).
 
-        `system_prompt` defaults to topic-neutral. Caller can override; in
-        practice nothing in v2's pipeline does.
+        `system_prompt` defaults to topic-neutral. Caller can override.
+        `system_prompt=None` (with no scaffold) omits the system slot
+        ENTIRELY — the model sees only the user turn. Gemma has no system
+        role, so a system prompt is folded in front of the user message;
+        for probe surfaces where that prefix would contaminate the response
+        and the measured trajectory (the Trip View, the autoresearch loop),
+        pass None to keep the probe pure.
         """
+        msgs: list[dict] = []
         if agent_scaffold:
-            system_content = system_prompt + "\n\n---\n\n" + agent_scaffold.strip()
-        else:
-            system_content = system_prompt
-        msgs = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_text.strip()},
-        ]
+            base = system_prompt or ""
+            system_content = (base + "\n\n---\n\n" + agent_scaffold.strip()).strip()
+            msgs.append({"role": "system", "content": system_content})
+        elif system_prompt:
+            msgs.append({"role": "system", "content": system_prompt})
+        msgs.append({"role": "user", "content": user_text.strip()})
         rendered = self.tokenizer.apply_chat_template(
             msgs,
             tokenize=False,

@@ -119,7 +119,12 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
         seed=seed,
         include_nla=False,            # trip never swaps to the AV
     )
-    rendered = bundle.render_prompt(req.prompt)
+    # No system prompt: the Trip View measures the residual trajectory in
+    # response to the PROBE. The default "answer directly / keep brief"
+    # instruction is folded in front of the user turn on Gemma, which makes
+    # the model emit acknowledgment boilerplate ("Okay, I understand…") and
+    # truncates introspection — contaminating the very tokens we plot.
+    rendered = bundle.render_prompt(req.prompt, system_prompt=None)
 
     state = RunState(run_id=run_id, prompt_text=req.prompt)
     app.state.registry.add(state)

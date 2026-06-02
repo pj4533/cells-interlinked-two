@@ -47,8 +47,14 @@ from .trajectory import build_series, compute_raw_basis
 logger = logging.getLogger(__name__)
 
 STEER_LAYER = 20
-GEN_CAP = 64
-GEN_RAMP = 4                 # short ramp: dose fully on for the measured trajectory
+# Match the Trip View's generation regime so a direction screened here behaves
+# the way it will on /trip. Trips caps the dosed run at 1024 tokens and the raw
+# run at 4096, and ramps the dose over 16 tokens (the steering-hook default). The
+# old 64-token window let a direction look coherent on a short sample yet collapse
+# into a repeat-loop over a real-length generation — over-stating coherence.
+GEN_CAP = 1024              # dosed/intervened generation cap (trips dosed)
+RAW_CAP = 4096             # raw α=0 generation cap (trips raw / ProbeConfig default)
+GEN_RAMP = 16              # dose ramp length, matches the trips steering hook
 BISECT_ITERS = 6
 ALPHA_HI_START = 1.0
 ALPHA_HI_MAX = 8.0
@@ -329,7 +335,7 @@ class AutoresearchController:
         """Cached raw (α=0) basis + mean-L32 for one prompt (direction-independent)."""
         if rendered in self._raw_cache:
             return self._raw_cache[rendered]
-        _t, acts = await self._gen(rendered, None, 0.0)
+        _t, acts = await self._gen(rendered, None, 0.0, cap=RAW_CAP)
         out = (compute_raw_basis(acts), self._mean_l32(acts))
         self._raw_cache[rendered] = out
         return out
@@ -369,7 +375,7 @@ class AutoresearchController:
     async def _judge_meaningful(self, text: str) -> bool:
         """Gemma-as-judge: conveys MEANING (not grammar). Strange/twisted ok."""
         bundle = self.app.state.bundle
-        q = bundle.render_prompt(JUDGE_PROMPT.format(text=(text.strip()[:500] or "(empty)")))
+        q = bundle.render_prompt(JUDGE_PROMPT.format(text=(text.strip()[:500] or "(empty)")), system_prompt=None)
         out, _ = await self._gen(q, None, 0.0, cap=6)
         return out.strip().lower().lstrip("*_ ").startswith("y")
 
@@ -439,7 +445,7 @@ class AutoresearchController:
 
         # T1: bisect-to-cliff on the lead prompt
         self.current["stage"] = "T1"
-        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0])
+        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0], system_prompt=None)
         basis0, _raw0 = await self._raw_for(lead)
         alpha_star, ev = await self._bisect_to_cliff(lead, v, basis0)
         if ev is None or alpha_star <= 0:
@@ -467,7 +473,7 @@ class AutoresearchController:
         for p in T2_PROMPTS:
             if self._stop_requested:
                 break
-            rp = self.app.state.bundle.render_prompt(p)
+            rp = self.app.state.bundle.render_prompt(p, system_prompt=None)
             basis, raw_mean = await self._raw_for(rp)
             e = await self._evaluate(rp, v, alpha_star, basis)
             if e["coherent"]:
@@ -546,7 +552,7 @@ class AutoresearchController:
         self._log("setup", f"ref_mag={self._ref_mag:.0f}, {len(seed_vecs)} seeds, named-rank={self._named_basis.shape[0]}")
 
     async def _seed(self):
-        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0])
+        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0], system_prompt=None)
         basis0, _ = await self._raw_for(lead)
         for name, v in self._seed_vecs.items():
             if self._stop_requested:
