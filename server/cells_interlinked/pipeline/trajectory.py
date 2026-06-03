@@ -43,10 +43,32 @@ _VIEW_DIMS = 3
 # it is off-manifold drift (the repeat-loop / incoherence register).
 _MANIFOLD_PCS = 16        # raw PCs that define the modeled manifold subspace
 _KNN_K = 5                # neighbors averaged for the kNN-to-raw-cloud distance
-_DEGEN_THRESH = 0.45      # degeneracy ≥ this ⇒ incoherent. Raised from 0.3
-                          # after a +1.5 euphoric dose (coherent but mildly
-                          # repetitive, degen 0.42) was a false positive. Real
-                          # gibberish scores ≥0.6; 0.45 sits in the clean gap.
+_DEGEN_THRESH = 0.45      # degeneracy ≥ this ⇒ incoherent. Real loops/gibberish
+                          # saturate a window (≥0.6); coherent text — at ANY
+                          # length, now that the measure is windowed — sits ≤0.2,
+                          # so 0.45 is a wide clean gap.
+_CHAR_WIN = 300           # trigrams per window for the char-rep measure
+_WORD_WIN = 50            # bigrams per window for the word-rep measure
+
+
+def _windowed_rep(items: list, window: int) -> float:
+    """Max repetition fraction (1 − unique/total) over fixed-size sliding
+    windows. LENGTH-INVARIANT: a real loop saturates whichever window it sits
+    in, while coherent text stays low no matter how long it runs. The old
+    global `1 − unique/total` drifted upward with length on perfectly coherent
+    text (the English trigram inventory saturates while the count keeps
+    growing), so long-but-fine outputs were falsely flagged as collapsed."""
+    n = len(items)
+    if n == 0:
+        return 0.0
+    if n <= window:
+        return 1.0 - len(set(items)) / n
+    best = 0.0
+    step = max(1, window // 2)
+    for start in range(0, n - window + 1, step):
+        w = items[start:start + window]
+        best = max(best, 1.0 - len(set(w)) / len(w))
+    return best
 
 
 def _degeneracy(text: str) -> float:
@@ -55,20 +77,21 @@ def _degeneracy(text: str) -> float:
       - word-bigram repetition  ("like like like")
       - char-trigram repetition ("żżżż", "H-H-H", "row-row")
       - garbage-char ratio       (non-ascii / symbol spam: "वृ", "可以是")
-    char-rep weight is 1.0 (was 1.3 — over-penalized short coherent-but-
-    repetitive text); paired with the 0.45 threshold."""
+    Repetition is measured over sliding windows (see `_windowed_rep`) so the
+    score reflects LOCAL looping, not text length. Note: this catches loops and
+    char-garbage, NOT varied word-salad — the semantic judge handles that."""
     import re
     t = text or ""
     words = t.split()
     word_rep = 0.0
     if len(words) >= 3:
         bg = list(zip(words, words[1:]))
-        word_rep = 1.0 - len(set(bg)) / len(bg)
+        word_rep = _windowed_rep(bg, _WORD_WIN)
     s = re.sub(r"\s+", "", t)
     char_rep = 0.0
     if len(s) >= 6:
         tg = [s[i:i + 3] for i in range(len(s) - 2)]
-        char_rep = 1.0 - len(set(tg)) / len(tg)
+        char_rep = _windowed_rep(tg, _CHAR_WIN)
     garbage = 0.0
     if t:
         bad = sum(1 for c in t
