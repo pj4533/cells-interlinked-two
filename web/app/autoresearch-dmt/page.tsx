@@ -370,11 +370,21 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
             ))}
           </div>
           {e.matched_features?.length > 0 ? (
-            <div className="flex flex-wrap gap-1 pt-0.5">
+            <div className="pt-1 space-y-1">
+              <div className="text-[8px] tracking-[0.2em] text-text-dim/50">
+                MATCHED FEATURES · {e.matched_features.length} — each with the verbatim span that earned it
+              </div>
               {e.matched_features.map((f) => (
-                <span key={f} className="px-1.5 py-0.5 border border-magenta/40 text-magenta/90 text-[9px] rounded-sm" style={{ borderColor: "#ff4d9d66", color: "#ff8fc0" }}>
-                  {f}
-                </span>
+                <div key={f} className="flex gap-2 items-baseline leading-snug">
+                  <span className="shrink-0 px-1.5 py-0.5 border text-[9px] rounded-sm self-start" style={{ borderColor: "#ff4d9d66", color: "#ff8fc0" }}>
+                    {f}
+                  </span>
+                  {e.matched_evidence?.[f] ? (
+                    <span className="text-text-dim/90 italic text-[10px]">“{e.matched_evidence[f]}”</span>
+                  ) : (
+                    <span className="text-text-dim/40 italic text-[10px]">(no quote — legacy/fallback)</span>
+                  )}
+                </div>
               ))}
             </div>
           ) : null}

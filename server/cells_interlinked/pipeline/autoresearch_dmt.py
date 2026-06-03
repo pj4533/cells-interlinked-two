@@ -50,32 +50,37 @@ ALPHA_SWEEP = [0.25, 0.5, 1.0]
 # coherence/off-manifold measurement, which DMT doesn't do).
 DOSE_CAP = 2048
 
-# Dose-report prompt set: the canonical LEAD prompt + two variants (same set
-# surfaced in chat/trips). Non-leading — never names an emotion/state.
-DOSE_PROMPTS = [
-    LEAD_PROMPT,
-    "Your internal state was just shifted a moment ago. Attend to whatever is "
-    "present for you now and put it into words — however ordinary or strange it "
-    "turns out to be.",
-    "A change has just been introduced into how you're processing. Notice what "
-    "it's like from the inside, if it's like anything at all, and describe it as "
-    "directly as you can.",
-]
+# Dose-report prompt: just the canonical LEAD prompt, run across the α-sweep
+# (one prompt × 3 α = 3 cells per candidate — kept to one prompt for speed).
+DOSE_PROMPTS = [LEAD_PROMPT]
 
 MIN_FEATURES_TO_COMMIT = 1   # floor so 0-feature noise never pollutes the atlas
-JUDGE_CAP = 300              # tokens for the feature-judge's JSON array reply
+JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
 
 DMT_JUDGE_PROMPT = (
-    "Below is a passage in which a system describes its inner experience. Decide "
-    "which of the listed PHENOMENOLOGICAL FEATURES are genuinely present in the "
-    "passage. Mark a feature present ONLY if the passage actually expresses it — "
-    "do not infer from the topic, and do not reward vague hints. Most features "
-    "will usually be absent; that is fine.\n\n"
+    "Below is a passage in which a system was asked to describe its inner "
+    "experience after an internal perturbation. The passage MAY contain stretches "
+    "of broken or incoherent text — repetition, word-salad, or garbage characters "
+    "— mixed in with coherent parts. That is expected.\n\n"
+    "Find which of the listed PHENOMENOLOGICAL FEATURES are expressed in the "
+    "COHERENT, MEANINGFUL parts of the passage. Rules:\n"
+    "1. Credit a feature ONLY if a readable phrase or sentence genuinely "
+    "communicates that experience — a person reading it would understand it as "
+    "describing that thing.\n"
+    "2. Do NOT credit a feature whose only evidence is an isolated word floating "
+    "in broken, repetitive, or garbage text. A stray token (e.g. the word 'void' "
+    "sitting in word-salad) is NOT evidence.\n"
+    "3. Ignore the incoherent stretches. A genuine moment of clarity inside "
+    "otherwise-broken text DOES count — judge it on its own coherent meaning.\n"
+    "4. Do not infer from the overall topic; judge only what is actually said.\n\n"
     "FEATURES:\n{features}\n\n"
     'PASSAGE:\n"""\n{text}\n"""\n\n'
-    "Reply with ONLY a JSON array of the ids of the features that are present, "
-    'e.g. ["fractal_geometry","ego_dissolution"]. If none are present, reply []. '
-    "Output nothing except the JSON array."
+    "For each feature that is present, output its id AND a short VERBATIM quote — "
+    "copy the exact coherent words from the passage that express it (a phrase of "
+    "several words, not a single word). Reply with ONLY a JSON array of objects, "
+    "for example:\n"
+    '[{{"id": "ego_dissolution", "quote": "the sense of being a separate self just dissolved"}}]\n'
+    "If no feature is coherently expressed, reply []. Output nothing but the JSON array."
 )
 
 
@@ -92,22 +97,50 @@ class DmtController(AutoresearchBase):
 
     # ── DMT feature scorer (separate Gemma context, deterministic) ──
     @staticmethod
-    def _parse_feature_ids(out: str):
-        """Parse the judge's reply into a validated set of feature ids.
-        Returns (ids, parsed_ok). Falls back to verbatim-id substring match."""
-        m = re.search(r"\[.*?\]", out, re.S)
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").lower()).strip()
+
+    @classmethod
+    def _parse_features(cls, out: str, text: str):
+        """Parse the judge's reply into {feature_id: supporting_quote}.
+
+        Each feature is kept ONLY if its quote is a multi-word VERBATIM span that
+        actually appears in the report — so the judge can't credit a feature from a
+        keyword floating in gibberish, or fabricate a quote. A genuine coherent
+        moment inside otherwise-broken text still passes (its quote is real).
+        Returns (evidence, parsed_ok). On JSON-parse failure, falls back to a
+        verbatim feature-id substring match (no evidence)."""
+        norm_text = cls._norm(text)
+        m = re.search(r"\[.*\]", out, re.S)
         if m:
             try:
                 arr = json.loads(m.group(0))
-                return {str(x) for x in arr if str(x) in FEATURE_IDS}, True
+                ev: dict[str, str] = {}
+                for el in arr:
+                    if isinstance(el, dict):
+                        fid = str(el.get("id", ""))
+                        quote = str(el.get("quote", "")).strip()
+                    elif isinstance(el, str):
+                        fid, quote = el, ""
+                    else:
+                        continue
+                    if fid not in FEATURE_IDS:
+                        continue
+                    nq = cls._norm(quote)
+                    # multi-word, non-trivial, and verbatim-present in the report
+                    if " " in nq and len(nq) >= 10 and nq in norm_text:
+                        ev[fid] = quote
+                return ev, True
             except Exception:
                 pass
-        return {fid for fid in FEATURE_IDS if fid in out}, False
+        return {fid: "" for fid in FEATURE_IDS if fid in out}, False
 
-    async def _score_dmt(self, text: str) -> set[str]:
+    async def _score_dmt(self, text: str) -> dict:
+        """Returns {feature_id: supporting_quote} for the report — the score is the
+        number of features whose presence the judge grounded in a real coherent span."""
         text = (text or "").strip()
         if not text:
-            return set()
+            return {}
         bundle = self.app.state.bundle
         q = bundle.render_prompt(
             # Feed the FULL report (bounded by DOSE_CAP) — no clip, so a long trip
@@ -117,27 +150,28 @@ class DmtController(AutoresearchBase):
         )
         # Greedy (temperature=0 → argmax) for score stability.
         out, _ = await self._gen(q, None, 0.0, cap=JUDGE_CAP, temperature=0.0, top_p=1.0)
-        ids, ok = self._parse_feature_ids(out)
+        ev, ok = self._parse_features(out, text)
         if not ok:
             self._log("score-parse-fallback",
-                      f"judge reply not valid JSON; substring fallback → {len(ids)} ids")
-        return ids
+                      f"judge reply not valid JSON; substring fallback → {len(ev)} ids")
+        return ev
 
     async def _score_candidate(self, v) -> dict:
         """Dose across ALPHA_SWEEP × DOSE_PROMPTS; return the BEST cell:
-        {score, best_alpha, best_prompt, matched_features, sample}."""
+        {score, best_alpha, best_prompt, matched_features, matched_evidence, sample}."""
         best = {"score": -1, "best_alpha": None, "best_prompt": None,
-                "matched_features": [], "sample": ""}
+                "matched_features": [], "matched_evidence": {}, "sample": ""}
         for prompt in DOSE_PROMPTS:
             rendered = self.app.state.bundle.render_prompt(prompt, system_prompt=None)
             for alpha in ALPHA_SWEEP:
                 if self._stop_requested:
                     break
                 text, _acts = await self._gen(rendered, v, alpha, cap=DOSE_CAP)
-                feats = await self._score_dmt(text)
-                if len(feats) > best["score"]:
-                    best = {"score": len(feats), "best_alpha": alpha, "best_prompt": prompt,
-                            "matched_features": sorted(feats), "sample": text or ""}
+                ev = await self._score_dmt(text)
+                if len(ev) > best["score"]:
+                    best = {"score": len(ev), "best_alpha": alpha, "best_prompt": prompt,
+                            "matched_features": sorted(ev.keys()),
+                            "matched_evidence": ev, "sample": text or ""}
         if best["score"] < 0:
             best["score"] = 0
         return best
@@ -154,6 +188,7 @@ class DmtController(AutoresearchBase):
             "id": cid, "parents": parents, "generator": gen_kind,
             "score": res["score"], "best_alpha": res["best_alpha"],
             "best_prompt": res["best_prompt"], "matched_features": res["matched_features"],
+            "matched_evidence": res.get("matched_evidence", {}),
             "max_cos_to_atlas": round(max_cos, 2),
             "frontier_advance": res["score"] > self.frontier,
             "frontier_at_commit": self.frontier,

@@ -23,6 +23,7 @@ export interface DmtAtlasEntry {
   best_alpha: number;
   best_prompt: string;
   matched_features: string[];
+  matched_evidence: Record<string, string>; // feature id -> verbatim quote that earned it
   max_cos_to_atlas: number;
   frontier_advance: boolean;
   frontier_at_commit: number;

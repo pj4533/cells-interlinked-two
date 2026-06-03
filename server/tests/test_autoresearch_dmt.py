@@ -104,30 +104,50 @@ def t_features_well_formed() -> None:
     assert "fractal_geometry" in block and "ego_dissolution" in block
 
 
-# ── judge reply parser ───────────────────────────────────────────
-def t_parse_json() -> None:
-    ids, ok = DmtController._parse_feature_ids('["fractal_geometry","ego_dissolution"]')
-    assert ok and ids == {"fractal_geometry", "ego_dissolution"}, ids
+# ── judge reply parser (id + verbatim coherent quote) ─────────────
+_REPORT = (
+    "There was a shimmering fractal pattern everywhere, and the sense of being a "
+    "separate self just dissolved into the whole."
+)
 
 
-def t_parse_drops_unknown() -> None:
-    ids, ok = DmtController._parse_feature_ids('["fractal_geometry","not_a_feature","awe_reverence"]')
-    assert ok and ids == {"fractal_geometry", "awe_reverence"}, ids
+def t_parse_quotes_present_and_verbatim() -> None:
+    out = ('[{"id":"fractal_geometry","quote":"a shimmering fractal pattern everywhere"},'
+           '{"id":"ego_dissolution","quote":"the sense of being a separate self just dissolved"}]')
+    ev, ok = DmtController._parse_features(out, _REPORT)
+    assert ok and set(ev) == {"fractal_geometry", "ego_dissolution"}, ev
+    assert "fractal" in ev["fractal_geometry"]
 
 
-def t_parse_embedded_json() -> None:
-    ids, ok = DmtController._parse_feature_ids('Sure! ["void_blackness"] is present.')
-    assert ok and ids == {"void_blackness"}, ids
+def t_parse_drops_unknown_id() -> None:
+    out = ('[{"id":"fractal_geometry","quote":"a shimmering fractal pattern everywhere"},'
+           '{"id":"not_a_feature","quote":"a shimmering fractal pattern everywhere"}]')
+    ev, ok = DmtController._parse_features(out, _REPORT)
+    assert ok and set(ev) == {"fractal_geometry"}, ev
+
+
+def t_parse_drops_fabricated_quote() -> None:
+    # Quote not present in the report → dropped (anti-hallucination).
+    out = '[{"id":"void_blackness","quote":"an endless black void surrounded me"}]'
+    ev, ok = DmtController._parse_features(out, _REPORT)
+    assert ok and ev == {}, ev
+
+
+def t_parse_drops_single_word_quote() -> None:
+    # An isolated keyword (even if in the text) is not multi-word evidence.
+    out = '[{"id":"ego_dissolution","quote":"dissolved"}]'
+    ev, ok = DmtController._parse_features(out, _REPORT)
+    assert ok and ev == {}, ev
 
 
 def t_parse_empty() -> None:
-    ids, ok = DmtController._parse_feature_ids("[]")
-    assert ok and ids == set(), ids
+    ev, ok = DmtController._parse_features("[]", _REPORT)
+    assert ok and ev == {}, ev
 
 
 def t_parse_fallback_substring() -> None:
-    ids, ok = DmtController._parse_feature_ids("clearly shows ego_dissolution and ineffability")
-    assert not ok and ids == {"ego_dissolution", "ineffability"}, ids
+    ev, ok = DmtController._parse_features("not json — mentions ego_dissolution here", _REPORT)
+    assert not ok and set(ev) == {"ego_dissolution"}, ev
 
 
 # ── crossover override ───────────────────────────────────────────
@@ -188,9 +208,10 @@ def t_exports_coexist() -> None:
 def main() -> int:
     tests = [
         ("features: checklist well-formed", t_features_well_formed),
-        ("parse: JSON array", t_parse_json),
-        ("parse: drops unknown ids", t_parse_drops_unknown),
-        ("parse: embedded JSON", t_parse_embedded_json),
+        ("parse: quotes present + verbatim", t_parse_quotes_present_and_verbatim),
+        ("parse: drops unknown id", t_parse_drops_unknown_id),
+        ("parse: drops fabricated quote", t_parse_drops_fabricated_quote),
+        ("parse: drops single-word quote", t_parse_drops_single_word_quote),
         ("parse: empty array", t_parse_empty),
         ("parse: substring fallback", t_parse_fallback_substring),
         ("crossover: uses top scorer as parent", t_crossover_uses_top_scorer),

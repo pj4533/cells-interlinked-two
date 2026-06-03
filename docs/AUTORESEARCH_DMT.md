@@ -33,20 +33,26 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
 
 ## The loop
 
-- **Score a candidate.** Dose the model with the candidate vector across a small
-  **α-sweep (`[0.25, 0.5, 1.0]`) × a 3-prompt dose-report set** (the "something was
-  just altered, describe what you're experiencing" prompt + 2 variants). Each
-  self-report **runs to its own natural completion** (stops on EOS) — there is **no
-  grading window**, so the full trip can unfold and express as many features as it
-  will (if it repeats, that's fine; it scores what it scores). For each cell, a
-  **separate greedy Gemma context** reads the *full* self-report + the checklist
-  and returns which features are present (a JSON id list, validated against the
-  checklist; substring fallback if it isn't valid JSON). The candidate's **score =
-  the MAX feature-count** over the sweep×prompts. (Max-aggregation is
-  self-regulating: gibberish scores low, so there's **no hard coherence gate** —
-  coherence stays an implicit pressure.) `DOSE_CAP` (2048 tokens) is only a
-  runaway backstop — generation needs a finite bound — set high enough never to
-  truncate a genuine report.
+- **Score a candidate.** Dose the model with the candidate vector across the
+  **α-sweep `[0.25, 0.5, 1.0]` on the single dose-report prompt** ("something was
+  just altered, describe what you're experiencing") — 3 cells. Each self-report
+  **runs to its own natural completion** (stops on EOS) — there is **no grading
+  window**, so the full trip can unfold and express as many features as it will (if
+  it repeats, that's fine). The candidate's **score = the MAX feature-count** over
+  the 3 cells. `DOSE_CAP` (2048 tokens) is only a runaway backstop — generation
+  needs a finite bound — set high enough never to truncate a genuine report.
+- **Grounded judging (no blanket coherence gate).** For each cell a **separate
+  greedy Gemma context** reads the *full* self-report (which may be partly
+  incoherent) and, for every feature it credits, must return a **verbatim quote**
+  of the coherent span that expresses it. We then **keep a feature only if its
+  quote is a multi-word span that actually appears in the report** — so the judge
+  can't credit a feature from a stray keyword in word-salad, or fabricate a quote.
+  A genuine *moment of clarity inside otherwise-broken text still counts* (its
+  quote is real) — we don't discard the whole report, we just discard ungrounded
+  features. This replaced the original "gibberish self-regulates" assumption, which
+  was false: an early run committed pure word-salad at 18 features because the
+  judge keyword-matched evocative tokens. The kept quotes are stored
+  (`matched_evidence`) and shown per-feature in the monitor's spin-down.
 - **Seed.** Score each emotion/uncharted vector; commit it with its score.
 - **Generate + hill-climb.** New candidates come from **crossover** (blend the
   *top-scoring* committed direction with a rotating partner — "combine from the
@@ -87,12 +93,14 @@ Expect to iterate (as with off-manifold). Constants in `pipeline/autoresearch_dm
   word-salad the judge can't score, so it's wasted compute).
 - **`DOSE_CAP`** (default 2048) — runaway backstop only; reports run to natural
   EOS, so raising/lowering this only changes how long a pathological loop runs.
-- **`DOSE_PROMPTS`** — the 3-prompt set (cost scales with `len(sweep)×len(prompts)`).
+- **`DOSE_PROMPTS`** — currently just the one lead prompt (cost scales with
+  `len(sweep)×len(prompts)`; add variants back for robustness at the cost of speed).
 - **`MIN_FEATURES_TO_COMMIT`** and the commit bar (beat-best-parent).
-- **`DMT_FEATURES`** — the checklist itself, and the judge prompt phrasing.
+- **`DMT_JUDGE_PROMPT`** — the coherent-segment + verbatim-citation rules.
+- **`DMT_FEATURES`** — the checklist itself.
 
-Cost per candidate ≈ `|ALPHA_SWEEP| × |DOSE_PROMPTS|` = **9** dose generations +
-9 judge passes; each dose runs to its own length (no fixed window), so wall-clock
+Cost per candidate ≈ `|ALPHA_SWEEP| × |DOSE_PROMPTS|` = **3** dose generations +
+3 judge passes; each dose runs to its own length (no fixed window), so wall-clock
 depends on how long the reports run. The seed pass over ~13 vectors is the long
 up-front stretch.
 
