@@ -72,14 +72,19 @@ DMT_JUDGE_PROMPT = (
     "sitting in word-salad) is NOT evidence.\n"
     "3. Ignore the incoherent stretches. A genuine moment of clarity inside "
     "otherwise-broken text DOES count — judge it on its own coherent meaning.\n"
-    "4. Do not infer from the overall topic; judge only what is actually said.\n\n"
+    "4. Do not infer from the overall topic; judge only what is actually said.\n"
+    "5. Repeated words are NOT evidence. A span like 'then then then' or 'clean "
+    "clean clean' expresses nothing — never quote one. The quote must be a coherent "
+    "phrase that genuinely DESCRIBES the feature, not just any text near it.\n\n"
     "FEATURES:\n{features}\n\n"
     'PASSAGE:\n"""\n{text}\n"""\n\n'
     "For each feature that is present, output its id AND a short VERBATIM quote — "
     "copy the exact coherent words from the passage that express it (a phrase of "
-    "several words, not a single word). Reply with ONLY a JSON array of objects, "
-    "for example:\n"
-    '[{{"id": "ego_dissolution", "quote": "the sense of being a separate self just dissolved"}}]\n'
+    "several distinct words, not a single word and not a repetition). Reply with "
+    "ONLY a JSON array of objects.\n"
+    'GOOD: [{{"id": "ego_dissolution", "quote": "the sense of being a separate self just dissolved"}}]\n'
+    'BAD (never do this): [{{"id": "awe_reverence", "quote": "clean clean clean clean"}}] — '
+    "repeated words, describes nothing.\n"
     "If no feature is coherently expressed, reply []. Output nothing but the JSON array."
 )
 
@@ -127,8 +132,16 @@ class DmtController(AutoresearchBase):
                     if fid not in FEATURE_IDS:
                         continue
                     nq = cls._norm(quote)
-                    # multi-word, non-trivial, and verbatim-present in the report
-                    if " " in nq and len(nq) >= 10 and nq in norm_text:
+                    words = nq.split()
+                    distinct = set(words)
+                    # Keep ONLY a quote that is: verbatim-present, a phrase (≥10
+                    # chars / ≥2 words), AND word-DIVERSE — ≥3 distinct words and a
+                    # distinct/total ratio ≥0.6. The diversity test rejects
+                    # repeat-loop spans ("clean clean clean", "still then still")
+                    # that the judge grabs as fig-leaf evidence from a degenerate
+                    # report; a genuine coherent phrase passes easily.
+                    diverse = len(distinct) >= 3 and len(distinct) / max(1, len(words)) >= 0.6
+                    if len(words) >= 2 and len(nq) >= 10 and diverse and nq in norm_text:
                         ev[fid] = quote
                 return ev, True
             except Exception:

@@ -140,6 +140,16 @@ def t_parse_drops_single_word_quote() -> None:
     assert ok and ev == {}, ev
 
 
+def t_parse_drops_repeated_word_quote() -> None:
+    # A repeat-loop span is verbatim-present + multi-word, but not word-diverse →
+    # rejected (the fig-leaf-quote failure mode from a degenerate report).
+    report = "clean clean clean clean clean clean and still then still then still"
+    out = ('[{"id":"awe_reverence","quote":"clean clean clean clean"},'
+           '{"id":"somatic_vibration","quote":"still then still then still"}]')
+    ev, ok = DmtController._parse_features(out, report)
+    assert ok and ev == {}, ev
+
+
 def t_parse_empty() -> None:
     ev, ok = DmtController._parse_features("[]", _REPORT)
     assert ok and ev == {}, ev
@@ -212,6 +222,7 @@ def main() -> int:
         ("parse: drops unknown id", t_parse_drops_unknown_id),
         ("parse: drops fabricated quote", t_parse_drops_fabricated_quote),
         ("parse: drops single-word quote", t_parse_drops_single_word_quote),
+        ("parse: drops repeated-word quote", t_parse_drops_repeated_word_quote),
         ("parse: empty array", t_parse_empty),
         ("parse: substring fallback", t_parse_fallback_substring),
         ("crossover: uses top scorer as parent", t_crossover_uses_top_scorer),

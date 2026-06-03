@@ -45,8 +45,12 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
   greedy Gemma context** reads the *full* self-report (which may be partly
   incoherent) and, for every feature it credits, must return a **verbatim quote**
   of the coherent span that expresses it. We then **keep a feature only if its
-  quote is a multi-word span that actually appears in the report** — so the judge
-  can't credit a feature from a stray keyword in word-salad, or fabricate a quote.
+  quote is verbatim-present, multi-word, AND word-diverse** (≥3 distinct words,
+  distinct/total ratio ≥0.6) — so the judge can't credit a feature from a stray
+  keyword in word-salad, fabricate a quote, or cite a repeat-loop span like "clean
+  clean clean" as fig-leaf evidence (a real failure: a degenerate report once
+  committed at 6 features on quotes exactly like that). The judge prompt also
+  carries an explicit BAD example.
   A genuine *moment of clarity inside otherwise-broken text still counts* (its
   quote is real) — we don't discard the whole report, we just discard ungrounded
   features. This replaced the original "gibberish self-regulates" assumption, which
