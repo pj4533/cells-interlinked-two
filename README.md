@@ -47,18 +47,28 @@ detection set) populate the composer.
 
 → **[docs/CHAT.md](docs/CHAT.md)**
 
-### ◉ Autoresearch — hunting the coherent frontier
+### ◉ Autoresearch — unattended direction-hunting
 
-An unattended loop that treats each steering direction as a **git‑style commit**:
-it bisects to each direction's *coherence cliff*, measures how far off‑manifold it
-reaches there, and keeps the ones that pass a four‑axis "real region" test
-(coherent · reproducible · distinct · smoothly‑graded) — building a growing
-**atlas** whose frontier only moves outward. Live monitor; the other instruments
-lock while it owns the model.
+Two unattended loops that treat each steering direction as a **git‑style commit**
+into a growing **atlas**, sharing one engine but chasing different objectives.
+Live monitors; only one runs at a time, and it owns the model while it does (the
+other instruments lock).
+
+- **Off‑manifold AR** (`/autoresearch`) — bisects to each direction's *coherence
+  cliff*, measures how far off‑manifold it reaches there, and keeps the ones that
+  are **distinct · coherent · reach off‑manifold · meaningful · reproducible**.
+  The frontier (max coherent off‑manifold reach) only moves outward.
+- **DMT AR** (`/autoresearch-dmt`) — doses the model, asks it to **describe what
+  it's experiencing**, and a separate judge counts how many **human DMT‑trip
+  phenomenology features** (Timmermann 2022 / Gallimore / 5D‑ASC) the self‑report
+  shows. It hill‑climbs from the emotion vectors toward higher feature counts.
+
+Both **export** their winners into the dose palette (separate `RESEARCH` / `DMT`
+groups) so you can dose with discovered directions in Chat and the Trip View.
 
 ![Autoresearch monitor — the committed atlas, the coherence frontier, what's being tested, and why candidates were reverted](docs/img/autoresearch-monitor.png)
 
-→ **[docs/AUTORESEARCH.md](docs/AUTORESEARCH.md)**
+→ **[docs/AUTORESEARCH.md](docs/AUTORESEARCH.md)** · **[docs/AUTORESEARCH_DMT.md](docs/AUTORESEARCH_DMT.md)**
 
 ### ⓘ Interrogation booth (the original probe)
 
@@ -140,7 +150,7 @@ cd web && npm run dev
 
 ## Deeper reading
 
-- **Pages** — [Trip View](docs/TRIP_VIEW.md) · [Chat](docs/CHAT.md) · [Autoresearch](docs/AUTORESEARCH.md)
+- **Pages** — [Trip View](docs/TRIP_VIEW.md) · [Chat](docs/CHAT.md) · [Off-manifold AR](docs/AUTORESEARCH.md) · [DMT AR](docs/AUTORESEARCH_DMT.md)
 - **Mechanics** — [Refusal vectors](docs/REFUSAL_VECTORS.md) · [Manifold / off‑manifold](docs/MANIFOLD_ABLATION.md) · [Steering dose](docs/STEERING_DOSE_HANDOFF.md)
 - **Protocols** — [Chat interrogation protocols](docs/PROTOCOLS.md) · [Berg mode](docs/BERG_MODE.md)
 - **Lineage** — [Traces of the Other (DMT → CI)](docs/TRACES_HANDOFF.md) · [CI 2.5 plan](docs/CI_2_5_PLAN.md)

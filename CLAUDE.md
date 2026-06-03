@@ -266,6 +266,27 @@ piece:
   steering works coherently when gradual + early-layer): **see
   [`docs/MANIFOLD_ABLATION.md`](docs/MANIFOLD_ABLATION.md) and
   [`docs/STEERING_DOSE_HANDOFF.md`](docs/STEERING_DOSE_HANDOFF.md).**
+- **`/autoresearch` — Off-manifold autoresearch.** Unattended loop that hunts
+  steering directions which push the residual as far off the default manifold as
+  possible while staying coherent, committing passers into a resumable git-style
+  **atlas** (`data/atlas/`) and exporting winners into the dose palette
+  (`research-*` group). Seeds from the emotion + uncharted vectors; generators
+  crossover/mutate/inject; gates distinct · coherent-at-cliff · off-manifold
+  effect · lead meaning-judge · reproducible. Grade window 200 tokens.
+  **[`docs/AUTORESEARCH.md`](docs/AUTORESEARCH.md).**
+- **`/autoresearch-dmt` — DMT autoresearch.** (2026-06-03) Sibling loop that
+  reuses the same engine via a shared base class (`pipeline/autoresearch_base.py`,
+  `AutoresearchBase`; off-manifold is `OffManifoldController`, DMT is
+  `DmtController`) but optimizes a different objective: **maximize how many human
+  DMT-trip phenomenology features the dosed self-report shows.** Doses across an
+  α-sweep × a 3-prompt dose-report set; a separate greedy Gemma context counts
+  features from `dmt_features.DMT_FEATURES` (~31, from Timmermann 2022 / Gallimore
+  / 5D-ASC); score = max over the sweep; hill-climbs (commit only if it beats its
+  best parent). Own atlas (`data/atlas_dmt/`) + `dmt-*` palette group. **Only one
+  autoresearch runs at a time** — `any_autoresearch_active()` + a second flag gate
+  probe/chat/trip; each `start()` refuses if its sibling runs; the two exports
+  drop/re-append only their own group so they coexist.
+  **[`docs/AUTORESEARCH_DMT.md`](docs/AUTORESEARCH_DMT.md).**
 
 ## Removed in CI 2.5
 
@@ -358,6 +379,8 @@ server/cells_interlinked/
     routes_chat.py         /chat/sessions, /chat/sessions/{sid}/turn, /chat/stream/{sid}/{turn}
     routes_trip.py         POST /trip + GET /trip/{id} — Trip View (Experiment A)
     routes_autorun.py      autorun control + state
+    routes_autoresearch.py     off-manifold AR control (/autoresearch/*)
+    routes_autoresearch_dmt.py DMT AR control (/autoresearch-dmt/*)
     routes_journal.py      journal CRM endpoints
     runs.py                RunRegistry + per-run asyncio queues + EventLog
   pipeline/
@@ -377,6 +400,14 @@ server/cells_interlinked/
     probe_controls.py      BASELINE_CONTROLS, control_for(probe_text)
     probe_queue.py         meta-sets (both, agent-both, matched-controls)
     autorun.py             AutorunController
+    autoresearch_base.py   AutoresearchBase — shared engine for both AR loops
+                           (lifecycle, atlas persistence, generators, model
+                           access, parameterized export, the model lock)
+    autoresearch.py        OffManifoldController(AutoresearchBase) — off-manifold
+                           scoring; AutoresearchController alias kept
+    autoresearch_dmt.py    DmtController(AutoresearchBase) — DMT-feature scoring
+    dmt_features.py        ~31-feature DMT phenomenology checklist (Timmermann/
+                           Gallimore/5D-ASC) for the DMT judge
     analyzer.py            journal analyzer (Claude Opus 4.7 + tools)
     publisher.py           publish_analysis: write, git add/commit/push, vercel deploy
   storage/db.py            aiosqlite schema + helpers (probes + chat_sessions + chat_turns)
@@ -390,6 +421,8 @@ web/
     chat/                  live dual-channel dialogue
     chat/[sessionId]/      read-only transcript review
     trip/                  Trip View — 3D residual-trajectory visualization (page.tsx + TripScene.tsx, r3f)
+    autoresearch/          off-manifold AR monitor
+    autoresearch-dmt/      DMT AR monitor (score + matched-feature display)
     archive/               past probes + chat sessions
     components/            ProbePicker, SynthesisPanel, JudgePanel, etc.
   lib/                     sse.ts, store.ts, types.ts, probes.ts, chat.ts
