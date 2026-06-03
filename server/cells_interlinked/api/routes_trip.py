@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..pipeline.autoresearch_base import any_autoresearch_active
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
 from ..pipeline.trajectory import (
     assemble_geometry,
@@ -90,7 +91,7 @@ def _seed_from_run_id(run_id: str) -> int:
 @router.post("/trip", response_model=TripResponse)
 async def start_trip(req: TripRequest, request: Request) -> TripResponse:
     app = request.app
-    if getattr(app.state, "autoresearch_active", False):
+    if any_autoresearch_active(app):
         raise HTTPException(status_code=503, detail="autoresearch is running — trips are locked")
     bundle = getattr(app.state, "bundle", None)
     if bundle is None:
@@ -144,21 +145,30 @@ async def dose_emotions(request: Request) -> dict:
     uncharted: list[str] = []
     research: list[str] = []
     research_meta: dict = {}
+    dmt: list[str] = []
+    dmt_meta: dict = {}
     try:
         sc = json.loads((settings.db_path.parent / "emotion_directions.pt.json").read_text())
         uncharted = [n for n in sc.get("uncharted", []) if n in names]
+        # Off-manifold autoresearch exports (provenance: atlas_id, off_ortho,
+        # alpha_star, parents, generator) so the picker can show lineage.
         research = [n for n in sc.get("research", []) if n in names]
-        # Provenance for each research-N (atlas_id, parents, generator, off_ortho,
-        # alpha_star) so the picker can show lineage instead of an opaque name.
         research_meta = {n: m for n, m in sc.get("research_meta", {}).items() if n in names}
+        # DMT autoresearch exports (provenance: atlas_id, score, best_alpha,
+        # matched_features, parents, generator).
+        dmt = [n for n in sc.get("dmt", []) if n in names]
+        dmt_meta = {n: m for n, m in sc.get("dmt_meta", {}).items() if n in names}
     except Exception:
         uncharted = []
         research = []
         research_meta = {}
+        dmt = []
+        dmt_meta = {}
     return {
         "available": bool(names), "emotions": list(names),
         "uncharted": uncharted, "research": research,
         "research_meta": research_meta,
+        "dmt": dmt, "dmt_meta": dmt_meta,
     }
 
 

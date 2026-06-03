@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..pipeline.autoresearch_base import any_autoresearch_active
 from ..pipeline.decoding_modes import normalize_mode, select_windows
 from ..pipeline.judge import _resolve_yes_no_token_ids, judge_sentence
 from ..pipeline.probe_controls import control_for
@@ -239,7 +240,7 @@ async def kickoff_probe(
 
 @router.post("/probe", response_model=ProbeResponse)
 async def start_probe(req: ProbeRequest, request: Request) -> ProbeResponse:
-    if getattr(request.app.state, "autoresearch_active", False):
+    if any_autoresearch_active(request.app):
         raise HTTPException(status_code=503, detail="autoresearch is running — probes are locked")
     state = await kickoff_probe(
         request.app,

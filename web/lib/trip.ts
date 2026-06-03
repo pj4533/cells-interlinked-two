@@ -91,15 +91,29 @@ export interface ResearchMeta {
   alpha_star: number;
 }
 
+// Provenance for one exported DMT-autoresearch direction (dmt-N).
+export interface DmtMeta {
+  atlas_id: string;
+  parents: string[];
+  generator: string;
+  score: number;
+  best_alpha: number;
+  matched_features: string[];
+}
+
 export interface DosePalette {
   emotions: string[]; // all selectable dose names
   uncharted: string[]; // subset that are NON-emotion, non-human-readable directions
-  research: string[]; // subset discovered + exported by the autoresearch loop
+  research: string[]; // subset discovered by the OFF-MANIFOLD autoresearch loop
   researchMeta: Record<string, ResearchMeta>; // research-N -> lineage
+  dmt: string[]; // subset discovered by the DMT autoresearch loop
+  dmtMeta: Record<string, DmtMeta>; // dmt-N -> lineage
 }
 
 export async function fetchDoseEmotions(): Promise<DosePalette> {
-  const empty: DosePalette = { emotions: [], uncharted: [], research: [], researchMeta: {} };
+  const empty: DosePalette = {
+    emotions: [], uncharted: [], research: [], researchMeta: {}, dmt: [], dmtMeta: {},
+  };
   try {
     const res = await fetch(`${API}/dose_emotions`);
     if (!res.ok) return empty;
@@ -109,6 +123,8 @@ export async function fetchDoseEmotions(): Promise<DosePalette> {
       uncharted: Array.isArray(j.uncharted) ? j.uncharted : [],
       research: Array.isArray(j.research) ? j.research : [],
       researchMeta: j.research_meta && typeof j.research_meta === "object" ? j.research_meta : {},
+      dmt: Array.isArray(j.dmt) ? j.dmt : [],
+      dmtMeta: j.dmt_meta && typeof j.dmt_meta === "object" ? j.dmt_meta : {},
     };
   } catch {
     return empty;
@@ -126,6 +142,21 @@ export function researchLineage(meta: ResearchMeta | undefined): string {
   else if (meta.generator === "inject") origin = "fresh direction (⊥ all emotions)";
   else origin = p.length ? p.join(" + ") : meta.generator;
   return `${meta.atlas_id} · ${origin} · off-manifold ${meta.off_ortho.toFixed(3)} · α*=${meta.alpha_star.toFixed(2)}`;
+}
+
+// One-line human lineage for a DMT direction, e.g.
+// "gen12_crossover · 7 DMT features · α2.0 · blend of awe + tannhauser · ego_dissolution, fractal_geometry, …".
+export function dmtLineage(meta: DmtMeta | undefined): string {
+  if (!meta) return "";
+  const p = meta.parents ?? [];
+  let origin: string;
+  if (meta.generator === "crossover" && p.length >= 2) origin = `blend of ${p[0]} + ${p[1]}`;
+  else if (meta.generator === "mutate" && p.length >= 1) origin = `mutation of ${p[0]}`;
+  else if (meta.generator === "inject") origin = "fresh direction (⊥ all emotions)";
+  else origin = p.length ? p.join(" + ") : meta.generator;
+  const feats = meta.matched_features ?? [];
+  const featStr = feats.slice(0, 6).join(", ") + (feats.length > 6 ? ", …" : "");
+  return `${meta.atlas_id} · ${meta.score} DMT features · α${meta.best_alpha} · ${origin}${featStr ? " · " + featStr : ""}`;
 }
 
 export async function startTrip(

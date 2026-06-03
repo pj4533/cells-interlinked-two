@@ -21,9 +21,11 @@ from fastapi.staticfiles import StaticFiles
 from ..config import settings
 from ..pipeline.autorun import AutorunController
 from ..pipeline.autoresearch import AutoresearchController
+from ..pipeline.autoresearch_dmt import DmtController
 from ..storage import db
 from .routes_autorun import router as autorun_router
 from .routes_autoresearch import router as autoresearch_router
+from .routes_autoresearch_dmt import router as autoresearch_dmt_router
 from .routes_chat import router as chat_router
 from .routes_journal import router as journal_router
 from .routes_probe import router as probe_router
@@ -105,6 +107,18 @@ async def lifespan(app: FastAPI):
     app.state.autoresearch = autoresearch
     app.state.autoresearch_active = False
 
+    # DMT autoresearch (sibling hunt — maximizes DMT-trip-feature count). Owns M
+    # while running too; mutually exclusive with the off-manifold loop. Locks out
+    # probe/chat/trip via app.state.dmt_autoresearch_active.
+    dmt_autoresearch = DmtController()
+    dmt_autoresearch.app = app
+    try:
+        dmt_autoresearch._load()  # surface any persisted DMT atlas before a run
+    except Exception:
+        logger.exception("failed to preload DMT autoresearch atlas")
+    app.state.dmt_autoresearch = dmt_autoresearch
+    app.state.dmt_autoresearch_active = False
+
     logger.info(
         "ready: M=%s | AV=%s | both unloaded (serial load on demand)",
         settings.model_name, settings.av_repo,
@@ -117,6 +131,8 @@ async def lifespan(app: FastAPI):
             await autorun.stop()
         if autoresearch.running:
             await autoresearch.stop()
+        if dmt_autoresearch.running:
+            await dmt_autoresearch.stop()
         await manager.release_all()
         logger.info("shutting down")
 
@@ -143,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(trip_router)
     app.include_router(autorun_router)
     app.include_router(autoresearch_router)
+    app.include_router(autoresearch_dmt_router)
     app.include_router(journal_router)
     app.include_router(chat_router)
     app.include_router(tts_router)

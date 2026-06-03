@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
+from ..pipeline.autoresearch_base import any_autoresearch_active
 from ..pipeline.chat_loop import (
     STEER_LAYER as CHAT_STEER_LAYER,
     ChatSession,
@@ -412,7 +413,7 @@ async def list_sessions(request: Request, limit: int = 50, offset: int = 0) -> d
 
 @router.post("/chat/sessions/{sid}/turn", response_model=TurnResponse)
 async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnResponse:
-    if getattr(request.app.state, "autoresearch_active", False):
+    if any_autoresearch_active(request.app):
         raise HTTPException(status_code=503, detail="autoresearch is running — chat is locked")
     session = await _rehydrate_session(sid, request)
     if session is None:

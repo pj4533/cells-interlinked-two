@@ -29,9 +29,9 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cells_interlinked.pipeline import autoresearch as ar  # noqa: E402
-from cells_interlinked.pipeline.autoresearch import (  # noqa: E402
-    AutoresearchController,
+from cells_interlinked.pipeline import autoresearch_base as arb  # noqa: E402
+from cells_interlinked.pipeline.autoresearch import AutoresearchController  # noqa: E402
+from cells_interlinked.pipeline.autoresearch_base import (  # noqa: E402
     STEER_LAYER,
     _free_mps,
     _mps_mem_gib,
@@ -67,8 +67,8 @@ def _fixture(td: str, n_emotions: int = 2, d: int = 8):
     (d_dir / "emotion_directions.pt.json").write_text(json.dumps({
         "emotions": ["awe", "joy"], "uncharted": [], "research": [],
     }))
-    # Point the module-global settings at our temp dir.
-    ar.settings = SimpleNamespace(db_path=d_dir / "probes.sqlite")
+    # Point the base module's settings (where export_to_palette reads) at temp.
+    arb.settings = SimpleNamespace(db_path=d_dir / "probes.sqlite")
 
     ctrl = AutoresearchController(app=None)
     ctrl.atlas = [

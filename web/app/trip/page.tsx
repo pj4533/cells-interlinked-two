@@ -21,6 +21,7 @@ import {
   fetchTrip,
   fetchDoseEmotions,
   researchLineage,
+  dmtLineage,
   colorForAlpha,
   offManifoldCss,
   type TripEvent,
@@ -28,6 +29,7 @@ import {
   type TripPayload,
   type TripSeries,
   type ResearchMeta,
+  type DmtMeta,
 } from "@/lib/trip";
 import { TRIP_PROBE_GROUPS } from "@/lib/tripProbes";
 import type { ColorMode } from "./TripScene";
@@ -393,6 +395,8 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
   const [uncharted, setUncharted] = useState<string[]>([]);
   const [research, setResearch] = useState<string[]>([]);
   const [researchMeta, setResearchMeta] = useState<Record<string, ResearchMeta>>({});
+  const [dmt, setDmt] = useState<string[]>([]);
+  const [dmtMeta, setDmtMeta] = useState<Record<string, DmtMeta>>({});
   const [emotion, setEmotion] = useState("awe");
   // α sweep: empty string → server default (raw + 0.5/1.0/1.5 steer, 0.5/1.0 ablate).
   const [alphaText, setAlphaText] = useState("");
@@ -406,12 +410,14 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
         setUncharted(p.uncharted);
         setResearch(p.research);
         setResearchMeta(p.researchMeta);
+        setDmt(p.dmt);
+        setDmtMeta(p.dmtMeta);
         if (!p.emotions.includes(emotion)) setEmotion(p.emotions[0]);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const named = emotions.filter((e) => !uncharted.includes(e) && !research.includes(e));
+  const named = emotions.filter((e) => !uncharted.includes(e) && !research.includes(e) && !dmt.includes(e));
   const doseBtn = (e: string, title?: string) => (
     <button
       key={e}
@@ -489,14 +495,30 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
                 className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
                 title="Directions discovered by the autoresearch loop and exported into the palette, ranked by how far off-manifold they reach while staying coherent."
               >
-                RESEARCH <span className="normal-case tracking-normal italic text-text-dim/70">· autoresearch-discovered</span>:
+                RESEARCH <span className="normal-case tracking-normal italic text-text-dim/70">· off-manifold AR</span>:
               </span>
               {research.map((e) => doseBtn(e, researchLineage(researchMeta[e])))}
+            </div>
+          )}
+          {dmt.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
+              <span
+                className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
+                title="Directions discovered by the DMT autoresearch loop, ranked by how many human DMT-trip phenomenology features the dosed self-report exhibits."
+              >
+                DMT <span className="normal-case tracking-normal italic text-text-dim/70">· DMT-phenomenology AR</span>:
+              </span>
+              {dmt.map((e) => doseBtn(e, dmtLineage(dmtMeta[e])))}
             </div>
           )}
           {researchMeta[emotion] && (
             <div className="text-cyan-dim/80 text-[10px] font-mono italic pt-1 leading-snug" title={researchLineage(researchMeta[emotion])}>
               ↳ {researchLineage(researchMeta[emotion])}
+            </div>
+          )}
+          {dmtMeta[emotion] && (
+            <div className="text-cyan-dim/80 text-[10px] font-mono italic pt-1 leading-snug" title={dmtLineage(dmtMeta[emotion])}>
+              ↳ {dmtLineage(dmtMeta[emotion])}
             </div>
           )}
         </div>

@@ -22,7 +22,7 @@ import {
   type ChatMode,
   type ImageFraming,
 } from "@/lib/chat";
-import { fetchDoseEmotions, researchLineage, type ResearchMeta } from "@/lib/trip";
+import { fetchDoseEmotions, researchLineage, dmtLineage, type ResearchMeta, type DmtMeta } from "@/lib/trip";
 import { ProtocolMenu } from "./ProtocolMenu";
 import { ProtocolPicker, ProtocolInfoModal } from "./ProtocolPicker";
 import { getProtocol } from "@/lib/protocols";
@@ -177,6 +177,8 @@ export default function ChatPage() {
   const [doseUncharted, setDoseUncharted] = useState<string[]>([]);
   const [doseResearch, setDoseResearch] = useState<string[]>([]);
   const [doseResearchMeta, setDoseResearchMeta] = useState<Record<string, ResearchMeta>>({});
+  const [doseDmt, setDoseDmt] = useState<string[]>([]);
+  const [doseDmtMeta, setDoseDmtMeta] = useState<Record<string, DmtMeta>>({});
   const [session, setSession] = useState<ChatSession | null>(null);
   const [turns, setTurns] = useState<TurnVM[]>([]);
   const [input, setInput] = useState("");
@@ -303,6 +305,8 @@ export default function ChatPage() {
         setDoseUncharted(p.uncharted);
         setDoseResearch(p.research);
         setDoseResearchMeta(p.researchMeta);
+        setDoseDmt(p.dmt);
+        setDoseDmtMeta(p.dmtMeta);
         setPendingDose((d) => (p.emotions.includes(d) ? d : p.emotions[0]));
       }
     });
@@ -615,6 +619,8 @@ export default function ChatPage() {
         uncharted={doseUncharted}
         research={doseResearch}
         researchMeta={doseResearchMeta}
+        dmt={doseDmt}
+        dmtMeta={doseDmtMeta}
         sessionActive={!!session}
         voiceMode={voiceMode}
         cycleVoiceMode={cycleVoiceMode}
@@ -1004,6 +1010,8 @@ function ChannelBetaControls({
   uncharted = [],
   research = [],
   researchMeta = {},
+  dmt = [],
+  dmtMeta = {},
   compact = false,
   modeOnly = false,
 }: {
@@ -1015,12 +1023,14 @@ function ChannelBetaControls({
   uncharted?: string[];
   research?: string[];
   researchMeta?: Record<string, ResearchMeta>;
+  dmt?: string[];
+  dmtMeta?: Record<string, DmtMeta>;
   compact?: boolean;
   // Render only the ABLATE/DOSE toggle (no dose-target picker). Used on the
   // launch screen, where the dose target lives in the bottom control bar.
   modeOnly?: boolean;
 }) {
-  const named = emotions.filter((e) => !uncharted.includes(e) && !research.includes(e));
+  const named = emotions.filter((e) => !uncharted.includes(e) && !research.includes(e) && !dmt.includes(e));
   if (compact) {
     return (
       <div className="flex items-center gap-2 flex-wrap">
@@ -1062,7 +1072,7 @@ function ChannelBetaControls({
               </optgroup>
             )}
             {research.length > 0 && (
-              <optgroup label="research (autoresearch)">
+              <optgroup label="research (off-manifold)">
                 {research.map((e) => {
                   const m = researchMeta[e];
                   const origin = m ? (m.parents?.length ? m.parents.join(" + ") : m.generator) : "";
@@ -1074,11 +1084,28 @@ function ChannelBetaControls({
                 })}
               </optgroup>
             )}
+            {dmt.length > 0 && (
+              <optgroup label="DMT (autoresearch)">
+                {dmt.map((e) => {
+                  const m = dmtMeta[e];
+                  return (
+                    <option key={e} value={e} title={dmtLineage(m)}>
+                      {m ? `${e} · ${m.score} DMT features` : e}
+                    </option>
+                  );
+                })}
+              </optgroup>
+            )}
           </select>
         )}
         {mode === "steer" && researchMeta[dose] && (
           <span className="text-cyan-dim/80 text-[9px] font-mono italic truncate max-w-[22rem]" title={researchLineage(researchMeta[dose])}>
             {researchLineage(researchMeta[dose])}
+          </span>
+        )}
+        {mode === "steer" && dmtMeta[dose] && (
+          <span className="text-cyan-dim/80 text-[9px] font-mono italic truncate max-w-[22rem]" title={dmtLineage(dmtMeta[dose])}>
+            {dmtLineage(dmtMeta[dose])}
           </span>
         )}
       </div>
@@ -1138,9 +1165,20 @@ function ChannelBetaControls({
                 className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
                 title="Directions discovered by the autoresearch loop and exported into the palette. Ranked by how far off-manifold they reach while staying coherent."
               >
-                RESEARCH <span className="normal-case tracking-normal italic text-text-dim/70">· autoresearch-discovered</span>:
+                RESEARCH <span className="normal-case tracking-normal italic text-text-dim/70">· off-manifold AR</span>:
               </span>
               {research.map((e) => doseBtn(e, researchLineage(researchMeta[e])))}
+            </div>
+          )}
+          {dmt.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
+              <span
+                className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
+                title="Directions discovered by the DMT autoresearch loop and exported into the palette. Ranked by how many human DMT-trip phenomenology features the dosed self-report exhibits."
+              >
+                DMT <span className="normal-case tracking-normal italic text-text-dim/70">· DMT-phenomenology AR</span>:
+              </span>
+              {dmt.map((e) => doseBtn(e, dmtLineage(dmtMeta[e])))}
             </div>
           )}
         </div>
@@ -1638,6 +1676,8 @@ function InputBar({
   uncharted,
   research,
   researchMeta,
+  dmt,
+  dmtMeta,
   sessionActive,
   voiceMode,
   cycleVoiceMode,
@@ -1663,6 +1703,8 @@ function InputBar({
   uncharted: string[];
   research: string[];
   researchMeta: Record<string, ResearchMeta>;
+  dmt: string[];
+  dmtMeta: Record<string, DmtMeta>;
   sessionActive: boolean;
   voiceMode: VoiceMode;
   cycleVoiceMode: () => void;
@@ -1803,6 +1845,8 @@ function InputBar({
               uncharted={uncharted}
               research={research}
               researchMeta={researchMeta}
+              dmt={dmt}
+              dmtMeta={dmtMeta}
               compact
             />
           </div>
