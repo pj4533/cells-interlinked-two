@@ -70,6 +70,7 @@ const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
   "T1-incoherent": "no coherent operating point",
   "not-graded": "effect jumped instead of ramping smoothly",
+  "no-effect": "coherent, but the dose barely moved it off-manifold",
   "incoherent-suite": "collapsed across the prompt suite",
   "word-salad": "judge: meaningless, not just strange",
   "not-reproducible": "effect didn't hold across prompts",
@@ -378,7 +379,12 @@ function AtlasRow({ e, maxOff }: { e: AtlasEntry; maxOff: number }) {
             ))}
           </div>
           {e.sample ? (
-            <div className="italic text-text-dim/90 leading-snug pt-1">{`"${e.sample}"`}</div>
+            <div className="pt-1">
+              <div className="text-[8px] tracking-[0.2em] text-text-dim/50 mb-0.5">DOSE RESPONSE · at α*</div>
+              <div className="italic text-text-dim/90 leading-snug whitespace-pre-wrap max-h-56 overflow-y-auto pr-1">
+                {e.sample}
+              </div>
+            </div>
           ) : null}
         </div>
       ) : null}

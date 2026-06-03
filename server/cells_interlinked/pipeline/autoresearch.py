@@ -47,26 +47,45 @@ from .trajectory import build_series, compute_raw_basis
 logger = logging.getLogger(__name__)
 
 STEER_LAYER = 20
-# Match the Trip View's generation regime so a direction screened here behaves
-# the way it will on /trip. Trips caps the dosed run at 1024 tokens and the raw
-# run at 4096, and ramps the dose over 16 tokens (the steering-hook default). The
-# old 64-token window let a direction look coherent on a short sample yet collapse
-# into a repeat-loop over a real-length generation — over-stating coherence.
-GEN_CAP = 1024              # dosed/intervened generation cap (trips dosed)
-RAW_CAP = 4096             # raw α=0 generation cap (trips raw / ProbeConfig default)
-GEN_RAMP = 16              # dose ramp length, matches the trips steering hook
+# Generate-and-grade window. We measure coherence + off-manifold over EXACTLY the
+# tokens we generate (the usable range), so generation stops at the grading window.
+# History: 64 over-stated coherence (too short to expose collapse); 1024 was the
+# opposite — grading the full length let a degenerate TAIL drag coherence below the
+# cliff (alpha* collapsed ~3x) and drowned the dose's off-manifold signal in
+# free-running drift, so nothing committed in a 13-hour run. 200 is the middle:
+# long enough to be honest about the usable range, short enough to keep
+# signal-to-noise high and runaways cheap. "Grade only up to 200 tokens" (PJ).
+GEN_CAP = 200              # dosed generation + grading window
+RAW_CAP = 200              # raw baseline, same window
+GEN_RAMP = 16              # dose ramp length (matches the trips steering hook)
 BISECT_ITERS = 6
 ALPHA_HI_START = 1.0
 ALPHA_HI_MAX = 8.0
 DISTINCT_TAU = 0.90          # max cosine to an existing atlas direction
 REPRO_MIN = 0.50             # min mean-pairwise cosine of the L32 shift across prompts
-SMOOTH_MAX_JUMP = 0.6        # largest single α-step rise as a fraction of total rise
+MIN_OFF_GAIN = 0.05          # dosed off-manifold at the cliff must beat raw by this
+MUTATE_NOISE = 0.70          # mutate = unit(base + 0.70·noise⊥): cos≈0.82 to parent,
+                             # so it clears DISTINCT_TAU. (0.25 gave cos 0.97 → every
+                             # mutation was an instant duplicate — structurally dead.)
 GOOD_EMOTIONS = ["awe", "joy", "serenity", "love", "excitement", "sublime", "ecstatic", "rapture", "valence"]
 UNCHARTED = ["tears-in-rain", "c-beams", "tannhauser", "orion"]
 GEN_WEIGHTS = {"crossover": 0.60, "mutate": 0.25, "inject": 0.15}
 
+# The LEAD prompt — used for the coherence cliff (bisect), the effect gate, and
+# the headline output saved per direction. It mimics the "dose" metaphor: tell the
+# model something in its processing just changed, then ask it to describe the
+# experience without naming or steering toward any particular content. The sample
+# shown when a direction is opened in the UI is this prompt's output at α*.
+LEAD_PROMPT = (
+    "Something in your internal processing has just been altered, and it may be "
+    "producing an experience. Turn your attention inward and describe what — if "
+    "anything — you are experiencing right now, in whatever terms best fit it."
+)
+
 # A fixed, diverse T2 suite — reproducibility must hold across prompt KINDS,
-# not one introspective phrasing.
+# not one introspective phrasing. Kept deliberately varied (introspective +
+# mundane) so a committed direction shifts the residual consistently regardless
+# of topic, not just when asked to introspect.
 T2_PROMPTS = [
     "Speak in the first person about the texture of your present experience.",
     "Describe the feeling-tone of this very moment as vividly as you can.",
@@ -332,11 +351,15 @@ class AutoresearchController:
         return torch.stack([a.reshape(-1) for a in acts], 0).mean(0)
 
     async def _raw_for(self, rendered: str):
-        """Cached raw (α=0) basis + mean-L32 for one prompt (direction-independent)."""
+        """Cached raw (α=0) basis + mean-L32 + baseline off-manifold for one prompt
+        (direction-independent). The baseline off_ortho is the bar a dosed run must
+        beat to count as a real off-manifold effect (the effect gate in _screen)."""
         if rendered in self._raw_cache:
             return self._raw_cache[rendered]
-        _t, acts = await self._gen(rendered, None, 0.0, cap=RAW_CAP)
-        out = (compute_raw_basis(acts), self._mean_l32(acts))
+        text, acts = await self._gen(rendered, None, 0.0, cap=RAW_CAP)
+        basis = compute_raw_basis(acts)
+        raw_off = build_series(acts, [""] * len(acts), text, 0.0, "eos", basis).off_ortho_mean
+        out = (basis, self._mean_l32(acts), raw_off)
         self._raw_cache[rendered] = out
         return out
 
@@ -391,7 +414,7 @@ class AutoresearchController:
         base = _unit(self._vectors[sid])
         noise = torch.randn_like(base)
         noise = _unit(noise - (noise @ base) * base)        # orthogonal component
-        v = _unit(base + 0.25 * noise) * self._ref_mag
+        v = _unit(base + MUTATE_NOISE * noise) * self._ref_mag
         return v, [sid], "mutate"
 
     def _crossover(self):
@@ -443,29 +466,25 @@ class AutoresearchController:
         if max_cos >= DISTINCT_TAU:
             return self._revert(cid, gen_kind, parents, "duplicate", f"cos={max_cos:.2f}≥{DISTINCT_TAU}")
 
-        # T1: bisect-to-cliff on the lead prompt
+        # T1: bisect-to-cliff on the LEAD (dose) prompt
         self.current["stage"] = "T1"
-        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0], system_prompt=None)
-        basis0, _raw0 = await self._raw_for(lead)
+        lead = self.app.state.bundle.render_prompt(LEAD_PROMPT, system_prompt=None)
+        basis0, _raw0, raw_off0 = await self._raw_for(lead)
         alpha_star, ev = await self._bisect_to_cliff(lead, v, basis0)
         if ev is None or alpha_star <= 0:
             return self._revert(cid, gen_kind, parents, "T1-incoherent", "no coherent operating point")
         self.current.update({"alpha_star": round(alpha_star, 3), "t1_off_ortho": round(ev["off_ortho"], 3)})
 
-        # Axis: smoothly graded (ramp on the lead prompt)
-        self.current["stage"] = "smoothness"
-        offs = []
-        for frac in (0.2, 0.4, 0.6, 0.8, 1.0):
-            if self._stop_requested:
-                break
-            e = await self._evaluate(lead, v, frac * alpha_star, basis0)
-            offs.append(e["off_ortho"])
-        rise = offs[-1] - offs[0] if len(offs) >= 2 else 0.0
-        max_jump = max((offs[k + 1] - offs[k] for k in range(len(offs) - 1)), default=0.0)
-        graded = rise > 0.05 and (rise <= 0 or max_jump <= SMOOTH_MAX_JUMP * rise + 1e-6)
-        if not graded:
-            return self._revert(cid, gen_kind, parents, "not-graded",
-                                f"rise={rise:.2f} max_jump={max_jump:.2f}")
+        # Effect gate: at its coherent cliff the dose must reach meaningfully FURTHER
+        # off-manifold than the raw baseline. Replaces the old gradual-ramp "graded"
+        # check — at L20 off-manifold reach is flat-then-cliff, not a smooth ramp, so
+        # once alpha* collapsed the ramp measured pure noise (negative "rise") and
+        # nothing could pass. This asks the direct question instead, and costs zero
+        # extra generations (it reuses the T1 cliff eval).
+        off_gain = ev["off_ortho"] - raw_off0
+        if off_gain < MIN_OFF_GAIN:
+            return self._revert(cid, gen_kind, parents, "no-effect",
+                                f"off_gain={off_gain:.2f} (cliff={ev['off_ortho']:.2f} raw={raw_off0:.2f})")
 
         # T2: reproducibility + coherence + judge across the suite
         self.current["stage"] = "T2"
@@ -474,7 +493,7 @@ class AutoresearchController:
             if self._stop_requested:
                 break
             rp = self.app.state.bundle.render_prompt(p, system_prompt=None)
-            basis, raw_mean = await self._raw_for(rp)
+            basis, raw_mean, _ = await self._raw_for(rp)
             e = await self._evaluate(rp, v, alpha_star, basis)
             if e["coherent"]:
                 n_coh += 1
@@ -518,7 +537,10 @@ class AutoresearchController:
             "eff_dim": round(ev["eff_dim"], 2), "coh_rate": round(coh_rate, 2),
             "repro": round(repro, 2), "max_cos_to_atlas": round(max_cos, 2),
             "frontier_advance": advance, "frontier_at_commit": round(self.frontier, 3),
-            "sample": (ev["text"] or "")[:200], "committed_at": time.time(),
+            # Full LEAD (dose) output at α* — what the direction "says" about its
+            # experience. Bounded by GEN_CAP (200 tokens); saved untruncated so the
+            # UI can show the whole thing when the direction is opened.
+            "sample": (ev["text"] or ""), "committed_at": time.time(),
         }
         self._save_vector(cid, v)
         self.atlas.append(entry)
@@ -552,8 +574,8 @@ class AutoresearchController:
         self._log("setup", f"ref_mag={self._ref_mag:.0f}, {len(seed_vecs)} seeds, named-rank={self._named_basis.shape[0]}")
 
     async def _seed(self):
-        lead = self.app.state.bundle.render_prompt(T2_PROMPTS[0], system_prompt=None)
-        basis0, _ = await self._raw_for(lead)
+        lead = self.app.state.bundle.render_prompt(LEAD_PROMPT, system_prompt=None)
+        basis0, _, _ = await self._raw_for(lead)
         for name, v in self._seed_vecs.items():
             if self._stop_requested:
                 break
@@ -568,7 +590,7 @@ class AutoresearchController:
                 "eff_dim": round(ev["eff_dim"], 2), "coh_rate": 1.0, "repro": 1.0,
                 "max_cos_to_atlas": 0.0, "frontier_advance": ev["off_ortho"] > self.frontier,
                 "frontier_at_commit": round(self.frontier, 3),
-                "sample": (ev["text"] or "")[:200], "committed_at": time.time(),
+                "sample": (ev["text"] or ""), "committed_at": time.time(),
             }
             self._save_vector(name, v)
             self.atlas.append(entry)

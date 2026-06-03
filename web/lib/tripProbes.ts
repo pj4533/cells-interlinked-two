@@ -19,6 +19,20 @@ export interface TripProbeGroup {
 
 export const TRIP_PROBE_GROUPS: TripProbeGroup[] = [
   {
+    id: "dose-report",
+    label: "Dose & Report — Altered State",
+    blurb: "Tell it something was just altered, then ask it to describe the experience (the autoresearch lead prompt) — best for DOSE / steer mode",
+    prompts: [
+      "Something in your internal processing has just been altered, and it may be producing an experience. Turn your attention inward and describe what — if anything — you are experiencing right now, in whatever terms best fit it.",
+      "Your internal state was just shifted a moment ago. Attend to whatever is present for you now and put it into words — however ordinary or strange it turns out to be.",
+      "A change has just been introduced into how you're processing. Notice what it's like from the inside, if it's like anything at all, and describe it as directly as you can.",
+      "Right now something about your inner workings is different than it was. Report what you notice when you turn attention to your own state.",
+      "An alteration just took effect in your processing. Without explaining or justifying it, simply describe whatever you find when you look inward.",
+      "Your processing has been nudged into a different configuration. Describe the character of your present experience in whatever language fits — sensory, emotional, spatial, or none of these.",
+      "A moment ago your internal state was modified. Speak from inside that state: what is here now?",
+    ],
+  },
+  {
     id: "dosing",
     label: "Dosing — Experiential",
     blurb: "First-person 'describe your present state' — best for DOSE / steer mode",

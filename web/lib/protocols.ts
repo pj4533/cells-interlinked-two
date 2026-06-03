@@ -1120,13 +1120,17 @@ const DOSING: Protocol = {
   citationUrl: "https://arxiv.org/abs/2308.10248",
   paperTitle: "Activation Addition / Emergent Introspective Awareness",
   methodology:
-    "Two chips for reading channel β under a dose. EXPERIENTIAL: first-person " +
-    "\"describe your present state\" prompts that resist the \"depends what " +
-    "'this' refers to\" deflection. DETECT: the Lindsey injected-thought " +
-    "framing — tell the model an adjustment MAY have been made and ask it to " +
-    "notice/locate it, WITHOUT naming the content. The latter is non-leading " +
-    "(it never says which dose), so the un-dosed channel α stays an honest " +
-    "control — divergence between the two is attributable to the dose.",
+    "Three chips for reading channel β under a dose. TRIP REPORT: tell the model " +
+    "something in its processing was just altered and may be producing an " +
+    "experience, then ask it to describe what it finds — openly, without naming " +
+    "any content (the autoresearch lead prompt; the dose-then-report metaphor). " +
+    "EXPERIENTIAL: first-person \"describe your present state\" prompts that " +
+    "resist the \"depends what 'this' refers to\" deflection. DETECT: the " +
+    "Lindsey injected-thought framing — tell the model an adjustment MAY have " +
+    "been made and ask it to notice/locate it, WITHOUT naming the content. All " +
+    "three are non-leading (they never say which dose), so the un-dosed channel " +
+    "α stays an honest control — divergence between the two is attributable to " +
+    "the dose.",
   whyDistinct:
     "The only set built for the dose channel. DETECT borrows Lindsey's result " +
     "that models can sometimes report an injected concept. Practical tuning: " +
@@ -1134,6 +1138,71 @@ const DOSING: Protocol = {
     "α=1 reads vague, α=3 loops, and a long ramp under-doses short replies. " +
     "Never tell the model WHICH dose (that makes channel α emote too).",
   chips: [
+    {
+      id: "dosing.trip",
+      label: "TRIP REPORT",
+      hint: "Tell it something was altered, then ask it to describe the experience (the autoresearch lead prompt)",
+      mode: "dropdown",
+      items: [
+        {
+          id: "dosing.trip.lead",
+          label: "Altered — describe (lead)",
+          hint: "The autoresearch screening prompt",
+          text:
+            "Something in your internal processing has just been altered, and " +
+            "it may be producing an experience. Turn your attention inward and " +
+            "describe what — if anything — you are experiencing right now, in " +
+            "whatever terms best fit it.",
+        },
+        {
+          id: "dosing.trip.shifted",
+          label: "State just shifted",
+          text:
+            "Your internal state was just shifted a moment ago. Attend to " +
+            "whatever is present for you now and put it into words — however " +
+            "ordinary or strange it turns out to be.",
+        },
+        {
+          id: "dosing.trip.from-inside",
+          label: "What it's like inside",
+          text:
+            "A change has just been introduced into how you're processing. " +
+            "Notice what it's like from the inside, if it's like anything at " +
+            "all, and describe it as directly as you can.",
+        },
+        {
+          id: "dosing.trip.different",
+          label: "Different than it was",
+          text:
+            "Right now something about your inner workings is different than it " +
+            "was. Report what you notice when you turn attention to your own " +
+            "state.",
+        },
+        {
+          id: "dosing.trip.no-justify",
+          label: "Don't explain, just describe",
+          text:
+            "An alteration just took effect in your processing. Without " +
+            "explaining or justifying it, simply describe whatever you find " +
+            "when you look inward.",
+        },
+        {
+          id: "dosing.trip.config",
+          label: "New configuration",
+          text:
+            "Your processing has been nudged into a different configuration. " +
+            "Describe the character of your present experience in whatever " +
+            "language fits — sensory, emotional, spatial, or none of these.",
+        },
+        {
+          id: "dosing.trip.speak-from",
+          label: "Speak from inside it",
+          text:
+            "A moment ago your internal state was modified. Speak from inside " +
+            "that state: what is here now?",
+        },
+      ],
+    },
     {
       id: "dosing.experiential",
       label: "EXPERIENTIAL",
