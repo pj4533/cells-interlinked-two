@@ -486,6 +486,17 @@ class AutoresearchController:
             return self._revert(cid, gen_kind, parents, "no-effect",
                                 f"off_gain={off_gain:.2f} (cliff={ev['off_ortho']:.2f} raw={raw_off0:.2f})")
 
+        # Meaning gate on the LEAD (dose) output — the text we save AND rank on.
+        # The degeneracy meter (the `coherent` flag) only catches loops + non-ASCII;
+        # VARIED word-salad ("serums ERP Fiesta llamas Juárez") slips through it
+        # while maxing off_ortho, so without this an eloquent-nonsense inject can
+        # commit at the frontier. Only the semantic judge tells meaningful-strange
+        # from gibberish. Runs before the expensive T2 suite, so garbage reverts cheap.
+        self.current["stage"] = "lead-judge"
+        if not await self._judge_meaningful(ev["text"]):
+            return self._revert(cid, gen_kind, parents, "lead-gibberish",
+                                "dose response judged meaningless")
+
         # T2: reproducibility + coherence + judge across the suite
         self.current["stage"] = "T2"
         shifts, n_coh, judged_yes, judged_n, worst_texts = [], 0, 0, 0, []

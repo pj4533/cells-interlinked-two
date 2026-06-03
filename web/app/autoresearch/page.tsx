@@ -71,6 +71,7 @@ const REVERT_HINT: Record<string, string> = {
   "T1-incoherent": "no coherent operating point",
   "not-graded": "effect jumped instead of ramping smoothly",
   "no-effect": "coherent, but the dose barely moved it off-manifold",
+  "lead-gibberish": "judge: the dose response itself was meaningless word-salad",
   "incoherent-suite": "collapsed across the prompt suite",
   "word-salad": "judge: meaningless, not just strange",
   "not-reproducible": "effect didn't hold across prompts",
