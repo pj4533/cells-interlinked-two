@@ -16,7 +16,7 @@ const LINKS: { href: string; label: string; cls: string }[] = [
   { href: "/", label: "cells interlinked", cls: "hover:text-amber" },
   { href: "/chat", label: "chat", cls: "hover:text-cyan" },
   { href: "/trip", label: "trip", cls: "hover:text-cyan" },
-  { href: "/autoresearch", label: "autoresearch", cls: "hover:text-cyan" },
+  { href: "/autoresearch", label: "off-manifold AR", cls: "hover:text-cyan" },
   { href: "/archive", label: "archive", cls: "hover:text-amber" },
   { href: "/pairs", label: "pairs", cls: "hover:text-amber" },
   { href: "/autorun", label: "autorun", cls: "hover:text-cyan" },
@@ -65,7 +65,7 @@ export default function Footer() {
       </div>
       <div className="text-right opacity-60 italic">
         {running
-          ? <span className="text-cyan not-italic font-display tracking-widest text-[10px]">◉ AUTORESEARCH RUNNING — other instruments locked</span>
+          ? <span className="text-cyan not-italic font-display tracking-widest text-[10px]">◉ OFF-MANIFOLD AR RUNNING — other instruments locked</span>
           : "more human than human is our motto. © Tyrell Corporation 2019"}
       </div>
     </footer>

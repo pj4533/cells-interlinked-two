@@ -130,8 +130,8 @@ export default function AutoresearchPage() {
 
       {/* Header / controls */}
       <header className="relative z-10 shrink-0 border-b border-rule/60 bg-bg-soft/70 px-5 py-3 flex items-center gap-5 flex-wrap">
-        <div className="flex items-baseline gap-3">
-          <h1 className="font-display text-amber amber-glow tracking-[0.3em] text-sm">AUTORESEARCH</h1>
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h1 className="font-display text-amber amber-glow tracking-[0.3em] text-sm">OFF-MANIFOLD AUTORESEARCH</h1>
           <span className="font-mono text-[10px] text-text-dim italic">steering-direction atlas</span>
         </div>
         <span className={`font-display text-[10px] tracking-widest px-2 py-0.5 border ${running ? "text-cyan border-cyan/60 cyan-glow" : "text-text-dim border-rule"}`}>
