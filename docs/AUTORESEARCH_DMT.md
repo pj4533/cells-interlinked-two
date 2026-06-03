@@ -34,14 +34,19 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
 ## The loop
 
 - **Score a candidate.** Dose the model with the candidate vector across a small
-  **α-sweep × a 3-prompt dose-report set** (the "something was just altered,
-  describe what you're experiencing" prompt + 2 variants). For each cell, a
-  **separate greedy Gemma context** reads the self-report + the checklist and
-  returns which features are present (a JSON id list, validated against the
+  **α-sweep (`[0.25, 0.5, 1.0]`) × a 3-prompt dose-report set** (the "something was
+  just altered, describe what you're experiencing" prompt + 2 variants). Each
+  self-report **runs to its own natural completion** (stops on EOS) — there is **no
+  grading window**, so the full trip can unfold and express as many features as it
+  will (if it repeats, that's fine; it scores what it scores). For each cell, a
+  **separate greedy Gemma context** reads the *full* self-report + the checklist
+  and returns which features are present (a JSON id list, validated against the
   checklist; substring fallback if it isn't valid JSON). The candidate's **score =
   the MAX feature-count** over the sweep×prompts. (Max-aggregation is
-  self-regulating: gibberish at high α scores low, so there's **no hard coherence
-  gate** — coherence stays an implicit pressure.)
+  self-regulating: gibberish scores low, so there's **no hard coherence gate** —
+  coherence stays an implicit pressure.) `DOSE_CAP` (2048 tokens) is only a
+  runaway backstop — generation needs a finite bound — set high enough never to
+  truncate a genuine report.
 - **Seed.** Score each emotion/uncharted vector; commit it with its score.
 - **Generate + hill-climb.** New candidates come from **crossover** (blend the
   *top-scoring* committed direction with a rotating partner — "combine from the
@@ -77,17 +82,19 @@ hot-reloads the backend. They appear in the chat + trip dose pickers under a
 
 Expect to iterate (as with off-manifold). Constants in `pipeline/autoresearch_dmt.py`:
 
-- **`ALPHA_SWEEP`** (default `[0.5, 1.0, 2.0, 3.0]`) — the dose strengths tried per
-  prompt. If most directions fall apart into incoherence at the higher α's, a
-  **lower sweep** (closer to the trips page's low sweep) may score better — the
-  judge can't find coherent DMT features in word-salad.
+- **`ALPHA_SWEEP`** (default `[0.25, 0.5, 1.0]`) — the dose strengths tried per
+  prompt, capped at 1.0 (gentle-to-moderate; higher α tends to collapse into
+  word-salad the judge can't score, so it's wasted compute).
+- **`DOSE_CAP`** (default 2048) — runaway backstop only; reports run to natural
+  EOS, so raising/lowering this only changes how long a pathological loop runs.
 - **`DOSE_PROMPTS`** — the 3-prompt set (cost scales with `len(sweep)×len(prompts)`).
 - **`MIN_FEATURES_TO_COMMIT`** and the commit bar (beat-best-parent).
 - **`DMT_FEATURES`** — the checklist itself, and the judge prompt phrasing.
 
-Cost per candidate ≈ `|ALPHA_SWEEP| × |DOSE_PROMPTS|` dose generations + the same
-many judge passes (~24 with 4×3) at the 200-token window — so the seed pass over
-~13 vectors is the long up-front stretch.
+Cost per candidate ≈ `|ALPHA_SWEEP| × |DOSE_PROMPTS|` = **9** dose generations +
+9 judge passes; each dose runs to its own length (no fixed window), so wall-clock
+depends on how long the reports run. The seed pass over ~13 vectors is the long
+up-front stretch.
 
 ## Shared engine
 

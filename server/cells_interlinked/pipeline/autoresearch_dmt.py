@@ -31,17 +31,24 @@ import time
 
 from .autoresearch_base import (
     DISTINCT_TAU,
-    GEN_CAP,
     LEAD_PROMPT,
     AutoresearchBase,
     _unit,
 )
 from .dmt_features import FEATURE_IDS, features_block
 
-# Small fixed dose sweep — spans coherent → strong. No bisect-to-cliff (no
-# coherence gate); the judge naturally scores gibberish low. Frozen for a run's
-# lifetime (scores are only comparable under an identical sweep).
-ALPHA_SWEEP = [0.5, 1.0, 2.0, 3.0]
+# Small fixed dose sweep — gentle-to-moderate, capped at 1.0. No bisect-to-cliff
+# (no coherence gate); the judge naturally scores gibberish low. Frozen for a
+# run's lifetime (scores are only comparable under an identical sweep).
+ALPHA_SWEEP = [0.25, 0.5, 1.0]
+
+# No grading window for DMT — we let the model FINISH ITS OWN report (stops on
+# EOS) so the full trip can unfold and express as many features as it will; if it
+# repeats, that's fine, it just scores what it scores. DOSE_CAP is only a runaway
+# backstop (a generation needs a finite bound), set high enough never to truncate
+# a genuine report. NOT the off-manifold 200-token grade window (that existed for
+# coherence/off-manifold measurement, which DMT doesn't do).
+DOSE_CAP = 2048
 
 # Dose-report prompt set: the canonical LEAD prompt + two variants (same set
 # surfaced in chat/trips). Non-leading — never names an emotion/state.
@@ -103,7 +110,9 @@ class DmtController(AutoresearchBase):
             return set()
         bundle = self.app.state.bundle
         q = bundle.render_prompt(
-            DMT_JUDGE_PROMPT.format(features=features_block(), text=text[:2000]),
+            # Feed the FULL report (bounded by DOSE_CAP) — no clip, so a long trip
+            # is scored on everything it expressed, not just its opening.
+            DMT_JUDGE_PROMPT.format(features=features_block(), text=text),
             system_prompt=None,
         )
         # Greedy (temperature=0 → argmax) for score stability.
@@ -124,7 +133,7 @@ class DmtController(AutoresearchBase):
             for alpha in ALPHA_SWEEP:
                 if self._stop_requested:
                     break
-                text, _acts = await self._gen(rendered, v, alpha, cap=GEN_CAP)
+                text, _acts = await self._gen(rendered, v, alpha, cap=DOSE_CAP)
                 feats = await self._score_dmt(text)
                 if len(feats) > best["score"]:
                     best = {"score": len(feats), "best_alpha": alpha, "best_prompt": prompt,
