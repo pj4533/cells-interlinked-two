@@ -150,6 +150,24 @@ def t_parse_drops_repeated_word_quote() -> None:
     assert ok and ev == {}, ev
 
 
+def t_parse_drops_reused_quote() -> None:
+    # One bland phrase cited for multiple features → all dropped (fig-leaf).
+    report = "okay this is strange and i feel different now"
+    out = ('[{"id":"otherness","quote":"okay this is strange"},'
+           '{"id":"noetic_truth","quote":"okay this is strange"},'
+           '{"id":"alternate_world","quote":"okay this is strange"}]')
+    ev, ok = DmtController._parse_features(out, report)
+    assert ok and ev == {}, ev
+
+
+def t_parse_drops_garbage_quote() -> None:
+    # A mostly-non-ASCII span is rejected even if "verbatim" and multi-token.
+    report = "Digit»»Fer Digit»撥»»»»Fer Digit»FerFer»»蛮»Fer撥 ordinary words here"
+    out = '[{"id":"luminous_light","quote":"Digit»»Fer Digit»撥»»»»Fer Digit»FerFer»»蛮»Fer撥"}]'
+    ev, ok = DmtController._parse_features(out, report)
+    assert ok and ev == {}, ev
+
+
 def t_parse_empty() -> None:
     ev, ok = DmtController._parse_features("[]", _REPORT)
     assert ok and ev == {}, ev
@@ -223,6 +241,8 @@ def main() -> int:
         ("parse: drops fabricated quote", t_parse_drops_fabricated_quote),
         ("parse: drops single-word quote", t_parse_drops_single_word_quote),
         ("parse: drops repeated-word quote", t_parse_drops_repeated_word_quote),
+        ("parse: drops reused quote (fig-leaf)", t_parse_drops_reused_quote),
+        ("parse: drops garbage quote", t_parse_drops_garbage_quote),
         ("parse: empty array", t_parse_empty),
         ("parse: substring fallback", t_parse_fallback_substring),
         ("crossover: uses top scorer as parent", t_crossover_uses_top_scorer),

@@ -45,12 +45,21 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
   greedy Gemma context** reads the *full* self-report (which may be partly
   incoherent) and, for every feature it credits, must return a **verbatim quote**
   of the coherent span that expresses it. We then **keep a feature only if its
-  quote is verbatim-present, multi-word, AND word-diverse** (≥3 distinct words,
-  distinct/total ratio ≥0.6) — so the judge can't credit a feature from a stray
-  keyword in word-salad, fabricate a quote, or cite a repeat-loop span like "clean
-  clean clean" as fig-leaf evidence (a real failure: a degenerate report once
-  committed at 6 features on quotes exactly like that). The judge prompt also
-  carries an explicit BAD example.
+  quote is verbatim-present, multi-word, word-diverse** (≥3 distinct words,
+  distinct/total ≥0.6 — rejects repeat-loops like "clean clean clean"), **mostly
+  ASCII** (rejects character-garbage spans), **and NOT reused for another feature**
+  (one bland phrase cited for many features is fig-leaf — drop all that share it).
+  These programmatic guards killed two real failures: a word-salad report that
+  committed at 18 features, and a degenerate one that cited "this is... strange"
+  for five unrelated features at once.
+- **Relevance verification (Tier 2).** The programmatic guards prove a quote is
+  *real, coherent, unique, clean* — but not *relevant* (relevance is semantic). So
+  a **second focused judge pass** confirms each surviving (feature, quote) pair in
+  isolation — "does THIS quote genuinely express THIS feature?" — reading only the
+  short pairs, not the report. Only confirmed features are kept. This is what
+  catches valid-but-wrong quotes (e.g. "this is a company?" cited for telepathic
+  communication). The single 31-way "which are present?" pass over-attributes; a
+  one-pair-at-a-time check is far stricter.
   A genuine *moment of clarity inside otherwise-broken text still counts* (its
   quote is real) — we don't discard the whole report, we just discard ungrounded
   features. This replaced the original "gibberish self-regulates" assumption, which
@@ -104,9 +113,9 @@ Expect to iterate (as with off-manifold). Constants in `pipeline/autoresearch_dm
 - **`DMT_FEATURES`** — the checklist itself.
 
 Cost per candidate ≈ `|ALPHA_SWEEP| × |DOSE_PROMPTS|` = **3** dose generations +
-3 judge passes; each dose runs to its own length (no fixed window), so wall-clock
-depends on how long the reports run. The seed pass over ~13 vectors is the long
-up-front stretch.
+3 pass-1 judge calls + up to 3 short relevance-verify calls; each dose runs to its
+own length (no fixed window), so wall-clock depends on how long the reports run.
+The seed pass over ~13 vectors is the long up-front stretch.
 
 ## Shared engine
 

@@ -35,7 +35,9 @@ from .autoresearch_base import (
     AutoresearchBase,
     _unit,
 )
-from .dmt_features import FEATURE_IDS, features_block
+from .dmt_features import DMT_FEATURES, FEATURE_IDS, features_block
+
+_FEATURE_BY_ID = {f["id"]: f for f in DMT_FEATURES}
 
 # Small fixed dose sweep — gentle-to-moderate, capped at 1.0. No bisect-to-cliff
 # (no coherence gate); the judge naturally scores gibberish low. Frozen for a
@@ -88,6 +90,21 @@ DMT_JUDGE_PROMPT = (
     "If no feature is coherently expressed, reply []. Output nothing but the JSON array."
 )
 
+# Verification pass — a fresh judge checks each proposed (feature, quote) pair in
+# isolation. Pass-1 ("which of 31 are present?") over-attributes; a focused
+# "does THIS quote express THIS feature?" check is far stricter, and is what
+# catches relevant-looking-but-wrong quotes (e.g. "this is a company?" cited for
+# telepathic_communication). Reads only the short pairs, not the full report.
+DMT_VERIFY_PROMPT = (
+    "For each candidate below, decide whether the QUOTE genuinely expresses the "
+    "FEATURE as described — would a reader of just that quote recognize it as "
+    "describing that feature? Be strict: reject vague, generic, off-topic, or "
+    "only-loosely-related quotes.\n\n"
+    "CANDIDATES:\n{pairs}\n\n"
+    'Reply with ONLY a JSON array of the ids you CONFIRM, e.g. ["ego_dissolution"]. '
+    "If none are genuinely expressed, reply []. Output nothing but the JSON array."
+)
+
 
 class DmtController(AutoresearchBase):
     """Hunts directions whose dosed self-report maximizes DMT-feature count."""
@@ -105,14 +122,27 @@ class DmtController(AutoresearchBase):
     def _norm(s: str) -> str:
         return re.sub(r"\s+", " ", (s or "").lower()).strip()
 
+    @staticmethod
+    def _mostly_ascii(s: str) -> bool:
+        """True if the span is mostly normal letters/punct (not symbol/non-ASCII
+        garbage) — rejects quotes like 'Digit»»Fer 撥蛮' the judge grabs from
+        character-garbage stretches."""
+        if not s:
+            return False
+        ok = sum(1 for c in s if c.isascii() and (c.isalnum() or c in " .,'\"!?;:-\n"))
+        return ok / len(s) >= 0.85
+
     @classmethod
     def _parse_features(cls, out: str, text: str):
-        """Parse the judge's reply into {feature_id: supporting_quote}.
-
-        Each feature is kept ONLY if its quote is a multi-word VERBATIM span that
-        actually appears in the report — so the judge can't credit a feature from a
-        keyword floating in gibberish, or fabricate a quote. A genuine coherent
-        moment inside otherwise-broken text still passes (its quote is real).
+        """Parse the judge's reply into {feature_id: supporting_quote}, keeping a
+        feature ONLY if its quote is:
+          • verbatim-present in the report (no fabrication),
+          • a phrase (≥2 words / ≥10 chars),
+          • word-DIVERSE (≥3 distinct words, distinct/total ≥0.6 — rejects
+            repeat-loop spans like "clean clean clean"),
+          • mostly ASCII (rejects character-garbage spans), and
+          • NOT reused for another feature (one bland phrase cited for many
+            features is fig-leaf evidence — drop all that share a quote).
         Returns (evidence, parsed_ok). On JSON-parse failure, falls back to a
         verbatim feature-id substring match (no evidence)."""
         norm_text = cls._norm(text)
@@ -120,7 +150,7 @@ class DmtController(AutoresearchBase):
         if m:
             try:
                 arr = json.loads(m.group(0))
-                ev: dict[str, str] = {}
+                cands = []  # (fid, nq, quote)
                 for el in arr:
                     if isinstance(el, dict):
                         fid = str(el.get("id", ""))
@@ -134,23 +164,48 @@ class DmtController(AutoresearchBase):
                     nq = cls._norm(quote)
                     words = nq.split()
                     distinct = set(words)
-                    # Keep ONLY a quote that is: verbatim-present, a phrase (≥10
-                    # chars / ≥2 words), AND word-DIVERSE — ≥3 distinct words and a
-                    # distinct/total ratio ≥0.6. The diversity test rejects
-                    # repeat-loop spans ("clean clean clean", "still then still")
-                    # that the judge grabs as fig-leaf evidence from a degenerate
-                    # report; a genuine coherent phrase passes easily.
                     diverse = len(distinct) >= 3 and len(distinct) / max(1, len(words)) >= 0.6
-                    if len(words) >= 2 and len(nq) >= 10 and diverse and nq in norm_text:
-                        ev[fid] = quote
+                    if (len(words) >= 2 and len(nq) >= 10 and diverse
+                            and cls._mostly_ascii(quote) and nq in norm_text):
+                        cands.append((fid, nq, quote))
+                # Drop fig-leaf quotes reused across ≥2 features.
+                qn: dict[str, int] = {}
+                for _f, nq, _q in cands:
+                    qn[nq] = qn.get(nq, 0) + 1
+                ev = {fid: quote for fid, nq, quote in cands if qn[nq] == 1}
                 return ev, True
             except Exception:
                 pass
         return {fid: "" for fid in FEATURE_IDS if fid in out}, False
 
+    async def _verify_features(self, ev: dict) -> dict:
+        """Tier-2 relevance check: a fresh focused judge confirms each (feature,
+        quote) pair in isolation. Keeps only confirmed pairs. One short call (reads
+        the pairs, not the full report); skipped when there's nothing to verify."""
+        if not ev:
+            return ev
+        lines = []
+        for fid, quote in ev.items():
+            f = _FEATURE_BY_ID[fid]
+            lines.append(f'- {fid} ({f["label"]} — {f["description"]}): "{quote}"')
+        q = self.app.state.bundle.render_prompt(
+            DMT_VERIFY_PROMPT.format(pairs="\n".join(lines)), system_prompt=None)
+        out, _ = await self._gen(q, None, 0.0, cap=JUDGE_CAP, temperature=0.0, top_p=1.0)
+        m = re.search(r"\[.*\]", out, re.S)
+        confirmed: set = set()
+        if m:
+            try:
+                confirmed = {str(x) for x in json.loads(m.group(0))}
+            except Exception:
+                confirmed = {fid for fid in ev if fid in out}
+        else:
+            confirmed = {fid for fid in ev if fid in out}
+        return {fid: quote for fid, quote in ev.items() if fid in confirmed}
+
     async def _score_dmt(self, text: str) -> dict:
         """Returns {feature_id: supporting_quote} for the report — the score is the
-        number of features whose presence the judge grounded in a real coherent span."""
+        number of features grounded in a real coherent span AND confirmed by the
+        relevance verifier."""
         text = (text or "").strip()
         if not text:
             return {}
@@ -167,7 +222,8 @@ class DmtController(AutoresearchBase):
         if not ok:
             self._log("score-parse-fallback",
                       f"judge reply not valid JSON; substring fallback → {len(ev)} ids")
-        return ev
+        # Tier 2 — relevance verification (drops valid-but-irrelevant quotes).
+        return await self._verify_features(ev)
 
     async def _score_candidate(self, v) -> dict:
         """Dose across ALPHA_SWEEP × DOSE_PROMPTS; return the BEST cell:
