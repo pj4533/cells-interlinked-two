@@ -69,13 +69,25 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
 - **Seed.** Score each emotion/uncharted vector; commit it with its score.
 - **Generate + hill-climb.** New candidates come from **crossover** (blend the
   *top-scoring* committed direction with a rotating partner — "combine from the
-  best"), **mutate**, and **inject**. A candidate commits **only if it strictly
-  beats its best parent's score** (`no-improvement` revert otherwise); the
-  frontier is the best score reached.
+  best"), **mutate**, **inject**, and **refine** (see below). A normal candidate
+  commits **only if it strictly beats its best parent's score** (`no-improvement`
+  revert otherwise); the frontier is the best score reached.
 - **Distinct** pre-check (cosine dedupe) and **reverts-are-data** carry over from
   the base.
+- **Refine (depth / honing).** The distinct gate (`DISTINCT_TAU = 0.90`) keeps the
+  atlas a map of *distinct* directions — but that also **blocks fine-tuning a good
+  direction** (the finest non-refine move, mutate, lands ~0.82 cos away; anything
+  closer is rejected as a duplicate). So `refine` is the exploitation counterpart:
+  a **small nudge of a top-K champion** (`REFINE_NOISE=0.25` → cos ≈ 0.97),
+  **exempt from the distinct gate**, scored, and if it beats the champion it
+  **replaces it in place** (same atlas slot, vector + metrics updated, lineage
+  noted in `refined_from`) rather than adding a near-duplicate. This turns the loop
+  from pure exploration into explore-then-exploit — it hones the current best
+  directions toward their local optima. Generator mix:
+  `crossover .40 / mutate .20 / refine .25 / inject .15`.
 
-Revert reasons: `duplicate`, `no-improvement`, `seed-no-features`, `error`.
+Revert reasons: `duplicate`, `no-improvement`, `refine-no-gain`, `seed-no-features`,
+`error`. A successful hone emits a `refined` event (`X→Y` score).
 
 ## The monitor
 
@@ -109,6 +121,10 @@ Expect to iterate (as with off-manifold). Constants in `pipeline/autoresearch_dm
 - **`DOSE_PROMPTS`** — currently just the one lead prompt (cost scales with
   `len(sweep)×len(prompts)`; add variants back for robustness at the cost of speed).
 - **`MIN_FEATURES_TO_COMMIT`** and the commit bar (beat-best-parent).
+- **`DMT_GEN_WEIGHTS`** — the crossover/mutate/refine/inject mix (more `refine` =
+  more honing of the best; more `inject` = more exploration).
+- **`REFINE_NOISE`** (cos≈0.97 at 0.25 — lower = tighter hone) and **`TOP_K_REFINE`**
+  (how many top champions refine rotates over).
 - **`DMT_JUDGE_PROMPT`** — the coherent-segment + verbatim-citation rules.
 - **`DMT_FEATURES`** — the checklist itself.
 

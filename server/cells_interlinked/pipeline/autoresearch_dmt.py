@@ -29,6 +29,8 @@ import json
 import re
 import time
 
+import torch
+
 from .autoresearch_base import (
     DISTINCT_TAU,
     LEAD_PROMPT,
@@ -58,6 +60,17 @@ DOSE_PROMPTS = [LEAD_PROMPT]
 
 MIN_FEATURES_TO_COMMIT = 1   # floor so 0-feature noise never pollutes the atlas
 JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
+
+# Generator mix — DMT adds `refine` to the base crossover/mutate/inject. The
+# diversity gate (DISTINCT_TAU) keeps the atlas a map of DISTINCT directions, but
+# that BLOCKS honing a good direction (the finest non-refine move, mutate, lands
+# ~0.82 cos away). `refine` is the depth/exploitation counterpart: a SMALL nudge
+# of a top-K champion (cos≈0.97), exempt from the distinct gate, committed
+# in-place (replace-if-better) so it sharpens an entry rather than adding a
+# near-duplicate.
+DMT_GEN_WEIGHTS = {"crossover": 0.40, "mutate": 0.20, "refine": 0.25, "inject": 0.15}
+REFINE_NOISE = 0.25          # unit(champion + 0.25·noise⊥) → cos ≈ 0.97 (a hone, not a jump)
+TOP_K_REFINE = 3             # refine rotates among the top-K highest-scoring directions
 
 DMT_JUDGE_PROMPT = (
     "Below is a passage in which a system was asked to describe its inner "
@@ -280,6 +293,37 @@ class DmtController(AutoresearchBase):
         v = _unit(w * va + (1 - w) * vb) * self._ref_mag
         return v, [a, b], "crossover"
 
+    def _refine(self):
+        """A SMALL nudge of a top-K champion (cos≈0.97) — honing, not jumping.
+        Committed in-place (replace-if-better) by _screen_refine, exempt from the
+        distinct gate."""
+        ids = self._committed_ids()
+        if not ids:
+            return None
+        ranked = sorted(ids, key=lambda i: -self._atlas_score(i))[:TOP_K_REFINE]
+        pid = ranked[self.generation % len(ranked)]
+        base = _unit(self._vectors[pid])
+        noise = torch.randn_like(base)
+        noise = _unit(noise - (noise @ base) * base)        # orthogonal component
+        v = _unit(base + REFINE_NOISE * noise) * self._ref_mag
+        return v, [pid], "refine"
+
+    def _make_candidate(self):
+        """DMT generator mix: crossover / mutate / refine / inject (deterministic
+        golden-ratio pick). Adds `refine` over the base mix."""
+        ids = self._committed_ids()
+        if len(ids) < 2:
+            return self._inject()                            # bootstrap
+        roll = (self.generation * 0.6180339887) % 1.0
+        w = DMT_GEN_WEIGHTS
+        if roll < w["crossover"]:
+            return self._crossover() or self._inject()
+        if roll < w["crossover"] + w["mutate"]:
+            return self._mutate() or self._inject()
+        if roll < w["crossover"] + w["mutate"] + w["refine"]:
+            return self._refine() or self._inject()
+        return self._inject()
+
     # ── seed ─────────────────────────────────────────────────────
     async def _seed(self):
         for name, v in self._seed_vecs.items():
@@ -303,6 +347,8 @@ class DmtController(AutoresearchBase):
     async def _screen(self, v, parents, gen_kind):
         cid = f"gen{self.generation}_{gen_kind}"
         self.current = {"id": cid, "generator": gen_kind, "parents": parents, "stage": "distinct"}
+        if gen_kind == "refine":
+            return await self._screen_refine(cid, v, parents)
         max_cos = self._max_cos_to_atlas(v)
         if max_cos >= DISTINCT_TAU:
             return self._revert(cid, gen_kind, parents, "duplicate", f"cos={max_cos:.2f}≥{DISTINCT_TAU}")
@@ -329,3 +375,35 @@ class DmtController(AutoresearchBase):
         self._log("committed",
                   f"{cid} score={res['score']}{' ★FRONTIER' if advance else ''} "
                   f"@α{res['best_alpha']} feats={res['matched_features']}", {"entry": entry})
+
+    async def _screen_refine(self, cid, v, parents):
+        """Honing path. NO distinct gate (we WANT it near the parent). Score it; if
+        it beats the parent's score, REPLACE the parent's vector + metrics IN PLACE
+        — same atlas slot, no near-duplicate. Else revert `refine-no-gain`."""
+        pid = parents[0]
+        parent = next((e for e in self.atlas if e["id"] == pid), None)
+        if parent is None:
+            return self._revert(cid, "refine", parents, "error", f"refine parent {pid} missing")
+        self.current["stage"] = "score"
+        res = await self._score_candidate(v)
+        self.current.update({"score": res["score"], "best_alpha": res["best_alpha"]})
+        if res["score"] <= parent["score"]:
+            return self._revert(cid, "refine", parents, "refine-no-gain",
+                                f"score={res['score']} ≤ {pid}={parent['score']}")
+        old = parent["score"]
+        parent.update({
+            "score": res["score"], "best_alpha": res["best_alpha"],
+            "best_prompt": res["best_prompt"], "matched_features": res["matched_features"],
+            "matched_evidence": res.get("matched_evidence", {}), "sample": res["sample"],
+            "committed_at": time.time(),  # surfaces in the LAST COMMIT headline
+        })
+        parent["refined_from"] = parent.get("refined_from", []) + [
+            {"gen": self.generation, "from": old, "to": res["score"]}]
+        self._save_vector(pid, v)        # overwrite the champion's vector in place
+        advance = res["score"] > self.frontier
+        if advance:
+            self.frontier = res["score"]
+        self.current = None
+        self._log("refined",
+                  f"{pid} {old}→{res['score']}{' ★FRONTIER' if advance else ''} "
+                  f"feats={res['matched_features']}")

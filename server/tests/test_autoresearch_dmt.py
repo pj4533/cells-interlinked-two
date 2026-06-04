@@ -192,6 +192,23 @@ def t_crossover_uses_top_scorer() -> None:
     assert parents[1] != parents[0]
 
 
+def t_refine_nudges_top_champion() -> None:
+    c = _dmt_ctrl()
+    c._ref_mag = 1.0
+    c.generation = 0
+    res = c._refine()
+    assert res is not None
+    v, parents, kind = res
+    assert kind == "refine"
+    # rotates among top-K; gen0 picks the #1 (gen3_crossover, score 9).
+    assert parents == ["gen3_crossover"], parents
+    # The nudge is CLOSE to the parent (cos≈0.97) — i.e. it would be killed as a
+    # 'duplicate' under the distinct gate, which is exactly why refine bypasses it.
+    pv = c._vectors["gen3_crossover"]
+    cos = abs(float((v / v.norm()) @ (pv / pv.norm())))
+    assert cos > 0.90, cos
+
+
 # ── DMT export ───────────────────────────────────────────────────
 def t_dmt_export_group_and_lineage() -> None:
     with tempfile.TemporaryDirectory() as td:
@@ -246,6 +263,7 @@ def main() -> int:
         ("parse: empty array", t_parse_empty),
         ("parse: substring fallback", t_parse_fallback_substring),
         ("crossover: uses top scorer as parent", t_crossover_uses_top_scorer),
+        ("refine: nudges top champion (cos>0.90)", t_refine_nudges_top_champion),
         ("export: dmt group + score-ranked lineage", t_dmt_export_group_and_lineage),
         ("export: research + dmt coexist (no clobber)", t_exports_coexist),
     ]

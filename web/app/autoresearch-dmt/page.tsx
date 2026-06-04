@@ -69,6 +69,7 @@ function fmtRelative(ts: number): string {
 const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
   "no-improvement": "scored no higher than its best parent — hill-climb rejects it",
+  "refine-no-gain": "a refinement nudge didn't beat the direction it was honing",
   "seed-no-features": "seed produced no recognizable DMT features",
   error: "crashed mid-screen",
 };
@@ -281,7 +282,7 @@ export default function AutoresearchDmtPage() {
                       {events.slice(0, 100).map((ev, i) => {
                         const rec = ev.entry ?? ev.revert;
                         const lin = rec ? lineage(rec.generator, rec.parents) : null;
-                        const kc = ev.kind === "committed" || ev.kind === "seeded" ? "text-cyan"
+                        const kc = ev.kind === "committed" || ev.kind === "seeded" || ev.kind === "refined" ? "text-cyan"
                           : ev.kind === "reverted" ? "text-warning" : "text-text-dim";
                         return (
                           <div key={i} className="flex gap-2 items-baseline">
