@@ -80,7 +80,7 @@ export default function AutoresearchDmtPage() {
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"events" | "reverts">("events");
-  const [commitRel, setCommitRel] = useState(false);
+  const [commitRel, setCommitRel] = useState(true);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = useCallback(async () => {
@@ -241,13 +241,17 @@ export default function AutoresearchDmtPage() {
                   </div>
                   {lastCommit ? (
                     <>
-                      <div className="font-mono text-[26px] text-cyan tabular-nums leading-none mt-0.5" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
-                        {commitRel ? fmtRelative(lastCommit.committed_at) : fmtTime(lastCommit.committed_at)}
+                      <div className="flex items-baseline gap-3 flex-wrap mt-0.5">
+                        <div className="font-mono text-[26px] text-cyan tabular-nums leading-none" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
+                          {commitRel ? fmtRelative(lastCommit.committed_at) : fmtTime(lastCommit.committed_at)}
+                        </div>
+                        <div className="font-mono text-[26px] tabular-nums leading-none" style={{ color: "#ff8fc0", textShadow: "0 0 10px rgba(255,77,157,0.3)" }} title="DMT features matched in the last commit">
+                          {lastCommit.score}<span className="text-[12px] text-text-dim/70"> feat</span>
+                        </div>
                       </div>
                       <div className="text-[10px] font-mono text-text-dim truncate mt-1">
                         {lastCommit.id}
                         {lastCommit.frontier_advance ? <span className="text-cyan"> ★</span> : null}
-                        <span className="text-text-dim/60"> · {lastCommit.score} feats</span>
                       </div>
                     </>
                   ) : (
