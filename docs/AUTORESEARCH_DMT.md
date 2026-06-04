@@ -67,11 +67,15 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
   judge keyword-matched evocative tokens. The kept quotes are stored
   (`matched_evidence`) and shown per-feature in the monitor's spin-down.
 - **Seed.** Score each emotion/uncharted vector; commit it with its score.
-- **Generate + hill-climb.** New candidates come from **crossover** (blend the
-  *top-scoring* committed direction with a rotating partner — "combine from the
-  best"), **mutate**, **inject**, and **refine** (see below). A normal candidate
-  commits **only if it strictly beats its best parent's score** (`no-improvement`
-  revert otherwise); the frontier is the best score reached.
+- **Generate + keep the population.** New candidates come from **crossover** (blend
+  the *top-scoring* committed direction with a rotating partner — "combine from the
+  best"), **mutate**, **inject**, and **refine** (see below). An **append**
+  candidate commits if it's **distinct AND scores ≥ `MIN_FEATURES_TO_COMMIT` (2)** —
+  *not* "beats its parent." A distinct, decent direction is kept as an export
+  candidate and as recombination material even if it isn't a new record; requiring
+  appends to beat the frontier was deleting good crossover fuel (distinct score-4/5
+  directions thrown out for not topping the best). Beat-parent is the right test
+  only for **refine** (in-place replace). The frontier is the best score reached.
 - **Distinct** pre-check (cosine dedupe) and **reverts-are-data** carry over from
   the base.
 - **Refine (depth / honing).** The distinct gate (`DISTINCT_TAU = 0.90`) keeps the
@@ -86,7 +90,7 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
   directions toward their local optima. Generator mix:
   `crossover .40 / mutate .20 / refine .25 / inject .15`.
 
-Revert reasons: `duplicate`, `no-improvement`, `refine-no-gain`, `seed-no-features`,
+Revert reasons: `duplicate`, `low-score`, `refine-no-gain`, `seed-no-features`,
 `error`. A successful hone emits a `refined` event (`X→Y` score).
 
 ## The monitor

@@ -68,6 +68,7 @@ function fmtRelative(ts: number): string {
 
 const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
+  "low-score": "distinct, but scored below the floor (too few grounded features)",
   "no-improvement": "scored no higher than its best parent — hill-climb rejects it",
   "refine-no-gain": "a refinement nudge didn't beat the direction it was honing",
   "seed-no-features": "seed produced no recognizable DMT features",

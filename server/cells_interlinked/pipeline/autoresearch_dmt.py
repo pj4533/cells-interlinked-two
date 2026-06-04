@@ -58,7 +58,13 @@ DOSE_CAP = 2048
 # (one prompt × 3 α = 3 cells per candidate — kept to one prompt for speed).
 DOSE_PROMPTS = [LEAD_PROMPT]
 
-MIN_FEATURES_TO_COMMIT = 1   # floor so 0-feature noise never pollutes the atlas
+MIN_FEATURES_TO_COMMIT = 2   # floor: a committed direction must show ≥2 grounded
+                             # features (a single feature is usually the easy
+                             # prompt-artifact one). Appends commit on distinct +
+                             # this floor — NOT beat-parent (beat-parent is refine-
+                             # only), so diverse decent directions are kept as
+                             # recombination material instead of deleted for failing
+                             # to beat the all-time record.
 JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
 
 # Generator mix — DMT adds `refine` to the base crossover/mutate/inject. The
@@ -358,12 +364,17 @@ class DmtController(AutoresearchBase):
         self.current.update({"score": res["score"], "best_alpha": res["best_alpha"],
                              "max_cos": round(max_cos, 2)})
 
-        # Hill-climb: must STRICTLY beat the best parent (and clear the floor).
-        parent_scores = [self._atlas_score(pid) for pid in parents]
-        bar = max([MIN_FEATURES_TO_COMMIT - 1] + parent_scores)
-        if res["score"] <= bar:
-            return self._revert(cid, gen_kind, parents, "no-improvement",
-                                f"score={res['score']} ≤ bar={bar} ({res['matched_features']})")
+        # Append commit rule: a DISTINCT direction that scores at/above the floor is
+        # worth keeping — as an export candidate AND as recombination material —
+        # even if it doesn't beat the direction it came from. (Beat-parent is the
+        # right test for refine's in-place replace, NOT for adding a new distinct
+        # point; requiring appends to beat the frontier was deleting good crossover
+        # fuel — distinct score-4/5 directions thrown out because they weren't a
+        # new record.) This makes it a population-based search, not a single-point
+        # hill-climb.
+        if res["score"] < MIN_FEATURES_TO_COMMIT:
+            return self._revert(cid, gen_kind, parents, "low-score",
+                                f"score={res['score']} < {MIN_FEATURES_TO_COMMIT} ({res['matched_features']})")
 
         entry = self._make_entry(cid, parents, gen_kind, res, max_cos)
         self._save_vector(cid, v)
