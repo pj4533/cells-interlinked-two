@@ -37,7 +37,14 @@ function lineage(generator: string, parents?: string[]): string {
 
 function fmtTime(ts: number): string {
   try {
-    return new Date(ts * 1000).toLocaleTimeString([], {
+    const d = new Date(ts * 1000);
+    // After 24h a bare HH:MM:SS is ambiguous — show the date (+ HH:MM) instead.
+    if (Date.now() / 1000 - ts >= 86400) {
+      return d.toLocaleString([], {
+        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+      });
+    }
+    return d.toLocaleTimeString([], {
       hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     });
   } catch {
@@ -86,7 +93,7 @@ export default function AutoresearchPage() {
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<"events" | "reverts">("events");
-  const [commitRel, setCommitRel] = useState(false);
+  const [commitRel, setCommitRel] = useState(true);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = useCallback(async () => {

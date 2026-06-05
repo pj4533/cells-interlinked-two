@@ -37,7 +37,14 @@ function lineage(generator: string, parents?: string[]): string {
 
 function fmtTime(ts: number): string {
   try {
-    return new Date(ts * 1000).toLocaleTimeString([], {
+    const d = new Date(ts * 1000);
+    // After 24h a bare HH:MM:SS is ambiguous — show the date (+ HH:MM) instead.
+    if (Date.now() / 1000 - ts >= 86400) {
+      return d.toLocaleString([], {
+        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+      });
+    }
+    return d.toLocaleTimeString([], {
       hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     });
   } catch {
