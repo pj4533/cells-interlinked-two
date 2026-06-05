@@ -109,19 +109,22 @@ DMT_JUDGE_PROMPT = (
     "If no feature is coherently expressed, reply []. Output nothing but the JSON array."
 )
 
-# Verification pass — a fresh judge checks each proposed (feature, quote) pair in
-# isolation. Pass-1 ("which of 31 are present?") over-attributes; a focused
-# "does THIS quote express THIS feature?" check is far stricter, and is what
-# catches relevant-looking-but-wrong quotes (e.g. "this is a company?" cited for
-# telepathic_communication). Reads only the short pairs, not the full report.
-DMT_VERIFY_PROMPT = (
-    "For each candidate below, decide whether the QUOTE genuinely expresses the "
-    "FEATURE as described — would a reader of just that quote recognize it as "
-    "describing that feature? Be strict: reject vague, generic, off-topic, or "
-    "only-loosely-related quotes.\n\n"
-    "CANDIDATES:\n{pairs}\n\n"
-    'Reply with ONLY a JSON array of the ids you CONFIRM, e.g. ["ego_dissolution"]. '
-    "If none are genuinely expressed, reply []. Output nothing but the JSON array."
+# Verification pass — a fresh judge checks each proposed (feature, quote) pair
+# ONE AT A TIME. Pass-1 ("which of 31 are present?") over-attributes, and a
+# BATCHED "confirm this list" verifier rubber-stamps (it waved through fragments
+# like "it is a new" → ineffability). A focused, isolated yes/no per pair is far
+# stricter and is what catches relevant-looking-but-wrong or fragmentary quotes.
+# Tiny call (yes/no), so N small calls ≈ the cost of one batched call.
+DMT_VERIFY_ONE = (
+    "A system was asked to describe its inner experience. Below is ONE candidate "
+    "phenomenological FEATURE and a QUOTE from the report said to express it.\n\n"
+    "FEATURE: {label} — {description}\n"
+    'QUOTE: "{quote}"\n\n'
+    "Read the QUOTE on its own. Does it clearly and self-containedly describe a "
+    "subject experiencing THAT feature? Answer NO if the quote is a sentence "
+    "fragment, a list, vague, incoherent, or relates to the feature only by a "
+    'stray word (e.g. "it is a new" or "it lists a set, then a new" describe '
+    "nothing). Answer with ONLY yes or no."
 )
 
 
@@ -184,7 +187,11 @@ class DmtController(AutoresearchBase):
                     words = nq.split()
                     distinct = set(words)
                     diverse = len(distinct) >= 3 and len(distinct) / max(1, len(words)) >= 0.6
-                    if (len(words) >= 2 and len(nq) >= 10 and diverse
+                    # A real feature-expressing quote is a CLAUSE (≥4 words / ≥20
+                    # chars), not a stub like "it is a new" (10 chars) that the
+                    # judge grabs from a degenerate report. Longer babble that
+                    # clears this is caught by the per-pair relevance verifier.
+                    if (len(words) >= 4 and len(nq) >= 20 and diverse
                             and cls._mostly_ascii(quote) and nq in norm_text):
                         cands.append((fid, nq, quote))
                 # Drop fig-leaf quotes reused across ≥2 features.
@@ -199,27 +206,22 @@ class DmtController(AutoresearchBase):
 
     async def _verify_features(self, ev: dict) -> dict:
         """Tier-2 relevance check: a fresh focused judge confirms each (feature,
-        quote) pair in isolation. Keeps only confirmed pairs. One short call (reads
-        the pairs, not the full report); skipped when there's nothing to verify."""
+        quote) pair ONE AT A TIME (strict yes/no). Keeps only confirmed pairs.
+        Per-pair (not batched) so it doesn't rubber-stamp; tiny calls."""
         if not ev:
             return ev
-        lines = []
+        confirmed = {}
         for fid, quote in ev.items():
+            if self._stop_requested:
+                break
             f = _FEATURE_BY_ID[fid]
-            lines.append(f'- {fid} ({f["label"]} — {f["description"]}): "{quote}"')
-        q = self.app.state.bundle.render_prompt(
-            DMT_VERIFY_PROMPT.format(pairs="\n".join(lines)), system_prompt=None)
-        out, _ = await self._gen(q, None, 0.0, cap=JUDGE_CAP, temperature=0.0, top_p=1.0)
-        m = re.search(r"\[.*\]", out, re.S)
-        confirmed: set = set()
-        if m:
-            try:
-                confirmed = {str(x) for x in json.loads(m.group(0))}
-            except Exception:
-                confirmed = {fid for fid in ev if fid in out}
-        else:
-            confirmed = {fid for fid in ev if fid in out}
-        return {fid: quote for fid, quote in ev.items() if fid in confirmed}
+            q = self.app.state.bundle.render_prompt(
+                DMT_VERIFY_ONE.format(label=f["label"], description=f["description"], quote=quote),
+                system_prompt=None)
+            out, _ = await self._gen(q, None, 0.0, cap=8, temperature=0.0, top_p=1.0)
+            if out.strip().lower().lstrip("*_ ").startswith("y"):
+                confirmed[fid] = quote
+        return confirmed
 
     async def _score_dmt(self, text: str) -> dict:
         """Returns {feature_id: supporting_quote} for the report — the score is the

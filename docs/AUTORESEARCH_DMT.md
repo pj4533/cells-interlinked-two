@@ -45,21 +45,22 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
   greedy Gemma context** reads the *full* self-report (which may be partly
   incoherent) and, for every feature it credits, must return a **verbatim quote**
   of the coherent span that expresses it. We then **keep a feature only if its
-  quote is verbatim-present, multi-word, word-diverse** (≥3 distinct words,
-  distinct/total ≥0.6 — rejects repeat-loops like "clean clean clean"), **mostly
-  ASCII** (rejects character-garbage spans), **and NOT reused for another feature**
-  (one bland phrase cited for many features is fig-leaf — drop all that share it).
-  These programmatic guards killed two real failures: a word-salad report that
-  committed at 18 features, and a degenerate one that cited "this is... strange"
-  for five unrelated features at once.
+  quote is a CLAUSE (≥4 words / ≥20 chars), verbatim-present, word-diverse** (≥3
+  distinct words, distinct/total ≥0.6 — rejects repeat-loops like "clean clean
+  clean"), **mostly ASCII** (rejects character-garbage spans), **and NOT reused for
+  another feature** (one bland phrase cited for many features is fig-leaf — drop
+  all that share it). These programmatic guards killed real failures: a word-salad
+  report at 18 features, one that cited "this is... strange" for five features, and
+  the stub fragments ("it is a new") a degenerate report hands the judge.
 - **Relevance verification (Tier 2).** The programmatic guards prove a quote is
   *real, coherent, unique, clean* — but not *relevant* (relevance is semantic). So
-  a **second focused judge pass** confirms each surviving (feature, quote) pair in
-  isolation — "does THIS quote genuinely express THIS feature?" — reading only the
-  short pairs, not the report. Only confirmed features are kept. This is what
-  catches valid-but-wrong quotes (e.g. "this is a company?" cited for telepathic
-  communication). The single 31-way "which are present?" pass over-attributes; a
-  one-pair-at-a-time check is far stricter.
+  a fresh judge confirms each surviving (feature, quote) pair **one at a time**
+  (strict yes/no, reading only that pair) — "does THIS quote, on its own, clearly
+  describe THIS feature?" Only confirmed features are kept. A *batched* "confirm
+  this list" verifier rubber-stamped (it waved through "it lists a set, then a new"
+  → fractal_geometry); per-pair isolation is far stricter and catches both
+  valid-but-wrong and fragmentary quotes. Tiny yes/no calls, so N of them ≈ one
+  batched call.
   A genuine *moment of clarity inside otherwise-broken text still counts* (its
   quote is real) — we don't discard the whole report, we just discard ungrounded
   features. This replaced the original "gibberish self-regulates" assumption, which

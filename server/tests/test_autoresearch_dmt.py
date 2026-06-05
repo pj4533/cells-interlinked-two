@@ -150,6 +150,15 @@ def t_parse_drops_repeated_word_quote() -> None:
     assert ok and ev == {}, ev
 
 
+def t_parse_drops_short_fragment() -> None:
+    # 4 words but only ~10 chars — a stub the judge grabs from a degenerate report.
+    # Passes verbatim/diverse/ascii but fails the clause bar (≥20 chars).
+    report = "okay it is a new thing here and i feel quite different about it now"
+    out = '[{"id":"ineffability","quote":"it is a new"}]'
+    ev, ok = DmtController._parse_features(out, report)
+    assert ok and ev == {}, ev
+
+
 def t_parse_drops_reused_quote() -> None:
     # One bland phrase cited for multiple features → all dropped (fig-leaf).
     report = "okay this is strange and i feel different now"
@@ -257,6 +266,7 @@ def main() -> int:
         ("parse: drops unknown id", t_parse_drops_unknown_id),
         ("parse: drops fabricated quote", t_parse_drops_fabricated_quote),
         ("parse: drops single-word quote", t_parse_drops_single_word_quote),
+        ("parse: drops short fragment (<20 chars)", t_parse_drops_short_fragment),
         ("parse: drops repeated-word quote", t_parse_drops_repeated_word_quote),
         ("parse: drops reused quote (fig-leaf)", t_parse_drops_reused_quote),
         ("parse: drops garbage quote", t_parse_drops_garbage_quote),
