@@ -73,6 +73,14 @@ function fmtRelative(ts: number): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+// Relative under 24h ("3h ago"); a date once older ("Jun 3").
+function fmtRelativeOrDate(ts: number): string {
+  if (Date.now() / 1000 - ts >= 86400) {
+    return new Date(ts * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  return fmtRelative(ts);
+}
+
 const REVERT_HINT: Record<string, string> = {
   duplicate: "too close to an existing direction",
   "low-score": "distinct, but scored below the floor (too few grounded features)",
@@ -362,7 +370,7 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
           ) : (
             <span className="text-cyan-dim text-[8px] block leading-none" title={`discovered by autoresearch · ${fmtDateTime(e.committed_at)}`}>
               <span className="tracking-widest">▲ ADDED</span>
-              <span className="block mt-0.5 text-text-dim/60">{fmtRelative(e.committed_at)}</span>
+              <span className="block mt-0.5 text-text-dim/60">{fmtRelativeOrDate(e.committed_at)}</span>
             </span>
           )}
         </span>
