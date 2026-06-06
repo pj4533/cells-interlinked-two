@@ -133,6 +133,56 @@ export default function AutoresearchDmtPage() {
     (acc, e) => (!acc || e.committed_at > acc.committed_at ? e : acc), null,
   );
 
+  // Glanceable headline, split in half: LAST COMMIT · EXPORTABLE. Rendered twice
+  // (one visible per breakpoint): above the atlas on mobile, in the right rail on
+  // desktop — so on mobile the status sits above the list and the activity log
+  // stays below it.
+  const statusPanel = (
+    <div className="shrink-0 flex border-b border-rule/40 divide-x divide-rule/40">
+      <div className="flex-1 px-3 py-2 min-w-0 relative">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">LAST COMMIT</div>
+          {lastCommit ? (
+            <button
+              onClick={() => setCommitRel((v) => !v)}
+              className="text-[8px] font-display tracking-[0.2em] text-text-dim/50 hover:text-cyan transition-colors uppercase"
+              title="toggle absolute time / time since commit"
+            >
+              {commitRel ? "relative" : "absolute"}
+            </button>
+          ) : null}
+        </div>
+        {lastCommit ? (
+          <>
+            <div className="flex items-baseline gap-3 flex-wrap mt-0.5">
+              <div className="font-mono text-[26px] text-cyan tabular-nums leading-none" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
+                {commitRel ? fmtRelative(lastCommit.committed_at) : fmtTime(lastCommit.committed_at)}
+              </div>
+              <div className="font-mono text-[26px] tabular-nums leading-none" style={{ color: "#ff8fc0", textShadow: "0 0 10px rgba(255,77,157,0.3)" }} title="DMT features matched in the last commit">
+                {lastCommit.score}<span className="text-[12px] text-text-dim/70"> feat</span>
+              </div>
+            </div>
+            <div className="text-[10px] font-mono text-text-dim truncate mt-1">
+              {lastCommit.id}
+              {lastCommit.frontier_advance ? <span className="text-cyan"> ★</span> : null}
+            </div>
+          </>
+        ) : (
+          <div className="font-mono text-[13px] text-text-dim italic mt-1">— nothing committed yet —</div>
+        )}
+      </div>
+      <div className="flex-1 px-3 py-2 min-w-0">
+        <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">EXPORTABLE</div>
+        <div className="font-mono text-[26px] text-amber tabular-nums leading-none mt-0.5" style={{ textShadow: "0 0 10px rgba(232,195,130,0.3)" }}>
+          {exportable}
+        </div>
+        <div className="text-[10px] font-mono text-text-dim/60 truncate mt-1" title="discovered (non-seed) directions — stop the loop, then ⇪ export → palette">
+          discovered directions
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-bg text-text">
       {/* CRT scanline wash */}
@@ -200,6 +250,8 @@ export default function AutoresearchDmtPage() {
 
       {/* Body */}
       <div className="relative z-10 flex-1 min-h-0 grid lg:grid-cols-3 overflow-hidden">
+        {/* Mobile only: status above the atlas (desktop shows it in the right rail). */}
+        <div className="lg:hidden shrink-0">{statusPanel}</div>
         {/* Atlas + frontier (2 cols) */}
         <section className="lg:col-span-2 min-h-0 overflow-y-auto border-r border-rule/40 p-4">
           <div className="font-display text-[10px] tracking-widest text-amber-dim mb-1">THE ATLAS — committed directions</div>
@@ -241,50 +293,9 @@ export default function AutoresearchDmtPage() {
           };
           return (
             <aside className="min-h-0 flex flex-col bg-bg/30">
-              {/* Glanceable headline, split in half: LAST COMMIT · EXPORTABLE. */}
-              <div className="shrink-0 flex border-b border-rule/40 divide-x divide-rule/40">
-                <div className="flex-1 px-3 py-2 min-w-0 relative">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">LAST COMMIT</div>
-                    {lastCommit ? (
-                      <button
-                        onClick={() => setCommitRel((v) => !v)}
-                        className="text-[8px] font-display tracking-[0.2em] text-text-dim/50 hover:text-cyan transition-colors uppercase"
-                        title="toggle absolute time / time since commit"
-                      >
-                        {commitRel ? "relative" : "absolute"}
-                      </button>
-                    ) : null}
-                  </div>
-                  {lastCommit ? (
-                    <>
-                      <div className="flex items-baseline gap-3 flex-wrap mt-0.5">
-                        <div className="font-mono text-[26px] text-cyan tabular-nums leading-none" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
-                          {commitRel ? fmtRelative(lastCommit.committed_at) : fmtTime(lastCommit.committed_at)}
-                        </div>
-                        <div className="font-mono text-[26px] tabular-nums leading-none" style={{ color: "#ff8fc0", textShadow: "0 0 10px rgba(255,77,157,0.3)" }} title="DMT features matched in the last commit">
-                          {lastCommit.score}<span className="text-[12px] text-text-dim/70"> feat</span>
-                        </div>
-                      </div>
-                      <div className="text-[10px] font-mono text-text-dim truncate mt-1">
-                        {lastCommit.id}
-                        {lastCommit.frontier_advance ? <span className="text-cyan"> ★</span> : null}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="font-mono text-[13px] text-text-dim italic mt-1">— nothing committed yet —</div>
-                  )}
-                </div>
-                <div className="flex-1 px-3 py-2 min-w-0">
-                  <div className="text-[8px] font-display tracking-[0.3em] text-text-dim/70">EXPORTABLE</div>
-                  <div className="font-mono text-[26px] text-amber tabular-nums leading-none mt-0.5" style={{ textShadow: "0 0 10px rgba(232,195,130,0.3)" }}>
-                    {exportable}
-                  </div>
-                  <div className="text-[10px] font-mono text-text-dim/60 truncate mt-1" title="discovered (non-seed) directions — stop the loop, then ⇪ export → palette">
-                    discovered directions
-                  </div>
-                </div>
-              </div>
+              {/* Status headline — desktop only here; on mobile it renders above
+                  the atlas (see the lg:hidden copy at the top of the grid). */}
+              <div className="hidden lg:block shrink-0">{statusPanel}</div>
               <div className="shrink-0 flex border-b border-rule/40">
                 {tab("events", "✦ EVENTS", events.length, "text-cyan border-cyan bg-cyan/5")}
                 {tab("reverts", "⟲ REVERTS", reverts.length, "text-warning border-warning bg-warning/5")}
