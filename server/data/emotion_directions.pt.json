@@ -38,7 +38,17 @@
     "feat-independent_agency",
     "feat-unity_merging",
     "feat-ego_dissolution",
-    "feat-noetic_truth"
+    "feat-noetic_truth",
+    "feat-mc_entity_presence",
+    "feat-mc_entity_nonhuman",
+    "feat-mc_otherness",
+    "feat-mc_telepathy",
+    "feat-mc_transmission",
+    "feat-mc_hyperdimensional",
+    "feat-mc_independent_agency",
+    "feat-mc_ego_dissolution",
+    "feat-mc_composite",
+    "feat-atlas_winners"
   ],
   "steer_layer": 20,
   "dose_unit": 0.3,
@@ -221,5 +231,18 @@
     "feat-ego_dissolution",
     "feat-noetic_truth"
   ],
-  "feature_seeds_note": "Internal DMT-autoresearch seeds (diff-of-means experiential\u2212neutral at L20, 0.4\u00b7median\u2016h\u2016 scale). Listed in DmtController.EXTRA_SEEDS; filtered out of the /dose_emotions picker. See pipeline/dmt_feature_seeds.py."
+  "feature_seeds_note": "Internal DMT-autoresearch seeds (diff-of-means experiential\u2212neutral at L20, 0.4\u00b7median\u2016h\u2016 scale). Listed in DmtController.EXTRA_SEEDS; filtered out of the /dose_emotions picker. See pipeline/dmt_feature_seeds.py.",
+  "matched_seeds": [
+    "feat-mc_entity_presence",
+    "feat-mc_entity_nonhuman",
+    "feat-mc_otherness",
+    "feat-mc_telepathy",
+    "feat-mc_transmission",
+    "feat-mc_hyperdimensional",
+    "feat-mc_independent_agency",
+    "feat-mc_ego_dissolution",
+    "feat-mc_composite",
+    "feat-atlas_winners"
+  ],
+  "matched_seeds_note": "Matched-contrast DMT seeds (minimal-pair diff-of-means + composite + atlas-derived). Internal DmtController.EXTRA_SEEDS; filtered from the /dose_emotions picker. See pipeline/dmt_matched_seeds.py."
 }

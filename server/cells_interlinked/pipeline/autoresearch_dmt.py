@@ -39,9 +39,15 @@ from .autoresearch_base import (
 )
 from .dmt_features import DMT_FEATURES, FEATURE_IDS, features_block
 from .dmt_feature_seeds import FEATURE_SEED_NAMES
+from .dmt_matched_seeds import MATCHED_SEED_NAMES, SEEDED_MATCHED
 
 _FEATURE_BY_ID = {f["id"]: f for f in DMT_FEATURES}
-_FEATURE_SEED_SET = set(FEATURE_SEED_NAMES)
+# All internal seed directions (first feat-* batch + the matched-contrast batch).
+# Force-committed in _seed and prioritized as crossover partners in _crossover.
+# (MATCHED_SEED_NAMES is the full extracted set; only SEEDED_MATCHED is actually
+# seeded — see EXTRA_SEEDS — but membership here is harmless for the unseeded ones
+# since they never get committed.)
+_FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES)
 
 # Small fixed dose sweep — gentle-to-moderate, capped at 1.0. No bisect-to-cliff
 # (no coherence gate); the judge naturally scores gibberish low. Frozen for a
@@ -145,7 +151,7 @@ class DmtController(AutoresearchBase):
     # as crossover partners in `_crossover` so they are actively recombined with
     # the top scorers (the user's "throw them in the mix and make sure they're
     # used"). Built by scripts/compute_dmt_feature_seeds.py.
-    EXTRA_SEEDS = FEATURE_SEED_NAMES
+    EXTRA_SEEDS = FEATURE_SEED_NAMES + SEEDED_MATCHED
 
     # ── DMT feature scorer (separate Gemma context, deterministic) ──
     @staticmethod
