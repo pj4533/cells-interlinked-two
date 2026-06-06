@@ -125,6 +125,12 @@ class AutoresearchBase:
     EXPORT_RANK_KEY: str = "off_ortho"          # atlas field to rank export by (desc)
     EXPORT_META_FIELDS: tuple = ("off_ortho", "alpha_star", "parents", "generator")
     LOG_TAG: str = "autoresearch"
+    # Extra seed names pulled from the emotion palette in addition to the shared
+    # GOOD_EMOTIONS + UNCHARTED pool (subclasses override). DMT adds its
+    # diff-of-means feature directions (feat-*) here so they seed the atlas and
+    # become crossover material. Seeding is idempotent, so adding names here and
+    # restarting seeds only the new ones onto an existing atlas.
+    EXTRA_SEEDS: list[str] = []
 
     def __init__(self, app: Any = None) -> None:
         self.app = app
@@ -415,7 +421,7 @@ class AutoresearchBase:
         names = getattr(self.app.state, "emotion_names", []) or []
         if edirs is None or not names:
             raise RuntimeError("emotion_directions not loaded — cannot seed")
-        seed_names = [n for n in (GOOD_EMOTIONS + UNCHARTED) if n in names]
+        seed_names = [n for n in (GOOD_EMOTIONS + UNCHARTED + list(self.EXTRA_SEEDS)) if n in names]
         seed_vecs = {n: edirs[names.index(n)][STEER_LAYER].float() for n in seed_names}
         self._ref_mag = float(torch.tensor([v.norm() for v in seed_vecs.values()]).median())
         # working seed vectors, all normalized to the reference magnitude
@@ -441,9 +447,11 @@ class AutoresearchBase:
             alloc, driver = _mps_mem_gib()
             self._log("memory", f"baseline MPS {alloc:.1f}G live / {driver:.1f}G reserved (M resident)",
                       {"mps_alloc_gib": round(alloc, 2), "mps_driver_gib": round(driver, 2)})
-            if not self.atlas:
-                await self._seed()
-                _free_mps()
+            # Seed every start. _seed is idempotent (skips pool members already in
+            # the atlas), so a fresh run seeds all of them and a resume seeds only
+            # newly-added seeds (e.g. DMT's feat-* directions) onto the saved atlas.
+            await self._seed()
+            _free_mps()
             n = 0
             while not self._stop_requested and (budget is None or n < budget):
                 cand = self._make_candidate()

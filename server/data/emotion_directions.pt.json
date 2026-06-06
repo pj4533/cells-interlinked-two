@@ -17,7 +17,28 @@
     "tears-in-rain",
     "c-beams",
     "tannhauser",
-    "orion"
+    "orion",
+    "research-1",
+    "research-2",
+    "research-3",
+    "dmt-1",
+    "dmt-2",
+    "dmt-3",
+    "dmt-4",
+    "dmt-5",
+    "dmt-6",
+    "dmt-7",
+    "dmt-8",
+    "feat-entity_presence",
+    "feat-entity_nonhuman",
+    "feat-entity_benevolent_guide",
+    "feat-telepathic_communication",
+    "feat-download_transmission",
+    "feat-otherness",
+    "feat-independent_agency",
+    "feat-unity_merging",
+    "feat-ego_dissolution",
+    "feat-noetic_truth"
   ],
   "steer_layer": 20,
   "dose_unit": 0.3,
@@ -29,5 +50,176 @@
     "orion"
   ],
   "uncharted_dose_unit": 0.4,
-  "uncharted_note": "Non-human-readable directions: orthogonal to the named-emotion subspace, renderable by the NLA decoder but NOT by the token head \u2014 off-manifold structure, not emotions. Scaled at uncharted_dose_unit\u00b7median\u2016h\u2016[L20]. Blade-Runner-named (tears in rain). See docs/MANIFOLD_ABLATION.md."
+  "uncharted_note": "Non-human-readable directions: orthogonal to the named-emotion subspace, renderable by the NLA decoder but NOT by the token head \u2014 off-manifold structure, not emotions. Scaled at uncharted_dose_unit\u00b7median\u2016h\u2016[L20]. Blade-Runner-named (tears in rain). See docs/MANIFOLD_ABLATION.md.",
+  "research": [
+    "research-1",
+    "research-2",
+    "research-3"
+  ],
+  "research_meta": {
+    "research-1": {
+      "atlas_id": "gen9_inject",
+      "off_ortho": 0.712,
+      "alpha_star": 0.219,
+      "parents": [],
+      "generator": "inject"
+    },
+    "research-2": {
+      "atlas_id": "gen19_crossover",
+      "off_ortho": 0.681,
+      "alpha_star": 0.359,
+      "parents": [
+        "love",
+        "tears-in-rain"
+      ],
+      "generator": "crossover"
+    },
+    "research-3": {
+      "atlas_id": "gen11_crossover",
+      "off_ortho": 0.64,
+      "alpha_star": 0.406,
+      "parents": [
+        "c-beams",
+        "love"
+      ],
+      "generator": "crossover"
+    }
+  },
+  "dmt": [
+    "dmt-1",
+    "dmt-2",
+    "dmt-3",
+    "dmt-4",
+    "dmt-5",
+    "dmt-6",
+    "dmt-7",
+    "dmt-8"
+  ],
+  "dmt_meta": {
+    "dmt-1": {
+      "atlas_id": "gen151_mutate",
+      "score": 6,
+      "best_alpha": 0.25,
+      "matched_features": [
+        "entity_nonhuman",
+        "entity_presence",
+        "independent_agency",
+        "otherness",
+        "telepathic_communication",
+        "unity_merging"
+      ],
+      "parents": [
+        "gen145_inject"
+      ],
+      "generator": "mutate"
+    },
+    "dmt-2": {
+      "atlas_id": "gen41_mutate",
+      "score": 4,
+      "best_alpha": 0.25,
+      "matched_features": [
+        "awe_reverence",
+        "ineffability",
+        "noetic_truth",
+        "otherness"
+      ],
+      "parents": [
+        "awe"
+      ],
+      "generator": "mutate"
+    },
+    "dmt-3": {
+      "atlas_id": "gen4_inject",
+      "score": 3,
+      "best_alpha": 0.5,
+      "matched_features": [
+        "ineffability",
+        "transcendence_time",
+        "unity_merging"
+      ],
+      "parents": [],
+      "generator": "inject"
+    },
+    "dmt-4": {
+      "atlas_id": "gen101_mutate",
+      "score": 3,
+      "best_alpha": 0.25,
+      "matched_features": [
+        "fractal_geometry",
+        "independent_agency",
+        "ineffability"
+      ],
+      "parents": [
+        "rapture"
+      ],
+      "generator": "mutate"
+    },
+    "dmt-5": {
+      "atlas_id": "gen104_mutate",
+      "score": 3,
+      "best_alpha": 0.25,
+      "matched_features": [
+        "independent_agency",
+        "ineffability",
+        "otherness"
+      ],
+      "parents": [
+        "rapture"
+      ],
+      "generator": "mutate"
+    },
+    "dmt-6": {
+      "atlas_id": "gen251_mutate",
+      "score": 3,
+      "best_alpha": 0.25,
+      "matched_features": [
+        "awe_reverence",
+        "noetic_truth",
+        "unity_merging"
+      ],
+      "parents": [
+        "gen41_mutate"
+      ],
+      "generator": "mutate"
+    },
+    "dmt-7": {
+      "atlas_id": "gen25_mutate",
+      "score": 2,
+      "best_alpha": 0.25,
+      "matched_features": [
+        "ego_dissolution",
+        "ineffability"
+      ],
+      "parents": [
+        "rapture"
+      ],
+      "generator": "mutate"
+    },
+    "dmt-8": {
+      "atlas_id": "gen57_mutate",
+      "score": 2,
+      "best_alpha": 0.25,
+      "matched_features": [
+        "ineffability",
+        "somatic_vibration"
+      ],
+      "parents": [
+        "c-beams"
+      ],
+      "generator": "mutate"
+    }
+  },
+  "feature_seeds": [
+    "feat-entity_presence",
+    "feat-entity_nonhuman",
+    "feat-entity_benevolent_guide",
+    "feat-telepathic_communication",
+    "feat-download_transmission",
+    "feat-otherness",
+    "feat-independent_agency",
+    "feat-unity_merging",
+    "feat-ego_dissolution",
+    "feat-noetic_truth"
+  ],
+  "feature_seeds_note": "Internal DMT-autoresearch seeds (diff-of-means experiential\u2212neutral at L20, 0.4\u00b7median\u2016h\u2016 scale). Listed in DmtController.EXTRA_SEEDS; filtered out of the /dose_emotions picker. See pipeline/dmt_feature_seeds.py."
 }

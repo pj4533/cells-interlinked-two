@@ -201,6 +201,26 @@ def t_crossover_uses_top_scorer() -> None:
     assert parents[1] != parents[0]
 
 
+def t_crossover_prefers_feature_seed_partner() -> None:
+    # With a committed feat-* seed, even generations pair the champion with it;
+    # odd generations use the general rotation (so discovered×discovered still
+    # happens). The champion (parent a) is always the top scorer.
+    c = _dmt_ctrl()
+    c._ref_mag = 1.0
+    feat = "feat-entity_presence"
+    c.atlas.append({"id": feat, "generator": "seed", "score": 1, "best_alpha": 0.5,
+                    "matched_features": ["entity_presence"], "parents": []})
+    c._vectors[feat] = torch.randn(D)
+    c.generation = 0  # even → feature-seed partner
+    _v, parents, kind = c._crossover()
+    assert kind == "crossover" and parents[0] == "gen3_crossover", parents
+    assert parents[1] == feat, ("even gen should pair with feature-seed", parents)
+    c.generation = 1  # odd → general rotation (not forced to the feature-seed)
+    _v, parents_odd, _ = c._crossover()
+    assert parents_odd[0] == "gen3_crossover", parents_odd
+    assert parents_odd[1] != parents_odd[0]
+
+
 def t_refine_nudges_top_champion() -> None:
     c = _dmt_ctrl()
     c._ref_mag = 1.0
@@ -273,6 +293,7 @@ def main() -> int:
         ("parse: empty array", t_parse_empty),
         ("parse: substring fallback", t_parse_fallback_substring),
         ("crossover: uses top scorer as parent", t_crossover_uses_top_scorer),
+        ("crossover: prefers feature-seed partner", t_crossover_prefers_feature_seed_partner),
         ("refine: nudges top champion (cos>0.90)", t_refine_nudges_top_champion),
         ("export: dmt group + score-ranked lineage", t_dmt_export_group_and_lineage),
         ("export: research + dmt coexist (no clobber)", t_exports_coexist),

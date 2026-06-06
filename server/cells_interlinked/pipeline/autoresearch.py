@@ -218,9 +218,12 @@ class OffManifoldController(AutoresearchBase):
     async def _seed(self):
         lead = self.app.state.bundle.render_prompt(LEAD_PROMPT, system_prompt=None)
         basis0, _, _ = await self._raw_for(lead)
+        committed = set(self._committed_ids())
         for name, v in self._seed_vecs.items():
             if self._stop_requested:
                 break
+            if name in committed:
+                continue  # idempotent: already seeded on a prior run
             self.current = {"id": name, "generator": "seed", "stage": "T1"}
             alpha_star, ev = await self._bisect_to_cliff(lead, v, basis0)
             if ev is None or alpha_star <= 0:

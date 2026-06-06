@@ -141,7 +141,10 @@ async def dose_emotions(request: Request) -> dict:
     `emotions` = all selectable names; `uncharted` = the subset that are NOT
     emotions but non-human-readable off-manifold directions (so the UI can group
     + caveat them honestly). Empty `emotions` ⇒ dose mode unavailable."""
-    names = getattr(request.app.state, "emotion_names", []) or []
+    # feat-* are internal DMT-autoresearch seeds (diff-of-means feature directions),
+    # not user-facing doses — keep them out of the picker entirely.
+    names = [n for n in (getattr(request.app.state, "emotion_names", []) or [])
+             if not n.startswith("feat-")]
     uncharted: list[str] = []
     research: list[str] = []
     research_meta: dict = {}

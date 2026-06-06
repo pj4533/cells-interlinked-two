@@ -38,8 +38,10 @@ from .autoresearch_base import (
     _unit,
 )
 from .dmt_features import DMT_FEATURES, FEATURE_IDS, features_block
+from .dmt_feature_seeds import FEATURE_SEED_NAMES
 
 _FEATURE_BY_ID = {f["id"]: f for f in DMT_FEATURES}
+_FEATURE_SEED_SET = set(FEATURE_SEED_NAMES)
 
 # Small fixed dose sweep — gentle-to-moderate, capped at 1.0. No bisect-to-cliff
 # (no coherence gate); the judge naturally scores gibberish low. Frozen for a
@@ -138,6 +140,12 @@ class DmtController(AutoresearchBase):
     EXPORT_RANK_KEY = "score"
     EXPORT_META_FIELDS = ("score", "best_alpha", "matched_features", "parents", "generator")
     LOG_TAG = "autoresearch-dmt"
+    # Diff-of-means DMT feature directions (entities, otherness, dissolution, …)
+    # seeded alongside the emotion pool. Force-committed in `_seed` and preferred
+    # as crossover partners in `_crossover` so they are actively recombined with
+    # the top scorers (the user's "throw them in the mix and make sure they're
+    # used"). Built by scripts/compute_dmt_feature_seeds.py.
+    EXTRA_SEEDS = FEATURE_SEED_NAMES
 
     # ── DMT feature scorer (separate Gemma context, deterministic) ──
     @staticmethod
@@ -288,14 +296,24 @@ class DmtController(AutoresearchBase):
     # ── generator override: crossover from the best ──────────────
     def _crossover(self):
         """DMT: blend the top-scoring direction with a rotating partner (so we
-        keep building from the best without dedup-stalling on a static top-2)."""
+        keep building from the best without dedup-stalling on a static top-2).
+
+        Feature-seeds are PRIORITIZED as the partner: on even generations, if any
+        feat-* direction is committed, pair the champion with one (rotating). This
+        is the user's "make sure they're combined with the top scoring ones" — it
+        guarantees the entity/otherness/dissolution directions are actively
+        recombined with the best, not just left sitting in the atlas. Odd
+        generations use the general rotation so discovered×discovered blends still
+        happen."""
         ids = self._committed_ids()
         if len(ids) < 2:
             return None
         ranked = sorted(ids, key=lambda i: -self._atlas_score(i))
         a = ranked[0]
-        others = ranked[1:]
-        b = others[self.generation % len(others)]
+        feat = [i for i in ranked if i in _FEATURE_SEED_SET and i != a]
+        others = [i for i in ranked if i != a]
+        pool = feat if (feat and self.generation % 2 == 0) else others
+        b = pool[self.generation % len(pool)]
         w = 0.35 + 0.3 * ((self.generation % 3) / 2.0)      # 0.35 / 0.5 / 0.65
         va, vb = _unit(self._vectors[a]), _unit(self._vectors[b])
         v = _unit(w * va + (1 - w) * vb) * self._ref_mag
@@ -334,12 +352,20 @@ class DmtController(AutoresearchBase):
 
     # ── seed ─────────────────────────────────────────────────────
     async def _seed(self):
+        committed = set(self._committed_ids())
         for name, v in self._seed_vecs.items():
             if self._stop_requested:
                 break
+            if name in committed:
+                continue  # idempotent: already seeded on a prior run
             self.current = {"id": name, "generator": "seed", "stage": "score"}
             res = await self._score_candidate(v)
-            if res["score"] < MIN_FEATURES_TO_COMMIT:
+            # Feature-seeds (feat-*) are force-committed regardless of solo score:
+            # the user wants them in the pool as recombination material even if
+            # they don't score on their own (a weak solo direction can still be
+            # good crossover fuel). Emotion/uncharted seeds keep the floor.
+            is_feat = name in _FEATURE_SEED_SET
+            if not is_feat and res["score"] < MIN_FEATURES_TO_COMMIT:
                 self._revert(name, "seed", [], "seed-no-features", f"score={res['score']}")
                 continue
             entry = self._make_entry(name, [], "seed", res)
