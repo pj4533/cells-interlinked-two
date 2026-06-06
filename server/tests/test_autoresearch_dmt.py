@@ -221,6 +221,36 @@ def t_crossover_prefers_feature_seed_partner() -> None:
     assert parents_odd[1] != parents_odd[0]
 
 
+def t_burst_explodes_leader_cluster() -> None:
+    # While _burst_remaining > 0, _make_candidate yields burst candidates
+    # (refine/mutate of the top cluster + inject), decrementing each time.
+    c = _dmt_ctrl()
+    c._ref_mag = 1.0
+    c._burst_remaining = 4
+    kinds = []
+    for _ in range(4):
+        v, parents, kind = c._make_candidate()
+        kinds.append(kind)
+    assert c._burst_remaining == 0, c._burst_remaining
+    assert set(kinds) <= {"refine", "mutate", "inject"}, kinds
+    assert "inject" in kinds, ("burst should include a discovery shot", kinds)
+    # after the burst, normal generation resumes (no burst flag)
+    v, parents, kind = c._make_candidate()
+    assert kind in {"crossover", "mutate", "refine", "inject"}, kind
+
+
+def t_rank_key_breaks_ties_on_fine() -> None:
+    # Two same-integer-score directions: the one with higher score_fine ranks first.
+    c = _dmt_ctrl()
+    c.atlas = [
+        {"id": "a", "generator": "mutate", "score": 3, "score_fine": 3.10},
+        {"id": "b", "generator": "mutate", "score": 3, "score_fine": 3.40},
+    ]
+    c._vectors = {"a": torch.randn(D), "b": torch.randn(D)}
+    ranked = sorted(c._committed_ids(), key=c._rank_key)
+    assert ranked[0] == "b", ranked  # higher fine wins the tie
+
+
 def t_refine_nudges_top_champion() -> None:
     c = _dmt_ctrl()
     c._ref_mag = 1.0
@@ -294,6 +324,8 @@ def main() -> int:
         ("parse: substring fallback", t_parse_fallback_substring),
         ("crossover: uses top scorer as parent", t_crossover_uses_top_scorer),
         ("crossover: prefers feature-seed partner", t_crossover_prefers_feature_seed_partner),
+        ("burst: explodes leader cluster", t_burst_explodes_leader_cluster),
+        ("rank_key: breaks ties on score_fine", t_rank_key_breaks_ties_on_fine),
         ("refine: nudges top champion (cos>0.90)", t_refine_nudges_top_champion),
         ("export: dmt group + score-ranked lineage", t_dmt_export_group_and_lineage),
         ("export: research + dmt coexist (no clobber)", t_exports_coexist),

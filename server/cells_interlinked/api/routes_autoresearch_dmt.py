@@ -16,11 +16,21 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
-from .routes_autoresearch import ExportRequest, StartRequest
+from .routes_autoresearch import ExportRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class DmtStartRequest(BaseModel):
+    # None = run until stopped. Otherwise stop after this many candidates.
+    budget: int | None = Field(default=None, ge=1, le=100000)
+    # One-shot leader burst: first N candidates explode the top-cluster
+    # neighborhood (mutate/refine of the leaders + fresh injects) before normal
+    # generation resumes. 0 = no burst.
+    burst: int = Field(default=0, ge=0, le=1000)
 
 
 def _controller(request: Request):
@@ -31,8 +41,8 @@ def _controller(request: Request):
 
 
 @router.post("/autoresearch-dmt/start")
-async def dmt_start(req: StartRequest, request: Request) -> dict:
-    return await _controller(request).start(budget=req.budget)
+async def dmt_start(req: DmtStartRequest, request: Request) -> dict:
+    return await _controller(request).start(budget=req.budget, burst=req.burst)
 
 
 @router.post("/autoresearch-dmt/stop")

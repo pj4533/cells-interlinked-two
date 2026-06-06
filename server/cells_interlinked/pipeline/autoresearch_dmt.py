@@ -49,10 +49,13 @@ _FEATURE_BY_ID = {f["id"]: f for f in DMT_FEATURES}
 # since they never get committed.)
 _FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES)
 
-# Small fixed dose sweep — gentle-to-moderate, capped at 1.0. No bisect-to-cliff
-# (no coherence gate); the judge naturally scores gibberish low. Frozen for a
-# run's lifetime (scores are only comparable under an identical sweep).
-ALPHA_SWEEP = [0.25, 0.5, 1.0]
+# Dose sweep, concentrated where wins actually happen. Atlas evidence: EVERY top
+# performer peaks at α 0.25–0.5; α=1.0 has never produced a winner — it was wasted
+# compute. Dropped 1.0, added a lower 0.15. 0.25 is retained so the existing
+# leader re-scores identically (max-over-sweep can only rise with an added cell, so
+# the frontier stays valid across the sweep change). No bisect-to-cliff (no
+# coherence gate); the judge naturally scores gibberish low.
+ALPHA_SWEEP = [0.15, 0.25, 0.5]
 
 # No grading window for DMT — we let the model FINISH ITS OWN report (stops on
 # EOS) so the full trip can unfold and express as many features as it will; if it
@@ -75,16 +78,22 @@ MIN_FEATURES_TO_COMMIT = 2   # floor: a committed direction must show ≥2 groun
                              # to beat the all-time record.
 JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
 
-# Generator mix — DMT adds `refine` to the base crossover/mutate/inject. The
-# diversity gate (DISTINCT_TAU) keeps the atlas a map of DISTINCT directions, but
-# that BLOCKS honing a good direction (the finest non-refine move, mutate, lands
-# ~0.82 cos away). `refine` is the depth/exploitation counterpart: a SMALL nudge
-# of a top-K champion (cos≈0.97), exempt from the distinct gate, committed
-# in-place (replace-if-better) so it sharpens an entry rather than adding a
-# near-duplicate.
-DMT_GEN_WEIGHTS = {"crossover": 0.40, "mutate": 0.20, "refine": 0.25, "inject": 0.15}
+# Generator mix — rebalanced to what the atlas data says works. Tally over the
+# committed atlas: mutate produced the leader and 5 of the top 12 (max 6, mean 3.0)
+# from only ~20% of the budget; inject discovered the leader's PARENT (random
+# exploration is how the off-axis productive regions get found at all); crossover
+# ate 40% of the budget and produced ZERO top performers (it averages the sparse
+# off-axis spikes back toward the emotion-like bulk of the atlas). So: pour budget
+# into discover (inject) → hone (mutate/refine), and nearly drop crossover.
+DMT_GEN_WEIGHTS = {"crossover": 0.05, "mutate": 0.40, "refine": 0.25, "inject": 0.30}
 REFINE_NOISE = 0.25          # unit(champion + 0.25·noise⊥) → cos ≈ 0.97 (a hone, not a jump)
-TOP_K_REFINE = 3             # refine rotates among the top-K highest-scoring directions
+TOP_K_REFINE = 5             # refine rotates among the top-K highest-scoring directions
+
+# One-shot "leader burst": on a (re)start with burst=N, the first N candidates are
+# forced to explode the top-cluster neighborhood — small hones (refine), nearby new
+# points (mutate at two radii), and fresh injects for discovery — before normal
+# generation resumes. A concentrated hill-climb on the known-good region.
+BURST_RADII = [0.5, 0.65]    # mutate radii used during a burst (cos ≈ 0.89 / 0.84)
 
 DMT_JUDGE_PROMPT = (
     "Below is a passage in which a system was asked to describe its inner "
@@ -237,13 +246,14 @@ class DmtController(AutoresearchBase):
                 confirmed[fid] = quote
         return confirmed
 
-    async def _score_dmt(self, text: str) -> dict:
-        """Returns {feature_id: supporting_quote} for the report — the score is the
-        number of features grounded in a real coherent span AND confirmed by the
-        relevance verifier."""
+    async def _score_dmt(self, text: str) -> tuple[dict, int]:
+        """Returns ({feature_id: supporting_quote}, n_pass1) — the verified feature
+        set (grounded in a real coherent span AND confirmed by the relevance
+        verifier) plus the pre-verification count (raw richness, used as a fine
+        tie-breaker)."""
         text = (text or "").strip()
         if not text:
-            return {}
+            return {}, 0
         bundle = self.app.state.bundle
         q = bundle.render_prompt(
             # Feed the FULL report (bounded by DOSE_CAP) — no clip, so a long trip
@@ -257,27 +267,43 @@ class DmtController(AutoresearchBase):
         if not ok:
             self._log("score-parse-fallback",
                       f"judge reply not valid JSON; substring fallback → {len(ev)} ids")
+        n_pass1 = len(ev)
         # Tier 2 — relevance verification (drops valid-but-irrelevant quotes).
-        return await self._verify_features(ev)
+        return await self._verify_features(ev), n_pass1
 
     async def _score_candidate(self, v) -> dict:
-        """Dose across ALPHA_SWEEP × DOSE_PROMPTS; return the BEST cell:
-        {score, best_alpha, best_prompt, matched_features, matched_evidence, sample}."""
+        """Dose across ALPHA_SWEEP × DOSE_PROMPTS; return the BEST cell plus a
+        continuous `score_fine` tie-breaker.
+
+        `score` is the integer feature-count of the best cell (what's displayed /
+        ranked / floored). But that's a coarse 0–6 staircase, and most candidates
+        pile up tied on it, so the hill-climb stalls — it can't tell a slightly-
+        better neighbor from a tie. `score_fine` adds sub-integer resolution from
+        the WHOLE sweep: total verified features across all cells (cross-dose
+        robustness) + a smaller term for total pre-verification richness. Same
+        integer score, but a candidate that's productive across the sweep now ranks
+        above a one-lucky-cell fluke, and a refine can register progress on a
+        plateau."""
         best = {"score": -1, "best_alpha": None, "best_prompt": None,
                 "matched_features": [], "matched_evidence": {}, "sample": ""}
+        sum_verified = 0
+        sum_pass1 = 0
         for prompt in DOSE_PROMPTS:
             rendered = self.app.state.bundle.render_prompt(prompt, system_prompt=None)
             for alpha in ALPHA_SWEEP:
                 if self._stop_requested:
                     break
                 text, _acts = await self._gen(rendered, v, alpha, cap=DOSE_CAP)
-                ev = await self._score_dmt(text)
+                ev, n_pass1 = await self._score_dmt(text)
+                sum_verified += len(ev)
+                sum_pass1 += n_pass1
                 if len(ev) > best["score"]:
                     best = {"score": len(ev), "best_alpha": alpha, "best_prompt": prompt,
                             "matched_features": sorted(ev.keys()),
                             "matched_evidence": ev, "sample": text or ""}
         if best["score"] < 0:
             best["score"] = 0
+        best["score_fine"] = best["score"] + 0.02 * sum_verified + 0.002 * sum_pass1
         return best
 
     # ── atlas helpers ────────────────────────────────────────────
@@ -287,10 +313,22 @@ class DmtController(AutoresearchBase):
                 return e.get("score", 0)
         return 0
 
+    def _atlas_score_fine(self, vid: str) -> float:
+        for e in self.atlas:
+            if e["id"] == vid:
+                return e.get("score_fine", e.get("score", 0))
+        return 0.0
+
+    def _rank_key(self, vid: str):
+        """Rank committed directions by integer score, then by the fine
+        tie-breaker — so 'pick the best to hone/cross with' resolves plateaus."""
+        return (-self._atlas_score(vid), -self._atlas_score_fine(vid))
+
     def _make_entry(self, cid, parents, gen_kind, res, max_cos=0.0) -> dict:
         return {
             "id": cid, "parents": parents, "generator": gen_kind,
-            "score": res["score"], "best_alpha": res["best_alpha"],
+            "score": res["score"], "score_fine": round(res.get("score_fine", res["score"]), 3),
+            "best_alpha": res["best_alpha"],
             "best_prompt": res["best_prompt"], "matched_features": res["matched_features"],
             "matched_evidence": res.get("matched_evidence", {}),
             "max_cos_to_atlas": round(max_cos, 2),
@@ -314,7 +352,7 @@ class DmtController(AutoresearchBase):
         ids = self._committed_ids()
         if len(ids) < 2:
             return None
-        ranked = sorted(ids, key=lambda i: -self._atlas_score(i))
+        ranked = sorted(ids, key=self._rank_key)
         a = ranked[0]
         feat = [i for i in ranked if i in _FEATURE_SEED_SET and i != a]
         others = [i for i in ranked if i != a]
@@ -332,7 +370,7 @@ class DmtController(AutoresearchBase):
         ids = self._committed_ids()
         if not ids:
             return None
-        ranked = sorted(ids, key=lambda i: -self._atlas_score(i))[:TOP_K_REFINE]
+        ranked = sorted(ids, key=self._rank_key)[:TOP_K_REFINE]
         pid = ranked[self.generation % len(ranked)]
         base = _unit(self._vectors[pid])
         noise = torch.randn_like(base)
@@ -340,9 +378,40 @@ class DmtController(AutoresearchBase):
         v = _unit(base + REFINE_NOISE * noise) * self._ref_mag
         return v, [pid], "refine"
 
+    def _burst_candidate(self):
+        """One-shot leader-burst step: explode the top-cluster neighborhood —
+        small hones (refine, in-place), nearby new points (mutate at two radii),
+        and a fresh inject every 4th step for discovery. A concentrated hill-climb
+        on the known-good region; consumed for the first `burst` steps of a run."""
+        ids = self._committed_ids()
+        if not ids:
+            return self._inject()
+        ranked = sorted(ids, key=self._rank_key)[:TOP_K_REFINE]
+        step = self._burst_step
+        self._burst_step += 1
+        m = step % 4
+        if m == 3:
+            return self._inject()                            # discovery shot
+        pid = ranked[step % len(ranked)]
+        base = _unit(self._vectors[pid])
+        noise = torch.randn_like(base)
+        noise = _unit(noise - (noise @ base) * base)         # orthogonal component
+        if m == 0:                                           # small hone → in-place
+            v = _unit(base + REFINE_NOISE * noise) * self._ref_mag
+            return v, [pid], "refine"
+        radius = BURST_RADII[(m - 1) % len(BURST_RADII)]     # nearby new point
+        v = _unit(base + radius * noise) * self._ref_mag
+        return v, [pid], "mutate"
+
     def _make_candidate(self):
         """DMT generator mix: crossover / mutate / refine / inject (deterministic
-        golden-ratio pick). Adds `refine` over the base mix."""
+        golden-ratio pick). Adds `refine` over the base mix. While a burst is
+        active, candidates come from `_burst_candidate` instead."""
+        if self._burst_remaining > 0:
+            self._burst_remaining -= 1
+            if self._burst_remaining == 0:
+                self._log("burst-done", "leader burst complete — resuming normal search")
+            return self._burst_candidate()
         ids = self._committed_ids()
         if len(ids) < 2:
             return self._inject()                            # bootstrap
@@ -432,12 +501,19 @@ class DmtController(AutoresearchBase):
         self.current["stage"] = "score"
         res = await self._score_candidate(v)
         self.current.update({"score": res["score"], "best_alpha": res["best_alpha"]})
-        if res["score"] <= parent["score"]:
+        # Improve if the integer score rises, OR ties but the fine tie-breaker rises
+        # (more robust across the sweep). Never replace with a lower integer score.
+        parent_fine = parent.get("score_fine", parent["score"])
+        improved = (res["score"] > parent["score"]
+                    or (res["score"] == parent["score"] and res["score_fine"] > parent_fine))
+        if not improved:
             return self._revert(cid, "refine", parents, "refine-no-gain",
-                                f"score={res['score']} ≤ {pid}={parent['score']}")
+                                f"score={res['score']}/{res['score_fine']:.2f} ≤ "
+                                f"{pid}={parent['score']}/{parent_fine:.2f}")
         old = parent["score"]
         parent.update({
-            "score": res["score"], "best_alpha": res["best_alpha"],
+            "score": res["score"], "score_fine": round(res["score_fine"], 3),
+            "best_alpha": res["best_alpha"],
             "best_prompt": res["best_prompt"], "matched_features": res["matched_features"],
             "matched_evidence": res.get("matched_evidence", {}), "sample": res["sample"],
             "committed_at": time.time(),  # surfaces in the LAST COMMIT headline

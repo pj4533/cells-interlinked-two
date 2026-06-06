@@ -145,6 +145,11 @@ class AutoresearchBase:
         self.events: deque = deque(maxlen=400)
         self.current: dict | None = None
         self.started_at: float | None = None
+        # One-shot "leader burst" (DMT): when >0, the first N candidates of a run
+        # come from the burst generator (explode the top-cluster neighborhood)
+        # before normal generation resumes. Set per-run via start(burst=N).
+        self._burst_remaining = 0
+        self._burst_step = 0
         # runtime-only (not serialized)
         self._vectors: dict = {}
         self._ref_mag: float = 1.0
@@ -167,7 +172,7 @@ class AutoresearchBase:
                 return True
         return False
 
-    async def start(self, budget: int | None = None) -> dict:
+    async def start(self, budget: int | None = None, burst: int = 0) -> dict:
         if self._running:
             return {"ok": True, "already_running": True}
         bundle = getattr(self.app.state, "bundle", None)
@@ -187,8 +192,11 @@ class AutoresearchBase:
         self._cancel = asyncio.Event()
         self._running = True
         self.started_at = time.time()
+        self._burst_remaining = int(burst or 0)
+        self._burst_step = 0
         setattr(self.app.state, self.ACTIVE_FLAG, True)
-        self._log("started", f"loop started (budget={budget or '∞'})")
+        self._log("started", f"loop started (budget={budget or '∞'}"
+                  f"{f', burst={self._burst_remaining}' if self._burst_remaining else ''})")
         self._loop_task = asyncio.create_task(self._run_loop(budget))
         return {"ok": True, "already_running": False}
 
@@ -218,6 +226,7 @@ class AutoresearchBase:
             "recent_events": list(self.events)[-60:],
             "current": self.current,
             "exportable": len([e for e in self.atlas if e["generator"] != "seed"]),
+            "burst_remaining": self._burst_remaining,
         }
 
     # ── export discovered directions into the dose palette ───────
