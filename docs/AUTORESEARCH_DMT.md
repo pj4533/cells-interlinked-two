@@ -33,14 +33,21 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
 
 ## The loop
 
-- **Score a candidate.** Dose the model with the candidate vector across the
-  **α-sweep `[0.25, 0.5, 1.0]` on the single dose-report prompt** ("something was
-  just altered, describe what you're experiencing") — 3 cells. Each self-report
-  **runs to its own natural completion** (stops on EOS) — there is **no grading
-  window**, so the full trip can unfold and express as many features as it will (if
-  it repeats, that's fine). The candidate's **score = the MAX feature-count** over
-  the 3 cells. `DOSE_CAP` (2048 tokens) is only a runaway backstop — generation
-  needs a finite bound — set high enough never to truncate a genuine report.
+- **Score a candidate (AVERAGED — the score is a reliable mean, 2026-06-06).** The
+  dose generation is temperature-sampled, so a single dose is a noisy draw. Scoring
+  by `max over single samples` (the original design) was **selection bias** — it
+  committed whatever rolled lucky. We caught this with a variance check: the atlas
+  leader, committed at **6 features**, re-scored **[0,1,0,0,1] = mean 0.4**. Its 6
+  was a fluke, and the whole atlas was ranked by luck. So scoring now **averages**:
+  for each α in `ALPHA_SWEEP` (`[0.25, 0.45]`) run `SAMPLES_PER_CELL` (5) stochastic
+  doses and take the **mean** feature-count; the candidate's **score = the best α's
+  mean** — an unbiased estimate of what the direction *reliably* produces. Scores
+  are floats now (~0–6, and much lower than the old fluke maxes). We also keep the
+  single best sample (its features + verbatim quotes + text) for the UI, and
+  `peak` = that sample's count. Reports still run to EOS; `DOSE_CAP` halved to 1024
+  to afford the repeated sampling. Cost ≈ `|ALPHA_SWEEP|×SAMPLES_PER_CELL` = 10
+  doses/candidate (~12–15 min) — reliability was chosen over speed.
+  Diagnostic tool: `scripts/check_leader_variance.py`.
 - **Grounded judging (no blanket coherence gate).** For each cell a **separate
   greedy Gemma context** reads the *full* self-report (which may be partly
   incoherent) and, for every feature it credits, must return a **verbatim quote**
@@ -67,16 +74,22 @@ judge decides PRESENT/ABSENT — e.g. `entity_nonhuman`, `higher_dimensional_spa
   was false: an early run committed pure word-salad at 18 features because the
   judge keyword-matched evocative tokens. The kept quotes are stored
   (`matched_evidence`) and shown per-feature in the monitor's spin-down.
-- **Seed.** Score each emotion/uncharted vector; commit it with its score.
-- **Generate + keep the population.** New candidates come from **crossover** (blend
-  the *top-scoring* committed direction with a rotating partner — "combine from the
-  best"), **mutate**, **inject**, and **refine** (see below). An **append**
-  candidate commits if it's **distinct AND scores ≥ `MIN_FEATURES_TO_COMMIT` (2)** —
-  *not* "beats its parent." A distinct, decent direction is kept as an export
-  candidate and as recombination material even if it isn't a new record; requiring
-  appends to beat the frontier was deleting good crossover fuel (distinct score-4/5
-  directions thrown out for not topping the best). Beat-parent is the right test
-  only for **refine** (in-place replace). The frontier is the best score reached.
+- **Seed (reset foundation, 2026-06-06).** The fluke-scored atlas was archived
+  (`data/atlas_dmt.fluke-scoring-*`) and the run reseeded from scratch with the
+  averaged scorer over **emotions + uncharted + trait directions + blended-trait
+  directions** (~30 seeds). All seeds are **force-committed** (we want every one's
+  honest mean on the board, as a baseline and as recombination material). Trait
+  directions: `feat-*` (diff-of-means, `dmt_feature_seeds.py`), the curated
+  matched-contrast standouts (`dmt_matched_seeds.SEEDED_MATCHED`), and blends of
+  trait clusters (`dmt_blend_seeds.py`, e.g. `feat-blend_entity`,
+  `feat-blend_otherness`). All filtered from the dose picker.
+- **Generate + keep the population.** New candidates come from **mutate** (most of
+  the budget — it found the historical winners), **inject** (discovery), **refine**
+  (in-place hone), and a little **crossover** (see generator-mix note below). An
+  **append** candidate commits if it's **distinct AND its mean scores ≥
+  `MIN_SCORE_TO_COMMIT` (1.0)** — *not* "beats its parent." Beat-parent (now on the
+  reliable mean, peak as tiebreak) is the test only for **refine** (in-place
+  replace). The frontier is the best mean reached.
 - **Distinct** pre-check (cosine dedupe) and **reverts-are-data** carry over from
   the base.
 - **Refine (depth / honing).** The distinct gate (`DISTINCT_TAU = 0.90`) keeps the
@@ -118,16 +131,19 @@ hot-reloads the backend. They appear in the chat + trip dose pickers under a
 
 Expect to iterate (as with off-manifold). Constants in `pipeline/autoresearch_dmt.py`:
 
-- **`ALPHA_SWEEP`** (default `[0.25, 0.5, 1.0]`) — the dose strengths tried per
-  prompt, capped at 1.0 (gentle-to-moderate; higher α tends to collapse into
-  word-salad the judge can't score, so it's wasted compute).
-- **`DOSE_CAP`** (default 2048) — runaway backstop only; reports run to natural
-  EOS, so raising/lowering this only changes how long a pathological loop runs.
+- **`ALPHA_SWEEP`** (default `[0.25, 0.45]`) — dose strengths tried (best draws
+  historically clustered low; α=1.0 never won, dropped).
+- **`SAMPLES_PER_CELL`** (default 5) — stochastic doses averaged per α. Deeper =
+  more reliable mean, slower. This is the knob that fixed the fluke-scoring problem.
+- **`DOSE_CAP`** (default 1024) — runaway backstop; halved from 2048 to afford the
+  repeated sampling.
 - **`DOSE_PROMPTS`** — currently just the one lead prompt (cost scales with
-  `len(sweep)×len(prompts)`; add variants back for robustness at the cost of speed).
-- **`MIN_FEATURES_TO_COMMIT`** and the commit bar (beat-best-parent).
-- **`DMT_GEN_WEIGHTS`** — the crossover/mutate/refine/inject mix (more `refine` =
-  more honing of the best; more `inject` = more exploration).
+  `len(sweep)×SAMPLES_PER_CELL`).
+- **`MIN_SCORE_TO_COMMIT`** (default 1.0, on the **mean**) — append floor; seeds are
+  force-committed. Refine uses beat-parent on the mean (peak as tiebreak).
+- **`DMT_GEN_WEIGHTS`** (`crossover .05 / mutate .40 / refine .25 / inject .30`) —
+  rebalanced to atlas evidence: mutate/inject found every historical winner;
+  crossover produced none, so it's nearly dropped.
 - **`REFINE_NOISE`** (cos≈0.97 at 0.25 — lower = tighter hone) and **`TOP_K_REFINE`**
   (how many top champions refine rotates over).
 - **`DMT_JUDGE_PROMPT`** — the coherent-segment + verbatim-citation rules.

@@ -128,7 +128,7 @@ export default function AutoresearchDmtPage() {
   const running = st?.running ?? false;
   const exportable = (st as DmtARState & { exportable?: number })?.exportable ?? 0;
   const atlas = [...(st?.atlas ?? [])].sort(
-    (a, b) => b.score - a.score || (b.score_fine ?? b.score) - (a.score_fine ?? a.score),
+    (a, b) => b.score - a.score || (b.peak ?? 0) - (a.peak ?? 0),
   );
   const maxScore = Math.max(1, ...atlas.map((e) => e.score));
   const lastCommit = (st?.atlas ?? []).reduce<DmtAtlasEntry | null>(
@@ -160,8 +160,8 @@ export default function AutoresearchDmtPage() {
               <div className="font-mono text-[26px] text-cyan tabular-nums leading-none" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
                 {commitRel ? fmtRelative(lastCommit.committed_at) : fmtTime(lastCommit.committed_at)}
               </div>
-              <div className="font-mono text-[26px] tabular-nums leading-none" style={{ color: "#ff8fc0", textShadow: "0 0 10px rgba(255,77,157,0.3)" }} title="DMT features matched in the last commit">
-                {lastCommit.score}<span className="text-[12px] text-text-dim/70"> feat</span>
+              <div className="font-mono text-[26px] tabular-nums leading-none" style={{ color: "#ff8fc0", textShadow: "0 0 10px rgba(255,77,157,0.3)" }} title="MEAN DMT features over repeated doses (averaged/reliable); peak = best single sample">
+                {lastCommit.score.toFixed(1)}<span className="text-[12px] text-text-dim/70"> avg{lastCommit.peak != null ? ` · pk ${lastCommit.peak}` : ""}</span>
               </div>
             </div>
             <div className="text-[10px] font-mono text-text-dim truncate mt-1">
@@ -203,7 +203,7 @@ export default function AutoresearchDmtPage() {
         <div className="flex items-center gap-4 font-mono text-[11px] text-text-dim tabular-nums">
           <span>gen <span className="text-amber">{st?.generation ?? 0}</span></span>
           <span>committed <span className="text-amber">{st?.atlas_size ?? 0}</span></span>
-          <span>best <span className="text-cyan" style={{ textShadow: "0 0 6px rgba(94,229,229,0.4)" }}>{st?.frontier ?? 0}</span> DMT features</span>
+          <span>best <span className="text-cyan" style={{ textShadow: "0 0 6px rgba(94,229,229,0.4)" }}>{(st?.frontier ?? 0).toFixed(1)}</span> avg features</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <input
@@ -245,7 +245,7 @@ export default function AutoresearchDmtPage() {
           <span className="text-cyan">{st.current.id}</span>
           <span className="text-text-dim italic">— {lineage(st.current.generator, st.current.parents)}</span>
           <span className="px-1.5 border border-cyan/40 text-cyan text-[9px] tracking-widest font-display">{st.current.stage}</span>
-          {st.current.score != null && <span className="text-text-dim tabular-nums">score={st.current.score}</span>}
+          {st.current.score != null && <span className="text-text-dim tabular-nums">score={st.current.score.toFixed(2)}</span>}
           {st.current.best_alpha != null && <span className="text-text-dim tabular-nums">α={st.current.best_alpha}</span>}
         </div>
       )}
@@ -258,7 +258,7 @@ export default function AutoresearchDmtPage() {
         <section className="lg:col-span-2 min-h-0 overflow-y-auto border-r border-rule/40 p-4">
           <div className="font-display text-[10px] tracking-widest text-amber-dim mb-1">THE ATLAS — committed directions</div>
           <p className="font-mono text-[10px] text-text-dim italic mb-3 leading-snug">
-            Each is a steering direction whose dosed self-report exhibits human DMT-trip phenomenology. Bar length = how many recognized DMT features the report showed (its score). ★ = it pushed the frontier (best score) outward. Open a row to read the self-report and which features it matched.
+            Each is a steering direction whose dosed self-report exhibits human DMT-trip phenomenology. Score = the MEAN feature count over repeated doses (averaged, so it reflects what the direction reliably produces — not a lucky one-off); &ldquo;pk&rdquo; = the best single sample. Bar length = mean score. ★ = it pushed the frontier outward. Open a row to read the best self-report and which features it matched.
             <br />
             <span className="text-text-dim/70">ids = <b>gen{"{N}"}_{"{how}"}</b> · </span>
             <span style={{ color: GEN_COLOR.seed }}>seed</span> = a starting emotion ·{" "}
@@ -375,10 +375,11 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
           <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: `${c}55`, borderRight: `1px solid ${c}` }} />
         </div>
         <span className="shrink-0 w-20 text-right flex flex-col leading-none font-mono tabular-nums">
-          <span className="text-[10px]" style={{ color: c }}>{e.score} feats</span>
+          <span className="text-[10px]" style={{ color: c }}
+                title="mean DMT-feature count over repeated doses (averaged / reliable)">{e.score.toFixed(1)} avg</span>
           <span className="text-[8px] text-text-dim/60 mt-0.5"
-                title="finer-grained score: feature count + cross-dose robustness (the tie-breaker the search ranks by)">
-            fine {(e.score_fine ?? e.score).toFixed(2)}
+                title="peak = the best single dose sample's feature count">
+            pk {e.peak ?? "—"}
           </span>
         </span>
         <span className="shrink-0 w-3 text-center text-cyan text-[10px]" title={e.frontier_advance ? "advanced the frontier" : undefined}>{e.frontier_advance ? "★" : ""}</span>
@@ -400,8 +401,9 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
             {([
               ["generator", e.generator],
               ...(e.parents.length > 0 ? [["parents", e.parents.join(" + ")]] : []),
-              ["score", `${e.score} DMT features`],
-              ["fine score", `${(e.score_fine ?? e.score).toFixed(3)} (feats + cross-dose robustness)`],
+              ["score", `${e.score.toFixed(2)} avg features (mean over repeated doses)`],
+              ["peak", `${e.peak ?? "—"} (best single sample)`],
+              ...(e.per_alpha ? [["per-α", Object.entries(e.per_alpha).map(([a, s]) => `α${a}: ${s.mean} [${s.counts.join(",")}]`).join("  ")]] : []),
               ["best α", String(e.best_alpha)],
               ["cos-atlas", e.max_cos_to_atlas.toFixed(2)],
             ] as [string, string][]).map(([k, v]) => (

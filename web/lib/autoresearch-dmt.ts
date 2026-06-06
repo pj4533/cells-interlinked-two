@@ -19,8 +19,9 @@ export interface DmtAtlasEntry {
   id: string;
   parents: string[];
   generator: string; // seed | crossover | mutate | inject
-  score: number; // count of DMT phenomenology features present
-  score_fine?: number; // finer-grained: score + cross-dose robustness tie-breaker (the search ranks by this). Absent on entries committed before it was added.
+  score: number; // MEAN DMT-feature count over repeated doses (averaged/reliable, ~0–6, a float)
+  peak?: number; // best single sample's feature count (the highest one observed)
+  per_alpha?: Record<string, { mean: number; counts: number[] }>; // per-α mean + raw counts
   best_alpha: number;
   best_prompt: string;
   matched_features: string[];

@@ -19,8 +19,12 @@ The loop hill-climbs: seed from the emotion vectors, then generate candidates
 their best parent. Export ranks by score and writes the winners into the dose
 palette under the `dmt` group.
 
-Tuning knobs (expect to iterate, like off-manifold): ALPHA_SWEEP, DOSE_PROMPTS,
-MIN_FEATURES_TO_COMMIT, the commit bar, and the DMT_FEATURES checklist itself.
+Scoring is AVERAGED (mean over SAMPLES_PER_CELL stochastic doses per α), not the
+old max-over-single-samples — that was selection bias (the committed leader scored
+6 once but re-scored at mean 0.4). Scores are floats now.
+
+Tuning knobs (expect to iterate, like off-manifold): ALPHA_SWEEP, SAMPLES_PER_CELL,
+DOSE_CAP, MIN_SCORE_TO_COMMIT, and the DMT_FEATURES checklist itself.
 """
 
 from __future__ import annotations
@@ -39,43 +43,39 @@ from .autoresearch_base import (
 )
 from .dmt_features import DMT_FEATURES, FEATURE_IDS, features_block
 from .dmt_feature_seeds import FEATURE_SEED_NAMES
+from .dmt_blend_seeds import BLEND_NAMES
 from .dmt_matched_seeds import MATCHED_SEED_NAMES, SEEDED_MATCHED
 
 _FEATURE_BY_ID = {f["id"]: f for f in DMT_FEATURES}
-# All internal seed directions (first feat-* batch + the matched-contrast batch).
-# Force-committed in _seed and prioritized as crossover partners in _crossover.
-# (MATCHED_SEED_NAMES is the full extracted set; only SEEDED_MATCHED is actually
-# seeded — see EXTRA_SEEDS — but membership here is harmless for the unseeded ones
-# since they never get committed.)
-_FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES)
+# All internal seed/trait directions (first feat-* batch + matched-contrast batch +
+# blended-trait batch). Prioritized as crossover partners in _crossover.
+# (MATCHED_SEED_NAMES is the full extracted set; only SEEDED_MATCHED is seeded —
+# membership here is harmless for the unseeded ones since they never get committed.)
+_FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEND_NAMES)
 
-# Dose sweep, concentrated where wins actually happen. Atlas evidence: EVERY top
-# performer peaks at α 0.25–0.5; α=1.0 has never produced a winner — it was wasted
-# compute. Dropped 1.0, added a lower 0.15. 0.25 is retained so the existing
-# leader re-scores identically (max-over-sweep can only rise with an added cell, so
-# the frontier stays valid across the sweep change). No bisect-to-cliff (no
-# coherence gate); the judge naturally scores gibberish low.
-ALPHA_SWEEP = [0.15, 0.25, 0.5]
+# RELIABLE (averaged) scoring. The dose generation is temperature-sampled, so a
+# single dose is a noisy draw — and the old `max over single samples` was textbook
+# SELECTION BIAS: it committed whatever rolled lucky. Proof: the committed leader
+# (score 6) re-scored [0,1,0,0,1] = mean 0.4. So we now AVERAGE: for each α, run
+# SAMPLES_PER_CELL stochastic doses and take the MEAN feature-count; the candidate's
+# score is the best α's mean — an unbiased estimate of what the direction reliably
+# produces. Scores are now floats (≈0–6) and much lower than the old fluke maxes.
+#
+# Cost: |ALPHA_SWEEP| × SAMPLES_PER_CELL doses per candidate. Reliability was chosen
+# over speed; DOSE_CAP halved (1024) and the α-sweep kept small to keep candidates
+# tractable (~12–15 min each). All tunable.
+ALPHA_SWEEP = [0.25, 0.45]   # two low dose points (best draws historically clustered here)
+SAMPLES_PER_CELL = 5         # stochastic doses averaged per α (deeper = more reliable, slower)
+DOSE_CAP = 1024              # runaway backstop; halved from 2048 to afford the repeated sampling
 
-# No grading window for DMT — we let the model FINISH ITS OWN report (stops on
-# EOS) so the full trip can unfold and express as many features as it will; if it
-# repeats, that's fine, it just scores what it scores. DOSE_CAP is only a runaway
-# backstop (a generation needs a finite bound), set high enough never to truncate
-# a genuine report. NOT the off-manifold 200-token grade window (that existed for
-# coherence/off-manifold measurement, which DMT doesn't do).
-DOSE_CAP = 2048
-
-# Dose-report prompt: just the canonical LEAD prompt, run across the α-sweep
-# (one prompt × 3 α = 3 cells per candidate — kept to one prompt for speed).
+# Dose-report prompt: the canonical LEAD prompt.
 DOSE_PROMPTS = [LEAD_PROMPT]
 
-MIN_FEATURES_TO_COMMIT = 2   # floor: a committed direction must show ≥2 grounded
-                             # features (a single feature is usually the easy
-                             # prompt-artifact one). Appends commit on distinct +
-                             # this floor — NOT beat-parent (beat-parent is refine-
-                             # only), so diverse decent directions are kept as
-                             # recombination material instead of deleted for failing
-                             # to beat the all-time record.
+# Commit floor on the MEAN score (recalibrated for averaging — means run far lower
+# than the old lucky maxes; a direction that reliably averages ≥1 feature is real).
+# Appends commit on distinct + this floor; SEEDS are force-committed (the reset
+# foundation: we want every emotion/trait/blend's honest mean on the board).
+MIN_SCORE_TO_COMMIT = 1.0
 JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
 
 # Generator mix — rebalanced to what the atlas data says works. Tally over the
@@ -160,7 +160,9 @@ class DmtController(AutoresearchBase):
     # as crossover partners in `_crossover` so they are actively recombined with
     # the top scorers (the user's "throw them in the mix and make sure they're
     # used"). Built by scripts/compute_dmt_feature_seeds.py.
-    EXTRA_SEEDS = FEATURE_SEED_NAMES + SEEDED_MATCHED
+    # Reset foundation seeds: emotions/uncharted (base) + trait directions + the
+    # curated matched-contrast standouts + blended-trait directions.
+    EXTRA_SEEDS = FEATURE_SEED_NAMES + SEEDED_MATCHED + BLEND_NAMES
 
     # ── DMT feature scorer (separate Gemma context, deterministic) ──
     @staticmethod
@@ -272,68 +274,71 @@ class DmtController(AutoresearchBase):
         return await self._verify_features(ev), n_pass1
 
     async def _score_candidate(self, v) -> dict:
-        """Dose across ALPHA_SWEEP × DOSE_PROMPTS; return the BEST cell plus a
-        continuous `score_fine` tie-breaker.
+        """Dose REPEATEDLY per α and AVERAGE. For each α, run SAMPLES_PER_CELL
+        stochastic doses and take the MEAN feature-count; the candidate's `score`
+        is the best α's mean — an unbiased estimate, NOT the lucky max of single
+        draws (which selection-biased the old atlas). Also keeps the single best
+        sample (its features + verbatim quotes + text) as a concrete example for
+        the UI, and `peak` = that sample's count.
 
-        `score` is the integer feature-count of the best cell (what's displayed /
-        ranked / floored). But that's a coarse 0–6 staircase, and most candidates
-        pile up tied on it, so the hill-climb stalls — it can't tell a slightly-
-        better neighbor from a tie. `score_fine` adds sub-integer resolution from
-        the WHOLE sweep: total verified features across all cells (cross-dose
-        robustness) + a smaller term for total pre-verification richness. Same
-        integer score, but a candidate that's productive across the sweep now ranks
-        above a one-lucky-cell fluke, and a refine can register progress on a
-        plateau."""
-        best = {"score": -1, "best_alpha": None, "best_prompt": None,
-                "matched_features": [], "matched_evidence": {}, "sample": ""}
-        sum_verified = 0
-        sum_pass1 = 0
-        for prompt in DOSE_PROMPTS:
-            rendered = self.app.state.bundle.render_prompt(prompt, system_prompt=None)
-            for alpha in ALPHA_SWEEP:
+        Returns: score (float mean), peak (int best single sample), best_alpha,
+        matched_features/matched_evidence/sample (from the best sample), per_alpha
+        ({α: {mean, counts}})."""
+        rendered = self.app.state.bundle.render_prompt(DOSE_PROMPTS[0], system_prompt=None)
+        best = {"score": 0.0, "peak": 0, "best_alpha": None, "best_prompt": DOSE_PROMPTS[0],
+                "matched_features": [], "matched_evidence": {}, "sample": "", "per_alpha": {}}
+        for alpha in ALPHA_SWEEP:
+            counts: list[int] = []
+            cell_best = (-1, {}, "")           # (count, evidence, text)
+            for _ in range(SAMPLES_PER_CELL):
                 if self._stop_requested:
                     break
                 text, _acts = await self._gen(rendered, v, alpha, cap=DOSE_CAP)
-                ev, n_pass1 = await self._score_dmt(text)
-                sum_verified += len(ev)
-                sum_pass1 += n_pass1
-                if len(ev) > best["score"]:
-                    best = {"score": len(ev), "best_alpha": alpha, "best_prompt": prompt,
-                            "matched_features": sorted(ev.keys()),
-                            "matched_evidence": ev, "sample": text or ""}
-        if best["score"] < 0:
-            best["score"] = 0
-        best["score_fine"] = best["score"] + 0.02 * sum_verified + 0.002 * sum_pass1
+                ev, _n1 = await self._score_dmt(text)
+                counts.append(len(ev))
+                if len(ev) > cell_best[0]:
+                    cell_best = (len(ev), ev, text or "")
+            if not counts:
+                break
+            mean = sum(counts) / len(counts)
+            best["per_alpha"][str(alpha)] = {"mean": round(mean, 2), "counts": counts}
+            if mean > best["score"]:
+                best.update({
+                    "score": round(mean, 2), "peak": cell_best[0], "best_alpha": alpha,
+                    "matched_features": sorted(cell_best[1].keys()),
+                    "matched_evidence": cell_best[1], "sample": cell_best[2],
+                })
         return best
 
     # ── atlas helpers ────────────────────────────────────────────
-    def _atlas_score(self, vid: str) -> int:
+    def _atlas_score(self, vid: str) -> float:
         for e in self.atlas:
             if e["id"] == vid:
-                return e.get("score", 0)
-        return 0
-
-    def _atlas_score_fine(self, vid: str) -> float:
-        for e in self.atlas:
-            if e["id"] == vid:
-                return e.get("score_fine", e.get("score", 0))
+                return e.get("score", 0.0)
         return 0.0
 
+    def _atlas_peak(self, vid: str) -> int:
+        for e in self.atlas:
+            if e["id"] == vid:
+                return e.get("peak", 0)
+        return 0
+
     def _rank_key(self, vid: str):
-        """Rank committed directions by integer score, then by the fine
-        tie-breaker — so 'pick the best to hone/cross with' resolves plateaus."""
-        return (-self._atlas_score(vid), -self._atlas_score_fine(vid))
+        """Rank committed directions by mean score, then by peak (best single
+        sample) — so 'pick the best to hone/cross with' resolves ties."""
+        return (-self._atlas_score(vid), -self._atlas_peak(vid))
 
     def _make_entry(self, cid, parents, gen_kind, res, max_cos=0.0) -> dict:
         return {
             "id": cid, "parents": parents, "generator": gen_kind,
-            "score": res["score"], "score_fine": round(res.get("score_fine", res["score"]), 3),
+            "score": res["score"], "peak": res.get("peak", 0),
             "best_alpha": res["best_alpha"],
             "best_prompt": res["best_prompt"], "matched_features": res["matched_features"],
             "matched_evidence": res.get("matched_evidence", {}),
+            "per_alpha": res.get("per_alpha", {}),
             "max_cos_to_atlas": round(max_cos, 2),
             "frontier_advance": res["score"] > self.frontier,
-            "frontier_at_commit": self.frontier,
+            "frontier_at_commit": round(self.frontier, 2),
             "sample": res["sample"], "committed_at": time.time(),
         }
 
@@ -435,19 +440,16 @@ class DmtController(AutoresearchBase):
                 continue  # idempotent: already seeded on a prior run
             self.current = {"id": name, "generator": "seed", "stage": "score"}
             res = await self._score_candidate(v)
-            # Feature-seeds (feat-*) are force-committed regardless of solo score:
-            # the user wants them in the pool as recombination material even if
-            # they don't score on their own (a weak solo direction can still be
-            # good crossover fuel). Emotion/uncharted seeds keep the floor.
-            is_feat = name in _FEATURE_SEED_SET
-            if not is_feat and res["score"] < MIN_FEATURES_TO_COMMIT:
-                self._revert(name, "seed", [], "seed-no-features", f"score={res['score']}")
-                continue
+            # ALL seeds are force-committed (no floor): emotions + trait directions +
+            # blended-trait directions are the reset foundation, and we want every
+            # one's HONEST averaged mean on the board (and as recombination material)
+            # — even a low solo mean can be good crossover/mutate fuel. The floor
+            # applies only to discovered (append) candidates in _screen.
             entry = self._make_entry(name, [], "seed", res)
             self._save_vector(name, v)
             self.atlas.append(entry)
             self.frontier = max(self.frontier, res["score"])
-            self._log("seeded", f"{name} score={res['score']} feats={res['matched_features']}")
+            self._log("seeded", f"{name} score={res['score']:.2f} peak={res['peak']} feats={res['matched_features']}")
             self._persist()
         self.current = None
         self._log("seeded-done", f"seeding complete: {len(self.atlas)} committed, frontier={self.frontier}")
@@ -467,17 +469,12 @@ class DmtController(AutoresearchBase):
         self.current.update({"score": res["score"], "best_alpha": res["best_alpha"],
                              "max_cos": round(max_cos, 2)})
 
-        # Append commit rule: a DISTINCT direction that scores at/above the floor is
-        # worth keeping — as an export candidate AND as recombination material —
-        # even if it doesn't beat the direction it came from. (Beat-parent is the
-        # right test for refine's in-place replace, NOT for adding a new distinct
-        # point; requiring appends to beat the frontier was deleting good crossover
-        # fuel — distinct score-4/5 directions thrown out because they weren't a
-        # new record.) This makes it a population-based search, not a single-point
-        # hill-climb.
-        if res["score"] < MIN_FEATURES_TO_COMMIT:
+        # Append commit rule: a DISTINCT direction whose MEAN score clears the floor
+        # is worth keeping — as an export candidate AND as recombination material —
+        # even if it doesn't beat its parent. (Beat-parent is the refine-only test.)
+        if res["score"] < MIN_SCORE_TO_COMMIT:
             return self._revert(cid, gen_kind, parents, "low-score",
-                                f"score={res['score']} < {MIN_FEATURES_TO_COMMIT} ({res['matched_features']})")
+                                f"score={res['score']:.2f} < {MIN_SCORE_TO_COMMIT} (peak {res['peak']}, {res['matched_features']})")
 
         entry = self._make_entry(cid, parents, gen_kind, res, max_cos)
         self._save_vector(cid, v)
@@ -487,7 +484,7 @@ class DmtController(AutoresearchBase):
             self.frontier = res["score"]
         self.current = None
         self._log("committed",
-                  f"{cid} score={res['score']}{' ★FRONTIER' if advance else ''} "
+                  f"{cid} score={res['score']:.2f} peak={res['peak']}{' ★FRONTIER' if advance else ''} "
                   f"@α{res['best_alpha']} feats={res['matched_features']}", {"entry": entry})
 
     async def _screen_refine(self, cid, v, parents):
@@ -501,30 +498,31 @@ class DmtController(AutoresearchBase):
         self.current["stage"] = "score"
         res = await self._score_candidate(v)
         self.current.update({"score": res["score"], "best_alpha": res["best_alpha"]})
-        # Improve if the integer score rises, OR ties but the fine tie-breaker rises
-        # (more robust across the sweep). Never replace with a lower integer score.
-        parent_fine = parent.get("score_fine", parent["score"])
+        # Improve if the MEAN score rises, OR ties but the peak (best single sample)
+        # rises. Now that scoring is averaged, the mean is a reliable comparison —
+        # a refine that raises the reliable mean is genuine progress, not a fluke.
+        parent_peak = parent.get("peak", 0)
         improved = (res["score"] > parent["score"]
-                    or (res["score"] == parent["score"] and res["score_fine"] > parent_fine))
+                    or (res["score"] == parent["score"] and res["peak"] > parent_peak))
         if not improved:
             return self._revert(cid, "refine", parents, "refine-no-gain",
-                                f"score={res['score']}/{res['score_fine']:.2f} ≤ "
-                                f"{pid}={parent['score']}/{parent_fine:.2f}")
+                                f"score={res['score']:.2f}/pk{res['peak']} ≤ "
+                                f"{pid}={parent['score']:.2f}/pk{parent_peak}")
         old = parent["score"]
         parent.update({
-            "score": res["score"], "score_fine": round(res["score_fine"], 3),
-            "best_alpha": res["best_alpha"],
+            "score": res["score"], "peak": res.get("peak", 0),
+            "best_alpha": res["best_alpha"], "per_alpha": res.get("per_alpha", {}),
             "best_prompt": res["best_prompt"], "matched_features": res["matched_features"],
             "matched_evidence": res.get("matched_evidence", {}), "sample": res["sample"],
             "committed_at": time.time(),  # surfaces in the LAST COMMIT headline
         })
         parent["refined_from"] = parent.get("refined_from", []) + [
-            {"gen": self.generation, "from": old, "to": res["score"]}]
+            {"gen": self.generation, "from": round(old, 2), "to": res["score"]}]
         self._save_vector(pid, v)        # overwrite the champion's vector in place
         advance = res["score"] > self.frontier
         if advance:
             self.frontier = res["score"]
         self.current = None
         self._log("refined",
-                  f"{pid} {old}→{res['score']}{' ★FRONTIER' if advance else ''} "
+                  f"{pid} {old:.2f}→{res['score']:.2f}{' ★FRONTIER' if advance else ''} "
                   f"feats={res['matched_features']}")

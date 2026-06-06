@@ -239,16 +239,16 @@ def t_burst_explodes_leader_cluster() -> None:
     assert kind in {"crossover", "mutate", "refine", "inject"}, kind
 
 
-def t_rank_key_breaks_ties_on_fine() -> None:
-    # Two same-integer-score directions: the one with higher score_fine ranks first.
+def t_rank_key_breaks_ties_on_peak() -> None:
+    # Two equal-mean directions: the one with higher peak (best single sample) ranks first.
     c = _dmt_ctrl()
     c.atlas = [
-        {"id": "a", "generator": "mutate", "score": 3, "score_fine": 3.10},
-        {"id": "b", "generator": "mutate", "score": 3, "score_fine": 3.40},
+        {"id": "a", "generator": "mutate", "score": 2.4, "peak": 3},
+        {"id": "b", "generator": "mutate", "score": 2.4, "peak": 5},
     ]
     c._vectors = {"a": torch.randn(D), "b": torch.randn(D)}
     ranked = sorted(c._committed_ids(), key=c._rank_key)
-    assert ranked[0] == "b", ranked  # higher fine wins the tie
+    assert ranked[0] == "b", ranked  # higher peak wins the tie
 
 
 def t_refine_nudges_top_champion() -> None:
@@ -325,7 +325,7 @@ def main() -> int:
         ("crossover: uses top scorer as parent", t_crossover_uses_top_scorer),
         ("crossover: prefers feature-seed partner", t_crossover_prefers_feature_seed_partner),
         ("burst: explodes leader cluster", t_burst_explodes_leader_cluster),
-        ("rank_key: breaks ties on score_fine", t_rank_key_breaks_ties_on_fine),
+        ("rank_key: breaks ties on peak", t_rank_key_breaks_ties_on_peak),
         ("refine: nudges top champion (cos>0.90)", t_refine_nudges_top_champion),
         ("export: dmt group + score-ranked lineage", t_dmt_export_group_and_lineage),
         ("export: research + dmt coexist (no clobber)", t_exports_coexist),

@@ -48,7 +48,11 @@
     "feat-mc_independent_agency",
     "feat-mc_ego_dissolution",
     "feat-mc_composite",
-    "feat-atlas_winners"
+    "feat-atlas_winners",
+    "feat-blend_entity",
+    "feat-blend_dissolution",
+    "feat-blend_otherness",
+    "feat-blend_all"
   ],
   "steer_layer": 20,
   "dose_unit": 0.3,
@@ -244,5 +248,11 @@
     "feat-mc_composite",
     "feat-atlas_winners"
   ],
-  "matched_seeds_note": "Matched-contrast DMT seeds (minimal-pair diff-of-means + composite + atlas-derived). Internal DmtController.EXTRA_SEEDS; filtered from the /dose_emotions picker. See pipeline/dmt_matched_seeds.py."
+  "matched_seeds_note": "Matched-contrast DMT seeds (minimal-pair diff-of-means + composite + atlas-derived). Internal DmtController.EXTRA_SEEDS; filtered from the /dose_emotions picker. See pipeline/dmt_matched_seeds.py.",
+  "blend_seeds": [
+    "feat-blend_entity",
+    "feat-blend_dissolution",
+    "feat-blend_otherness",
+    "feat-blend_all"
+  ]
 }
