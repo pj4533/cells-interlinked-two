@@ -127,7 +127,9 @@ export default function AutoresearchDmtPage() {
 
   const running = st?.running ?? false;
   const exportable = (st as DmtARState & { exportable?: number })?.exportable ?? 0;
-  const atlas = [...(st?.atlas ?? [])].sort((a, b) => b.score - a.score);
+  const atlas = [...(st?.atlas ?? [])].sort(
+    (a, b) => b.score - a.score || (b.score_fine ?? b.score) - (a.score_fine ?? a.score),
+  );
   const maxScore = Math.max(1, ...atlas.map((e) => e.score));
   const lastCommit = (st?.atlas ?? []).reduce<DmtAtlasEntry | null>(
     (acc, e) => (!acc || e.committed_at > acc.committed_at ? e : acc), null,
@@ -372,7 +374,13 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
         <div className="flex-1 h-2.5 bg-bg relative overflow-hidden">
           <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: `${c}55`, borderRight: `1px solid ${c}` }} />
         </div>
-        <span className="font-mono text-[10px] tabular-nums shrink-0 w-20 text-right" style={{ color: c }}>{e.score} feats</span>
+        <span className="shrink-0 w-20 text-right flex flex-col leading-none font-mono tabular-nums">
+          <span className="text-[10px]" style={{ color: c }}>{e.score} feats</span>
+          <span className="text-[8px] text-text-dim/60 mt-0.5"
+                title="finer-grained score: feature count + cross-dose robustness (the tie-breaker the search ranks by)">
+            fine {(e.score_fine ?? e.score).toFixed(2)}
+          </span>
+        </span>
         <span className="shrink-0 w-3 text-center text-cyan text-[10px]" title={e.frontier_advance ? "advanced the frontier" : undefined}>{e.frontier_advance ? "★" : ""}</span>
         {/* Origin: starting seed vs discovered-by-autoresearch (with when). */}
         <span className="shrink-0 w-[5.25rem] text-right leading-none font-mono">
@@ -393,6 +401,7 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
               ["generator", e.generator],
               ...(e.parents.length > 0 ? [["parents", e.parents.join(" + ")]] : []),
               ["score", `${e.score} DMT features`],
+              ["fine score", `${(e.score_fine ?? e.score).toFixed(3)} (feats + cross-dose robustness)`],
               ["best α", String(e.best_alpha)],
               ["cos-atlas", e.max_cos_to_atlas.toFixed(2)],
             ] as [string, string][]).map(([k, v]) => (

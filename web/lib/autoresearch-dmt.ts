@@ -20,6 +20,7 @@ export interface DmtAtlasEntry {
   parents: string[];
   generator: string; // seed | crossover | mutate | inject
   score: number; // count of DMT phenomenology features present
+  score_fine?: number; // finer-grained: score + cross-dose robustness tie-breaker (the search ranks by this). Absent on entries committed before it was added.
   best_alpha: number;
   best_prompt: string;
   matched_features: string[];
