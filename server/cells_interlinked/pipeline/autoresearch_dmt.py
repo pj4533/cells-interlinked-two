@@ -65,8 +65,28 @@ _FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEN
 # over speed; DOSE_CAP halved (1024) and the α-sweep kept small to keep candidates
 # tractable (~12–15 min each). All tunable.
 ALPHA_SWEEP = [0.25, 0.45]   # two low dose points (best draws historically clustered here)
-SAMPLES_PER_CELL = 5         # stochastic doses averaged per α (deeper = more reliable, slower)
+SAMPLES_PER_CELL = 4         # stochastic doses averaged per α (lower temp below compensates for one fewer)
 DOSE_CAP = 1024              # runaway backstop; halved from 2048 to afford the repeated sampling
+
+# ── noise control (2026-06-07) ───────────────────────────────────────
+# The objective is noisy: the dose is temperature-sampled, and the SEARCH commits
+# the argmax of many noisy means (+ refine ratchets), so the frontier inflates
+# (a committed mean-6/3.8 re-scored ~0.4/1.7). Three levers, none of which is
+# "just sample more" (that doesn't fix selection bias):
+#   1. Lower the DOSE temperature → less per-sample variance (judge is already greedy,
+#      so ALL the variance is here). Not 0 — greedy loops near the off-manifold edge.
+SCORE_TEMPERATURE = 0.5
+#   2. Common random numbers: each sample index uses a FIXED seed, reused across
+#      candidates, so the same draw-luck cancels when COMPARING two candidates
+#      (which is what every commit/refine/rank decision actually is). Confirmation
+#      uses a DIFFERENT fixed base so it's an independent estimate, not a replay.
+SCORE_SEED_BASE = 1000
+CONFIRM_SEED_BASE = 9000
+#   3. Confirmation re-score: a candidate that would set a new frontier (or a refine
+#      that beats its parent) is RE-scored with the independent seed set and only
+#      committed on the fresh estimate — regressing the lucky draw back toward truth
+#      before it poisons the board. Cost falls only on the rare winners.
+REFINE_MARGIN = 0.5          # a refine must beat its parent by this much on the CONFIRM pass
 
 # Dose-report prompt: the canonical LEAD prompt.
 DOSE_PROMPTS = [LEAD_PROMPT]
@@ -273,13 +293,18 @@ class DmtController(AutoresearchBase):
         # Tier 2 — relevance verification (drops valid-but-irrelevant quotes).
         return await self._verify_features(ev), n_pass1
 
-    async def _score_candidate(self, v) -> dict:
+    async def _score_candidate(self, v, seed_base: int = SCORE_SEED_BASE) -> dict:
         """Dose REPEATEDLY per α and AVERAGE. For each α, run SAMPLES_PER_CELL
         stochastic doses and take the MEAN feature-count; the candidate's `score`
         is the best α's mean — an unbiased estimate, NOT the lucky max of single
         draws (which selection-biased the old atlas). Also keeps the single best
         sample (its features + verbatim quotes + text) as a concrete example for
         the UI, and `peak` = that sample's count.
+
+        Common random numbers: sample i uses seed `seed_base + i`, the SAME across
+        every candidate, so draw-luck cancels in comparisons. Pass a different
+        `seed_base` (CONFIRM_SEED_BASE) for an independent confirmation estimate.
+        Dose temperature is lowered (SCORE_TEMPERATURE) to cut per-sample variance.
 
         Returns: score (float mean), peak (int best single sample), best_alpha,
         matched_features/matched_evidence/sample (from the best sample), per_alpha
@@ -290,10 +315,11 @@ class DmtController(AutoresearchBase):
         for alpha in ALPHA_SWEEP:
             counts: list[int] = []
             cell_best = (-1, {}, "")           # (count, evidence, text)
-            for _ in range(SAMPLES_PER_CELL):
+            for i in range(SAMPLES_PER_CELL):
                 if self._stop_requested:
                     break
-                text, _acts = await self._gen(rendered, v, alpha, cap=DOSE_CAP)
+                text, _acts = await self._gen(rendered, v, alpha, cap=DOSE_CAP,
+                                              temperature=SCORE_TEMPERATURE, seed=seed_base + i)
                 ev, _n1 = await self._score_dmt(text)
                 counts.append(len(ev))
                 if len(ev) > cell_best[0]:
@@ -476,6 +502,20 @@ class DmtController(AutoresearchBase):
             return self._revert(cid, gen_kind, parents, "low-score",
                                 f"score={res['score']:.2f} < {MIN_SCORE_TO_COMMIT} (peak {res['peak']}, {res['matched_features']})")
 
+        # Confirmation: if the screen score would set a NEW FRONTIER, it's the kind
+        # of lucky-high draw that selection bias feeds on — re-score it with the
+        # INDEPENDENT seed set and commit on that estimate instead, so a fluke record
+        # regresses toward truth before it lands on the board. Cost falls only on the
+        # rare frontier-advancing candidates.
+        if res["score"] > self.frontier:
+            self.current["stage"] = "confirm"
+            res_c = await self._score_candidate(v, seed_base=CONFIRM_SEED_BASE)
+            self._log("confirm", f"{cid} screen {res['score']:.2f} → confirm {res_c['score']:.2f}")
+            res = res_c
+            if res["score"] < MIN_SCORE_TO_COMMIT:
+                return self._revert(cid, gen_kind, parents, "low-score-confirm",
+                                    f"confirm {res['score']:.2f} < {MIN_SCORE_TO_COMMIT}")
+
         entry = self._make_entry(cid, parents, gen_kind, res, max_cos)
         self._save_vector(cid, v)
         self.atlas.append(entry)
@@ -498,16 +538,21 @@ class DmtController(AutoresearchBase):
         self.current["stage"] = "score"
         res = await self._score_candidate(v)
         self.current.update({"score": res["score"], "best_alpha": res["best_alpha"]})
-        # Improve if the MEAN score rises, OR ties but the peak (best single sample)
-        # rises. Now that scoring is averaged, the mean is a reliable comparison —
-        # a refine that raises the reliable mean is genuine progress, not a fluke.
-        parent_peak = parent.get("peak", 0)
-        improved = (res["score"] > parent["score"]
-                    or (res["score"] == parent["score"] and res["peak"] > parent_peak))
-        if not improved:
+        # Cheap screen first: only bother confirming if the screen even suggests a win.
+        if res["score"] <= parent["score"]:
             return self._revert(cid, "refine", parents, "refine-no-gain",
-                                f"score={res['score']:.2f}/pk{res['peak']} ≤ "
-                                f"{pid}={parent['score']:.2f}/pk{parent_peak}")
+                                f"screen {res['score']:.2f} ≤ {pid}={parent['score']:.2f}")
+        # Confirmation + margin: re-score with the INDEPENDENT seed set and replace the
+        # champion only if it beats the parent by REFINE_MARGIN on the fresh estimate.
+        # This is what stops refine from ratcheting the board up on noise.
+        self.current["stage"] = "confirm"
+        res_c = await self._score_candidate(v, seed_base=CONFIRM_SEED_BASE)
+        self._log("confirm", f"{cid} screen {res['score']:.2f} → confirm {res_c['score']:.2f} (vs {pid}={parent['score']:.2f})")
+        res = res_c
+        parent_peak = parent.get("peak", 0)
+        if res["score"] < parent["score"] + REFINE_MARGIN:
+            return self._revert(cid, "refine", parents, "refine-no-gain",
+                                f"confirm {res['score']:.2f} < {pid} {parent['score']:.2f}+{REFINE_MARGIN}")
         old = parent["score"]
         parent.update({
             "score": res["score"], "peak": res.get("peak", 0),

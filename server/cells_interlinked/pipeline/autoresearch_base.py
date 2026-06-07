@@ -324,10 +324,11 @@ class AutoresearchBase:
     # ── generation + measurement ─────────────────────────────────
     async def _gen(self, rendered: str, v: torch.Tensor | None, alpha: float,
                    cap: int = GEN_CAP, temperature: float | None = None,
-                   top_p: float | None = None) -> tuple[str, list]:
+                   top_p: float | None = None, seed: int | None = None) -> tuple[str, list]:
         """Run one generation, optionally with an additive steering dose (α·v at
         STEER_LAYER). temperature/top_p default to settings; pass overrides for
-        deterministic judging."""
+        deterministic judging. `seed` fixes the sampler RNG — pass a fixed seed
+        per sample index to get common-random-numbers (paired) scoring."""
         bundle = self.app.state.bundle
         handle = None
         if v is not None and alpha > 0:
@@ -338,7 +339,7 @@ class AutoresearchBase:
             cfg = ProbeConfig(
                 temperature=settings.temperature if temperature is None else temperature,
                 top_p=settings.top_p if top_p is None else top_p,
-                seed=None, decoding_mode="per-token", pooled=False,
+                seed=seed, decoding_mode="per-token", pooled=False,
                 include_nla=False, safety_cap=cap,
             )
             r = await run_probe(bundle=bundle, rendered_prompt=rendered, cfg=cfg,
