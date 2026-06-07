@@ -369,7 +369,14 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c, boxShadow: `0 0 6px ${c}` }} />
         <span className="shrink-0 w-44 flex flex-col leading-tight overflow-hidden">
           <span className="font-mono text-[11px] text-text truncate" title={e.id}>{e.id}</span>
-          <span className="font-mono text-[8px] text-text-dim/70 truncate">{lineage(e.generator, e.parents)}</span>
+          <span className="font-mono text-[8px] text-text-dim/70 truncate">
+            {lineage(e.generator, e.parents)}
+            {e.refined_from?.length ? (
+              <span className="text-cyan" title={`honed in place ${e.refined_from.length}× (origin: ${e.generator})`}>
+                {" "}· ⟳ refined ×{e.refined_from.length}
+              </span>
+            ) : null}
+          </span>
         </span>
         <div className="flex-1 h-2.5 bg-bg relative overflow-hidden">
           <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: `${c}55`, borderRight: `1px solid ${c}` }} />
@@ -399,7 +406,8 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
         <div className="px-3 py-2 border-t border-rule/30 font-mono text-[10px] text-text-dim space-y-1.5">
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 tabular-nums">
             {([
-              ["generator", e.generator],
+              ["generator", e.generator + (e.refined_from?.length ? ` (origin) · honed in place ×${e.refined_from.length}` : "")],
+              ...(e.refined_from?.length ? [["refined", `${[e.refined_from[0].from, ...e.refined_from.map((r) => r.to)].map((s) => s.toFixed(1)).join(" → ")}  (gens ${e.refined_from.map((r) => r.gen).join(", ")})`]] : []),
               ...(e.parents.length > 0 ? [["parents", e.parents.join(" + ")]] : []),
               ["score", `${e.score.toFixed(2)} avg features (mean over repeated doses)`],
               ["peak", `${e.peak ?? "—"} (best single sample)`],

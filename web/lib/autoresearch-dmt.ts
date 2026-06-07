@@ -22,6 +22,7 @@ export interface DmtAtlasEntry {
   score: number; // MEAN DMT-feature count over repeated doses (averaged/reliable, ~0–6, a float)
   peak?: number; // best single sample's feature count (the highest one observed)
   per_alpha?: Record<string, { mean: number; counts: number[] }>; // per-α mean + raw counts
+  refined_from?: { gen: number; from: number; to: number }[]; // in-place hone history (origin generator unchanged)
   best_alpha: number;
   best_prompt: string;
   matched_features: string[];
