@@ -1,137 +1,157 @@
-# DMT search: from a vector to a *path* (possible direction)
+# DMT search: from a single vector to multi-dimensional manifold steering
 
-**Status: exploration / not built.** This captures a candidate next direction for the
-DMT autoresearch (`/autoresearch-dmt`): **extend the search from a single steering
-*vector* to a steering *path* (trajectory) through a low-rank subspace.** It records
-the motivating insight, a diagnostic we ran (2026-06-07) that supports it, the design
-options, and the open risks — so it's ready to pick up. Nothing in the loop changed.
+**Status: exploration in progress.** Captures the current candidate direction for the
+DMT autoresearch (`/autoresearch-dmt`): **the productive DMT region is multi-dimensional
+and likely curved; instead of hunting one steering vector, steer within/along that
+manifold to occupy a point high on many DMT-feature axes at once while staying
+coherent (on-manifold).** Records the corrected framing, the supporting papers, the
+diagnostic results so far, the live "dimension-hunt" run (2026-06-08), and the plan.
 
-Origin: Drift's handoff `CI_LORA_DMT_HANDOFF.md` (LoRA/self-explainer ideas) →
-discussion of the manifold/subspace literature already in CI's orbit.
+> Supersedes the earlier token-window "path" framing in this doc, which was wrong —
+> the multi-dimensionality is **spatial (multiple activation axes at once)**, not
+> temporal (features sequenced into output windows).
+
+Origin: Drift's handoff `CI_LORA_DMT_HANDOFF.md` → manifold/subspace discussion →
+wiki research (below).
 
 ---
 
 ## The setup today
 
-A DMT candidate is a single additive direction `v` at L20: the dose is `h + α·v`
-(`install_runtime_steering_hook`, ramped over `GEN_RAMP=16`). The search hill-climbs
-over `v`; scoring averages DMT-feature counts over repeated stochastic doses
-(`SAMPLES_PER_CELL=5`, `ALPHA_SWEEP=[0.25,0.45]`). Best direction so far:
-`feat-download_transmission`.
+A DMT candidate is a single additive direction `v` at L20: dose `h + α·v`
+(`install_runtime_steering_hook`). Scoring is averaged + noise-controlled (CRN seeds,
+lower dose temp, confirmation re-score; see the "noise control" block in
+`autoresearch_dmt.py`). After an honest-rescored run the frontier sits at **~2.75
+features** (`feat-download_transmission`) and has not broken out — the single-vector
+ceiling we predicted.
 
-## The key insight (why "search for a subspace" by itself is a trap)
+## Why a single vector caps out (diagnostic, 2026-06-07)
 
-A **static** subspace dose `h + Σ αᵢ·vᵢ` **is just a single vector** `w = Σ αᵢ·vᵢ`,
-and the current search already ranges over *all* directions in ℝ³⁸⁴⁰ — which contains
-every vector in every subspace. So "find the best subspace, then dose with a vector
-from it" reaches **nothing the single-vector search can't already reach**. A static
-single-layer subspace can only ever be a *search-efficiency trick* (a smart region to
-seed/constrain the hill-climb), never an expressivity gain — it cannot break the
-single-vector ceiling.
+`scripts/dmt_offmanifold_diagnostic.py` dosed the leader across a wide α range and
+measured DMT features vs off-manifold drift (`trajectory.py` `off_ortho`, the metric
+`/trip` shows). Features peak at α≈0.25 then collapse to 0 as the dose drives sharply
+off-manifold (off_ortho 0.59→0.91). **You can't push a single linear vector harder to
+get more features — harder = off-manifold = incoherent.** That off-manifold wall is the
+opening for a multi-dimensional / curved approach.
 
-To genuinely exceed a single static L20 vector, the intervention must stop being one
-static additive vector. Exactly three ways:
+## The corrected framing (NOT token windows)
 
-1. **Time-varying path (trajectory steering)** — the dose direction changes over
-   generation: `h_t + v(t)`, tracing a curve. NOT reducible to a static vector. The
-   real "manifold" move.
-2. **Multi-layer** — directions at several layers (L16/L20/L24) at once. Not reducible
-   to one L20 vector — but breaks the "a single direction at L20" deliverable framing.
-3. **Non-additive operator** — project/constrain the residual onto a fitted DMT
-   manifold instead of adding (the `project_out` ablation operator, inverted).
+A *static* multi-direction dose `h + Σ αᵢ·vᵢ` is just a single vector `Σ αᵢ·vᵢ`, and the
+search already ranges over all vectors — so a static subspace adds no reach, only
+search efficiency. Genuine gains require one of:
+1. **Occupy a multi-axis point coherently** — the DMT-coherent states form a curved,
+   low-dim **manifold** with several intrinsic axes; set many axes high at once and
+   reach that point by an **on-manifold (curved) path** so it stays coherent. This is
+   the real "use multiple dimensions" move (Wurgaft's *factored control*).
+2. **Multi-layer** steering (breaks the "single direction at L20" deliverable framing —
+   separate thread; see `MANIFOLD_ABLATION.md`).
+3. **Non-additive operator** (project/constrain onto the manifold).
 
-## Why a path could beat a point (mechanism)
+**NLA is not involved.** The wiki frames these papers through CI's NLA verdict
+instrument, but trips/chat/DMT-AR don't use NLA. The "behavior map" the manifold
+pullback needs is, for us, **the DMT scorer itself** (feature count). No NLA dependency.
 
-Raising α on `h + α·v` eventually **teleports the residual off-manifold** → coherence
-breaks → word-salad → the judge scores it low. Features peak at a moderate α then
-collapse. A curved/scheduled path can traverse **more coherent state-space distance**
-while staying on-manifold, potentially expressing more of the phenomenology before it
-breaks. The win isn't reaching a different static point (a single vector could reach
-that) — it's *travelling further without falling off the manifold*. This is exactly
-the Wurgaft "manifold steering" reframe ("from finding the right direction to finding
-the right geometry") and what CI's shipped `/trip` off-manifold metric measures.
-Phenomenologically apt too: a trip is a trajectory (onset → visual → entity contact →
-insight → return), not a fixed state.
+### Why this can beat the wall
+- **Reach deeper, coherently** — a geodesic curves *around* the off-manifold region a
+  straight push falls into, reaching high-DMT states while staying coherent.
+- **Factored control** — Wurgaft shows manifold steering can move several intrinsic
+  axes at once. The leader maxes the dominant axis but is ~zero on the agency/otherness
+  axis; a 2-D steer could hold the dominant axis high AND add agency/otherness features
+  the leader structurally can't.
 
-## Diagnostic (2026-06-07): is the ceiling an off-manifold wall?
+## Supporting papers (Drift's wiki)
 
-`scripts/dmt_offmanifold_diagnostic.py` doses the leader across a wide α range and, at
-each α, measures DMT-feature count vs. off-manifold drift (`off_ortho_mean`, the
-`trajectory.py` metric `/trip` shows) of the dosed L32 trajectory vs. a raw (undosed)
-one. Result (leader `feat-download_transmission`, RAW baseline off_ortho = 0.371):
+- `som-multi-direction-refusal` (Piras, AAAI-26) — a concept is a low-dim **manifold**;
+  extract a coherent rank-K family via a **SOM** (topology-constrained chart, not
+  independent rays); reduces to single-direction at K=1. The **extraction** method.
+- `manifold-steering-shared-geometry` (Wurgaft/Bhalla/Fel) + `rhizonymph-manifold-emotion-steering`
+  — steer **along the manifold's curve** (intrinsic-coordinate interpolation / route
+  through centroids), not a straight line. Geodesic↔behavior r≈0.99 vs 0.06 linear in
+  the curved case. The **steering** method + the deciding test.
+- `fel-bhalla-ci-manifold-ablation` (MPA) — the ablation twin: ordered, conditionally-
+  orthogonal directions applied to the *recomputed* residual, staying on the curve.
+- `sae-concept-manifolds` (Goodfire/Bhalla) — concepts are curved manifolds; one
+  direction tiles only a patch.
+- Unifying thesis: **"recast steering from finding the right *direction* to finding the
+  right *geometry*."**
 
-| α | mean features | off_ortho | Δ vs raw |
+## Step 0 — flat-vs-curved diagnostic (decides whether to build it)
+
+**Part A — direction-set geometry (free, no M). DONE 2026-06-08.**
+Participation ratio + cosines of the top-12 honest DMT directions:
+- **eff-dim ≈ 2.03** — not collinear (so not a pure single-ray regime), not high-dim.
+- **One dominant axis:** leader + `noetic_truth` 0.92, `blend_dissolution` 0.92,
+  `unity_merging` 0.91, `love/awe/excitement/sublime` 0.84–0.85 (those four ≈ identical).
+- **A real second axis:** `independent_agency` cos **−0.41** to the leader (and 0.12 to
+  `otherness`); `otherness` 0.74; discovered `gen55/gen97_mutate` 0.74–0.75. An
+  **"agency/otherness" axis** the leader doesn't touch.
+- **Verdict:** multi-dimensional structure confirmed (~2-D), modest. Justifies Part B.
+
+**Part B1 — static subspace grid (next, needs M, ~45 min).** Build a 2–3D subspace from
+`{download_transmission, independent_agency, otherness}`, orthonormalize, grid
+**independent** amplitudes `Σ αᵢ bᵢ`, score each with the noise-controlled scorer + track
+`off_ortho`. If a static multi-axis point beats 2.75 coherently → cheap win (a better
+vector in the subspace, fold subspace search into the loop). If the high-feature point
+goes off-manifold → curvature matters → Part B2.
+
+**Part B2 — geodesic curvature test + manifold steering (only if B1 hits the wall).**
+Capture **L20** activations (the dose layer, not L32), fit the manifold through centroids
+(SOM or PCA+centroids), geodesic-vs-linear correlation; if curved, build position-
+dependent on-manifold steering and search the K-dim intrinsic coordinates.
+
+Keep K ≤ ~4 so the deliverable stays a decodable object (subspace + target point).
+
+## Live experiment — DIMENSION HUNT (2026-06-08, temporary)
+
+Before B1, we're spending today letting the search **actively hunt new axes** (could it
+find a 3rd/4th productive dimension? that would enlarge the manifold and change the
+framing). The current fitness rewards *feature count*, which biases toward the dominant
+axis; for one day we bias toward **novelty/exploration** instead. Temporary constant
+changes in `autoresearch_dmt.py` (clearly marked, **revert tonight**):
+
+| knob | production | hunt | why |
 |---|---|---|---|
-| 0.15 | 0.67 | 0.501 | +0.131 |
-| **0.25** | **1.67** | 0.587 | +0.216 |
-| 0.45 | 1.33 | 0.561 | +0.191 |
-| 0.70 | 0.33 | 0.750 | +0.380 |
-| 1.00 | 0.00 | 0.913 | +0.542 |
-| 1.40 | 0.00 | 0.925 | +0.554 |
+| `DMT_GEN_WEIGHTS` | x.05/mut.40/ref.25/inj.30 | **x.10/mut.20/ref.05/inj.65** | pour budget into random exploration; refine (hones the known axis) nearly off |
+| `DISTINCT_TAU` | 0.90 | **0.80** | reject candidates within cos 0.80 of any committed direction → commits must be in NEW regions, not copies of axis 1 |
+| `MIN_SCORE_TO_COMMIT` | 1.0 | **0.5** | keep weak-but-distinct directions as map points (see WHERE off-axis signal exists) |
 
-**Read 1 — off-manifold wall: SUPPORTED.** Features peak in a narrow low-α window
-(α≈0.25) and collapse to 0 as α rises and the dose drives sharply off-manifold
-(off_ortho 0.59 → 0.91). You *can't push the linear dose harder to get more features* —
-harder = off-manifold = incoherent. That's the signature a coherent **path** could
-get past. → path steering is worth prototyping.
+All mechanisms kept (none zeroed). Atlas preserved + backed up. **Revert to production
+values tonight** and run B1 against the (hopefully richer) atlas.
 
-**Read 2 — IMPORTANT caveat: the frontier is still noise-inflated.** The leader
-committed at **mean 3.8** but re-scores here at **~1.5–1.7** (α=0.25 samples [1,3,1];
-α=0.45 [2,0,2]). Averaging 5 samples reduced per-sample noise but the *search* still
-selects lucky means (every commit/refine took an upward draw of mean-of-5), so the
-board's frontier is inflated; the leader's **reliable** level is ~1.5–2 features, not
-3.8. Raw/undosed self-report scores 0, so the dose *does* induce features — just
-modestly and noisily. Any path search inherits this noisy objective; it may need more
-samples per candidate or a less noisy scorer (cf. the LoRA self-explainer idea) before
-"path beats point" can be measured cleanly.
+**Check-in (no auto-reporter — run on demand):**
+`uv run python -m cells_interlinked.scripts.dmt_dimension_check` — prints eff-dim of the
+productive set, the off-dominant-axis directions, and the diff since the hunt baseline
+(`/tmp/dmt_hunt_baseline.json`). Tells us if eff-dim is climbing (new axes found) or
+flat (~2-D confirmed → run B1).
 
-## Design options (if we pursue it), ranked by upside-per-effort
+**Reading it tonight:**
+- eff-dim climbing / new off-axis directions → the bet is paying; bigger subspace for B1.
+- eff-dim flat at ~2 → structure is genuinely ~2-D → run B1 on the {dominant, agency,
+  otherness} subspace.
 
-1. **Trajectory steering through a low-rank subspace (the real experiment).** Build a
-   rank-2/3 orthonormal subspace from the atlas's best *distinct* directions
-   (`gram_schmidt` already exists; e.g. download_transmission + otherness/independent_agency
-   + a dissolution direction). Dose along a *scheduled path* through it (ramp into
-   direction 1, then 2, then 3 over generation) instead of a static sum. Generalizes
-   the existing single-vector ramp hook to a piecewise schedule. **Genuinely more
-   expressive, phenomenologically motivated, still a CI-decodable deliverable**
-   (rank-k subspace + schedule is interpretable / NLA-decodable). Cost: search now
-   includes the schedule (more candidates), each still one generation.
-2. **Static subspace as a search trick (cheap, limited).** Generalize `crossover` from
-   `w·a+(1−w)·b` (one knob, a point on a line) to `Σ αᵢ·vᵢ` over the top-K with
-   *independent* weights. Easy, may find a better combined vector than pairwise
-   crossover — but **cannot beat single-vector reach**, only find it faster. Frame as
-   "better crossover," not "manifold steering."
-3. **Manifold-constrained intervention (principled, ambitious, defer).** Fit a low-dim
-   manifold to the real DMT-state activations we already capture, steer along geodesics
-   / project onto it (faithful Wurgaft/Goodfire). Right version if curvature clearly
-   dominates; deliverable gets murkier (a curved manifold is less cleanly "a decodable
-   direction"). Only after (1) shows trajectories beat static.
+## Honest risks
 
-Keep it **low-rank (k≤~4)** to preserve the decodable-direction deliverable. Multi-layer
-steering (option 2 in the insight list) is also genuinely more expressive and is on the
-`/trip` roadmap (`MANIFOLD_ABLATION.md`: SOM rank-16, Zhao two-direction) but breaks the
-"single direction at L20" framing — keep it a separate thread.
+- The structure may genuinely be ~2-D (modest headroom); B1 still tests the cheap win.
+- Hunt mode lowers the floor → re-admits some noise for the day (acceptable; revert tonight;
+  eff-dim/cosine structure is robust to score noise).
+- B2 (geodesic steering) is a real build and inherits the noisy objective — keep the
+  noise controls on.
+- Layer discipline: fit/steer at **L20**, not L32.
 
-## Open questions / risks
+## Contingency
 
-- **Noise first.** The frontier is inflated (~3.8 board vs ~1.5–2 reliable). Decide
-  whether to harden the scorer (more samples / activation-readout) before or alongside
-  path search — otherwise "path beats point" is unmeasurable.
-- **Scoring cost.** The scorer is the bottleneck (~12–15 min/candidate). A schedule
-  search multiplies the candidate count; budget accordingly.
-- **Decodability.** A rank-≤4 subspace + schedule stays decodable; a full curved
-  manifold or multi-layer object does not, cleanly. Don't drift out of the frame.
-- **Does a path actually clear the wall?** The diagnostic shows linear hits a wall; it
-  does NOT yet show a path gets past it. That's the experiment.
+**WWDC 2026 is later today.** If Apple ships significant AI tooling we may pause this work
+to evaluate it. Until then, focus is the dimension hunt. The hunt is fully reversible and
+the atlas is backed up, so pausing/parking costs nothing.
 
 ## Pointers
 
-- `scripts/dmt_offmanifold_diagnostic.py` — the diagnostic above (re-runnable).
-- `pipeline/trajectory.py` — `compute_raw_basis` / `build_series` / `off_ortho` (the
-  manifold metric, shared with `/trip`).
-- `pipeline/abliteration.py` — `install_runtime_steering_hook`, `gram_schmidt`,
-  subspace-aware ablation (`[K, d_model]` basis precedent).
-- `docs/MANIFOLD_ABLATION.md` — CI's manifold-aware ablation thread + roadmap.
-- Wiki: `concepts/manifold-steering-shared-geometry.md` (Wurgaft), `sae-concept-manifolds.md`
-  (Goodfire/Bhalla/Fel), `self-explanation-privileged-access.md` (the handoff's paper).
-- `CI_LORA_DMT_HANDOFF.md` (iCloud) — Drift's handoff that kicked this off.
+- `scripts/dmt_offmanifold_diagnostic.py` — the off-manifold wall diagnostic.
+- `scripts/dmt_dimension_check.py` — the on-demand hunt check-in.
+- `scripts/rescore_dmt_atlas.py` — the noise-control rescore (template for B1/B2 capture).
+- `pipeline/trajectory.py` — `off_ortho` / manifold metric (shared with `/trip`).
+- `pipeline/abliteration.py` — steering hook, `gram_schmidt`, subspace-ablation precedent.
+- Wiki: `som-multi-direction-refusal`, `manifold-steering-shared-geometry`,
+  `rhizonymph-manifold-emotion-steering`, `fel-bhalla-ci-manifold-ablation`,
+  `sae-concept-manifolds`.
+- `docs/MANIFOLD_ABLATION.md` — CI's manifold-ablation thread; `CI_LORA_DMT_HANDOFF.md` (iCloud).

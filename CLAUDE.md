@@ -439,10 +439,12 @@ docs/
   MANIFOLD_ABLATION.md     current direction: manifold-aware ablation —
                            shipped off-manifold metric + roadmap (SOM rank-16,
                            Zhao two-direction, 3D surface rendering)
-  DMT_PATH_SEARCH.md       possible direction: extend the DMT vector search to a
-                           PATH (trajectory) search — diagnostic confirms an
-                           off-manifold wall; static subspace ≠ gain, a path is.
-                           Not built. (scripts/dmt_offmanifold_diagnostic.py)
+  DMT_PATH_SEARCH.md       current direction: multi-dimensional MANIFOLD steering
+                           for DMT — off-manifold wall confirmed; productive
+                           region is ~2-D (dominant axis + agency/otherness axis);
+                           Step-0 diagnostics + a temporary "dimension-hunt" run.
+                           (scripts/dmt_offmanifold_diagnostic.py,
+                           dmt_dimension_check.py) NLA not involved.
   PROTOCOLS.md             chat interrogation protocols (BERG, LINDSEY,
                            ELEOS, SCHNEIDER, CHALMERS, JANUS, BUTLIN).
                            Each is a preset library of prompts grounded

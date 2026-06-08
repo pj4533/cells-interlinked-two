@@ -36,11 +36,30 @@ import time
 import torch
 
 from .autoresearch_base import (
-    DISTINCT_TAU,
+    DISTINCT_TAU as _BASE_DISTINCT_TAU,  # noqa: F401 — shadowed below for the diversity hunt
     LEAD_PROMPT,
     AutoresearchBase,
     _unit,
 )
+
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║ DIVERSITY-HUNT MODE — TEMPORARY (2026-06-08, revert tonight)          ║
+# ║ Goal for today: find NEW productive DMT *dimensions* (axes orthogonal ║
+# ║ to the current ~2-D structure), not climb the known axis. Part A      ║
+# ║ found the productive directions span eff-dim ≈ 2 (one dominant axis +  ║
+# ║ an agency/otherness axis). To hunt more axes we (a) pour the generator ║
+# ║ budget into INJECT (random exploration), (b) tighten the distinct gate ║
+# ║ so near-axis-1 duplicates are rejected and only genuinely new regions  ║
+# ║ commit, and (c) lower the commit floor so weak-but-distinct directions ║
+# ║ are kept as map points. All three are simple constants; REVERT to the  ║
+# ║ noise-controlled production values tonight (see docs/DMT_PATH_SEARCH). ║
+# ║   production → hunt:                                                   ║
+# ║   GEN_WEIGHTS inject .30→.65, mutate .40→.20, refine .25→.05, x .05→.10║
+# ║   DISTINCT_TAU 0.90→0.80   ·   MIN_SCORE_TO_COMMIT 1.0→0.5            ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+DISTINCT_TAU = 0.80          # HUNT (prod 0.90): reject candidates within cos 0.80 of any
+                             # committed direction → forces commits into NEW regions, not
+                             # more copies of the dominant axis.
 from .dmt_features import DMT_FEATURES, FEATURE_IDS, features_block
 from .dmt_feature_seeds import FEATURE_SEED_NAMES
 from .dmt_blend_seeds import BLEND_NAMES
@@ -95,7 +114,8 @@ DOSE_PROMPTS = [LEAD_PROMPT]
 # than the old lucky maxes; a direction that reliably averages ≥1 feature is real).
 # Appends commit on distinct + this floor; SEEDS are force-committed (the reset
 # foundation: we want every emotion/trait/blend's honest mean on the board).
-MIN_SCORE_TO_COMMIT = 1.0
+MIN_SCORE_TO_COMMIT = 0.5    # HUNT (prod 1.0): keep weak-but-distinct directions as map
+                             # points so we can see WHERE off-axis DMT signal exists at all.
 JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
 
 # Generator mix — rebalanced to what the atlas data says works. Tally over the
@@ -105,7 +125,7 @@ JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + q
 # ate 40% of the budget and produced ZERO top performers (it averages the sparse
 # off-axis spikes back toward the emotion-like bulk of the atlas). So: pour budget
 # into discover (inject) → hone (mutate/refine), and nearly drop crossover.
-DMT_GEN_WEIGHTS = {"crossover": 0.05, "mutate": 0.40, "refine": 0.25, "inject": 0.30}
+DMT_GEN_WEIGHTS = {"crossover": 0.10, "mutate": 0.20, "refine": 0.05, "inject": 0.65}  # HUNT (prod .05/.40/.25/.30): inject-dominant to explore new regions
 REFINE_NOISE = 0.25          # unit(champion + 0.25·noise⊥) → cos ≈ 0.97 (a hone, not a jump)
 TOP_K_REFINE = 5             # refine rotates among the top-K highest-scoring directions
 
