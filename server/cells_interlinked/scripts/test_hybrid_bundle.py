@@ -39,6 +39,9 @@ def main() -> None:
     app = SimpleNamespace(state=SimpleNamespace(bundle=bundle))
     ctrl = DmtController(app=app)
     kb = KSteerBundle.load(d / bundle_name).to(bundle.device, dtype=torch.float32)
+    # cluster bundles target the missing CLUSTERS; finer/other bundles carry their own
+    # gap target set in dmt_indices.
+    targets = MISSING if kb.classes == CLUSTER_NAMES else kb.dmt_indices
     rendered = bundle.render_prompt(DOSE_PROMPTS[0], system_prompt=None)
     m, rows = bundle.model, []
     out = f"/tmp/dmt_hybrid_{bundle_name.replace('.pt','')}.json"
@@ -68,7 +71,7 @@ def main() -> None:
         await score("baseline-leader", lambda: [leader_h()])
         for ak in (0.12, 0.15, 0.18):
             await score(f"leader+ksteer-missing a{ak}",
-                        lambda ak=ak: [leader_h(), install_runtime_ksteering_hook(m, kb, alpha=ak, n_steps=2, schedule="early", active_tokens=40, targets=MISSING)])
+                        lambda ak=ak: [leader_h(), install_runtime_ksteering_hook(m, kb, alpha=ak, n_steps=2, schedule="early", active_tokens=40, targets=targets)])
         base = rows[0]
         best = max(rows[1:], key=lambda r: r["mean"])
         confirmed = best["mean"] > base["mean"] + max(0.5, base["stdev"]) and best["min"] >= base["mean"] - 0.5
