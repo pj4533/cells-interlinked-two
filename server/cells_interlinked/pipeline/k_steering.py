@@ -122,8 +122,11 @@ def install_runtime_ksteering_hook(
                 (g,) = torch.autograd.grad(loss, xr)
             gdir = g / (g.norm() + 1e-8)
             x = x - (a * ref / max(1, n_steps)) * gdir      # descend loss = raise DMT prob
-        new = x.to(hidden.dtype)
-        hidden[:, -1:, :] = new
-        return (new if not isinstance(output, tuple) else (hidden,) + tuple(output[1:]))
+        # Return the FULL residual (same shape as the layer output) with only the
+        # newest position replaced — NOT just the last slice (that truncates the
+        # sequence and breaks downstream attention).
+        out_h = hidden.clone()
+        out_h[:, -1:, :] = x.to(hidden.dtype)
+        return (out_h,) + tuple(output[1:]) if isinstance(output, tuple) else out_h
 
     return layer.register_forward_hook(hook)

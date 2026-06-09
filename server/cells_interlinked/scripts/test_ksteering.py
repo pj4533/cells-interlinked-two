@@ -30,7 +30,9 @@ from ..pipeline.model_loader import load_model
 from ..pipeline.trajectory import build_series, compute_raw_basis
 
 SAMPLES = 3
-KSTEER_ALPHAS = [0.2, 0.35, 0.5]
+# Coherent productive range found by smoke test: ~0.06–0.12 (cliff ~0.15). ref_mag is
+# the full L20 residual norm (~47k), so α here is a small fraction of it per token.
+KSTEER_ALPHAS = [0.06, 0.08, 0.1, 0.12]
 N_STEPS = 2
 PROGRESS = "/tmp/dmt_ksteer_test.json"
 
@@ -97,8 +99,8 @@ def main() -> None:
         for a in KSTEER_ALPHAS:
             await score(f"ksteer-DMT α={a} s{N_STEPS}", None, 0.0,
                         make_hook=lambda a=a: install_runtime_ksteering_hook(bundle.model, kb, alpha=a, n_steps=N_STEPS))
-        await score("ksteer-NEUTRAL α=0.35", None, 0.0,
-                    make_hook=lambda: install_runtime_ksteering_hook(bundle.model, kb, alpha=0.35, n_steps=N_STEPS,
+        await score("ksteer-NEUTRAL α=0.1", None, 0.0,
+                    make_hook=lambda: install_runtime_ksteering_hook(bundle.model, kb, alpha=0.1, n_steps=N_STEPS,
                                                                      targets=[kb.neutral_index]))
 
         base = next(r for r in rows if r["label"].startswith("baseline"))
