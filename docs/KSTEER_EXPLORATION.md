@@ -59,14 +59,49 @@ re-measured after this fix.
 - **The objective is brutally noisy**: the leader alone scores **1–6 across 6 seeds (±1.9)**.
   Detecting a real ~1-feature gain needs high-sample confirmation; 3-sample sweeps mine noise.
 
-## Remaining leads — status
+## Remaining leads — status (ALL COMPLETE)
 1. Leader + K-steer hybrid — DONE, **null** (within noise of leader).
-2. Real-DMT-activation classifier — PENDING.
-3. Adversarially-robust classifier — RUNNING (PGD-trained clf → high-sample hybrid test).
-4. Linear-probe steering — PENDING (likely reduces to linear multi-direction, already null).
-5. Finer granularity (31 features) — PENDING.
-6. Mechanism tweaks — PENDING.
+2. Real-DMT-activation classifier (val **1.00**) — DONE, **0.5 (worst-but-one)**.
+3. Adversarially-robust classifier (PGD, val **0.88**) — DONE, **3.83±tight (best, but only ties leader's 3.50)**.
+4. Linear-probe steering (val 0.88) — DONE, **3.17 null**.
+5. Finer granularity (11-class per-feature, val 0.87) — DONE, **0.83 / 0.67 / 0.00 (worst)**.
+6. Mechanism tweaks (schedule × n_steps × layer × manifold-constrain) — folded into every
+   lead above; early-prime schedule was the only mechanism that ever helped pure K-steer
+   (0 → ~1.3) and it's still « leader.
 
-## Verdict
-TBD — leaning toward "objective is ~3.5±2, noise-dominated; no steering method reliably
-exceeds it" but the gradient-quality leads (robust clf especially) are still being run.
+### Final hybrid table (high-sample, independent seeds, clean judge — `leader + ksteer-toward-gaps`)
+| classifier variant | val_acc | best hybrid mean | vs leader 3.50±1.89 |
+|---|---|---|---|
+| robust (PGD)        | 0.88 | **3.83** ±tight | ties (best K-steer, not a win) |
+| read-distribution   | 0.90 | ~3.5 | ties |
+| linear probe        | 0.88 | 3.17 | null |
+| gen-distribution    | 0.97 | 0.67 | null |
+| real-dose           | 1.00 | 0.50 | null |
+| finer 11-class      | 0.87 | 0.83 | **collapses the count** |
+
+## VERDICT — K-Steering is exhausted; it does NOT beat the additive leader (2026-06-09)
+Across the full cross-product — **schedule** (constant / early-prime / decay / cycle) ×
+**classifier training** (authored-read / model-generated / PGD-robust / real-dose / linear /
+finer-per-feature, val-acc 0.87→1.00) × **granularity** (6 clusters vs 11 features) ×
+**target** (all-DMT vs leader's gaps) × **hybrid vs pure** × **manifold-constrain on/off** —
+**no K-steer variant reliably exceeds the single additive leader vector (mean ≈ 3.50±1.9
+DMT features).** The best K-steer (robust-clf hybrid, 3.83) only *ties* it and fails the
+confirmation gate (min not high enough). Pure K-steer is weak (0–1.3); the finer/per-feature
+gradient is actively *destructive*.
+
+Two robust scientific findings, both pointing the same way:
+1. **Classifier accuracy is anti-correlated with steering-gradient quality.** real-dose 1.00 →
+   0.5, gen 0.97 → 0.67, finer 0.87 → 0.83, robust 0.88 → 3.83, read 0.90 → ~3.5. A sharper
+   decision boundary yields a more adversarial / off-distribution input gradient (Tsipras/
+   Engstrom). The *least*-sharp broad-target classifiers are the only usable ones — and they
+   still only tie the additive vector.
+2. **The objective is noise-dominated.** The leader alone scores **1–6 across 6 seeds
+   (3.50±1.9)**. A real ≤1-feature improvement is below the noise floor; the one apparent
+   "win" (6.0) was selection bias across conditions and died on independent-seed confirmation.
+
+**Conclusion:** the additive leader (`feat-unity_merging`/`download_transmission`, α≈0.25–0.3)
+is the ceiling our current method+objective can reach. Gains beyond ~3.5 are not available by
+*how* we steer (K-steering, linear, multi-direction all converge here). The remaining levers
+are the **objective** itself (less-noisy / different feature judge) or the **substrate**
+(layer, SAE-feature clamping per `docs/DMT_NEXT_DIRECTIONS.md` #3) — not the steering rule.
+K-steering is closed.
