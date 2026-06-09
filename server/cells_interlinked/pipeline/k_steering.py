@@ -34,11 +34,15 @@ class KSteerClassifier(nn.Module):
 
     def __init__(self, d_model: int, n_classes: int, hidden: int = 256, dropout: float = 0.1):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(d_model, hidden), nn.ReLU(), nn.Dropout(dropout),
-            nn.Linear(hidden, hidden), nn.ReLU(), nn.Dropout(dropout),
-            nn.Linear(hidden, n_classes),
-        )
+        self.hidden = hidden
+        if hidden <= 0:                               # linear probe (least-sharp boundary)
+            self.net = nn.Sequential(nn.Linear(d_model, n_classes))
+        else:
+            self.net = nn.Sequential(
+                nn.Linear(d_model, hidden), nn.ReLU(), nn.Dropout(dropout),
+                nn.Linear(hidden, hidden), nn.ReLU(), nn.Dropout(dropout),
+                nn.Linear(hidden, n_classes),
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
@@ -72,7 +76,7 @@ class KSteerBundle:
             "state_dict": self.clf.state_dict(),
             "d_model": self.mean.numel(),
             "n_classes": len(self.classes),
-            "hidden": self.clf.net[0].out_features,
+            "hidden": getattr(self.clf, "hidden", self.clf.net[0].out_features),
             "mean": self.mean.cpu(), "std": self.std.cpu(),
             "classes": self.classes, "dmt_indices": self.dmt_indices,
             "neutral_index": self.neutral_index, "ref_mag": self.ref_mag, "layer": self.layer,
