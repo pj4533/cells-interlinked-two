@@ -91,40 +91,65 @@ def install_runtime_ksteering_hook(
     n_steps: int = 2,
     ramp_tokens: int = 16,
     targets: list | None = None,     # class indices to push UP (default: all DMT clusters)
+    schedule: str = "constant",      # "constant" | "early" | "decay"
+    active_tokens: int = 40,         # for early/decay: how many tokens to steer
+    cycle_targets: bool = False,     # target a DIFFERENT DMT cluster each token (temporal multiplex)
 ):
     """Forward hook on decoder layer `bundle.layer` that, each generated token, nudges
     the NEWEST position's residual along the gradient that raises the summed softmax
-    probability of the target (DMT) classes. Step size per inner step is
-    `(alpha·ref_mag)/n_steps` along the unit gradient, ramped over `ramp_tokens`.
-    Returns the handle; caller `.remove()`s it. Only `bundle.clf` is differentiated
-    (the big model is not), so this is cheap."""
+    probability of the target (DMT) classes. Step per inner step is
+    `(α_eff·ref_mag)/n_steps` along the unit gradient. Only `bundle.clf` is
+    differentiated (the big model is not), so it's cheap. Returns the handle.
+
+    Schedules (constant-full-length steering drifts off-manifold over a long report —
+    coherent for ~60 tokens then collapses):
+      - "constant": ramp 0→α over ramp_tokens, then hold (original behavior).
+      - "early":   ramp 0→α over ramp_tokens, hold to `active_tokens`, then RELEASE
+                   (no steering) — prime the trajectory into DMT-space, then let the
+                   report unfold coherently from the primed context (the KV cache
+                   carries the steered early states). Mirrors a dose onset.
+      - "decay":   ramp 0→α, then linearly decay to 0 by `active_tokens`, then release.
+
+    cycle_targets: at token t, push toward DMT cluster `dmt[t % K]` instead of all at
+    once — forces the report to traverse different feature regions (temporal multiplex)."""
     layers = _find_decoder_layers(model)
     layer = layers[bundle.layer]
     clf, mean, std = bundle.clf, bundle.mean, bundle.std
-    tgt = torch.tensor(bundle.dmt_indices if targets is None else targets, device=mean.device)
+    base_tgt = bundle.dmt_indices if targets is None else targets
+    dmt = bundle.dmt_indices
     ref = bundle.ref_mag
     step = [0]
 
+    def _alpha_eff(s: int) -> float:
+        if schedule == "early":
+            if s > active_tokens:
+                return 0.0
+            return float(alpha) * min(1.0, s / max(1, ramp_tokens))
+        if schedule == "decay":
+            if s > active_tokens:
+                return 0.0
+            if s <= ramp_tokens:
+                return float(alpha) * (s / max(1, ramp_tokens))
+            return float(alpha) * max(0.0, 1.0 - (s - ramp_tokens) / max(1, active_tokens - ramp_tokens))
+        return float(alpha) * min(1.0, s / max(1, ramp_tokens))   # constant
+
     def hook(_m, _i, output):
         hidden = output[0] if isinstance(output, tuple) else output
-        last = hidden[:, -1:, :].detach().float()           # [B,1,D]
         step[0] += 1
-        frac = min(1.0, step[0] / max(1, ramp_tokens))
-        a = float(alpha) * frac
+        a = _alpha_eff(step[0])
+        if a <= 0.0:
+            return None                                     # released → output unchanged
+        tgt = torch.tensor([dmt[(step[0] - 1) % len(dmt)]] if cycle_targets else base_tgt, device=mean.device)
+        last = hidden[:, -1:, :].detach().float()
         x = last.clone()
         for _ in range(max(1, n_steps)):
             with torch.enable_grad():
                 xr = x.clone().requires_grad_(True)
-                logits = clf((xr - mean) / std)             # [B,1,K]
-                probs = torch.softmax(logits, dim=-1)
-                # maximize total probability mass on the DMT classes
+                probs = torch.softmax(clf((xr - mean) / std), dim=-1)
                 loss = -probs[..., tgt].sum()
                 (g,) = torch.autograd.grad(loss, xr)
             gdir = g / (g.norm() + 1e-8)
-            x = x - (a * ref / max(1, n_steps)) * gdir      # descend loss = raise DMT prob
-        # Return the FULL residual (same shape as the layer output) with only the
-        # newest position replaced — NOT just the last slice (that truncates the
-        # sequence and breaks downstream attention).
+            x = x - (a * ref / max(1, n_steps)) * gdir
         out_h = hidden.clone()
         out_h[:, -1:, :] = x.to(hidden.dtype)
         return (out_h,) + tuple(output[1:]) if isinstance(output, tuple) else out_h
