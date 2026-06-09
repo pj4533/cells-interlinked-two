@@ -73,6 +73,10 @@ def main() -> None:
                 X.shape[0], d_model,
                 {CLUSTER_NAMES[c]: int((y == c).sum()) for c in range(len(CLUSTER_NAMES))}, ref_mag)
 
+    # PCA manifold basis (for the on-manifold gradient-constraint option)
+    _U, _S, Vh = torch.linalg.svd(X - mean, full_matrices=False)
+    manifold_basis = Vh[:64].contiguous()
+
     Xs = (X - mean) / std
     g = torch.Generator().manual_seed(0)
     perm = torch.randperm(Xs.shape[0], generator=g)
@@ -112,7 +116,7 @@ def main() -> None:
     out = settings.db_path.parent / "ksteering_dmt.pt"
     KSteerBundle(clf=clf, mean=mean, std=std, classes=CLUSTER_NAMES,
                  dmt_indices=DMT_INDICES, neutral_index=NEUTRAL_INDEX,
-                 ref_mag=ref_mag, layer=STEER_LAYER).save(out)
+                 ref_mag=ref_mag, layer=STEER_LAYER, manifold_basis=manifold_basis).save(out)
     logger.info("saved K-steering bundle → %s", out)
 
 

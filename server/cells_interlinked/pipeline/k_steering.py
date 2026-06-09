@@ -54,6 +54,8 @@ class KSteerBundle:
     neutral_index: int
     ref_mag: float            # median L20 residual norm (step scaling)
     layer: int
+    manifold_basis: torch.Tensor | None = None   # [n_pc, d_model] orthonormal PCs of real
+                                                 # activations — to project the gradient ON-manifold
 
     def to(self, device, dtype=torch.float32) -> "KSteerBundle":
         self.clf = self.clf.to(device=device, dtype=dtype).eval()
@@ -61,6 +63,8 @@ class KSteerBundle:
             p.requires_grad_(False)
         self.mean = self.mean.to(device=device, dtype=dtype)
         self.std = self.std.to(device=device, dtype=dtype)
+        if self.manifold_basis is not None:
+            self.manifold_basis = self.manifold_basis.to(device=device, dtype=dtype)
         return self
 
     def save(self, path) -> None:
@@ -72,6 +76,7 @@ class KSteerBundle:
             "mean": self.mean.cpu(), "std": self.std.cpu(),
             "classes": self.classes, "dmt_indices": self.dmt_indices,
             "neutral_index": self.neutral_index, "ref_mag": self.ref_mag, "layer": self.layer,
+            "manifold_basis": None if self.manifold_basis is None else self.manifold_basis.cpu(),
         }, path)
 
     @staticmethod
@@ -81,7 +86,8 @@ class KSteerBundle:
         clf.load_state_dict(b["state_dict"])
         return KSteerBundle(clf=clf, mean=b["mean"], std=b["std"], classes=b["classes"],
                             dmt_indices=b["dmt_indices"], neutral_index=b["neutral_index"],
-                            ref_mag=float(b["ref_mag"]), layer=int(b["layer"]))
+                            ref_mag=float(b["ref_mag"]), layer=int(b["layer"]),
+                            manifold_basis=b.get("manifold_basis"))
 
 
 def install_runtime_ksteering_hook(
@@ -94,6 +100,8 @@ def install_runtime_ksteering_hook(
     schedule: str = "constant",      # "constant" | "early" | "decay"
     active_tokens: int = 40,         # for early/decay: how many tokens to steer
     cycle_targets: bool = False,     # target a DIFFERENT DMT cluster each token (temporal multiplex)
+    constrain_manifold: bool = False,  # project the gradient onto bundle.manifold_basis (kill the
+                                       # adversarial/off-distribution component of a discriminative grad)
 ):
     """Forward hook on decoder layer `bundle.layer` that, each generated token, nudges
     the NEWEST position's residual along the gradient that raises the summed softmax
@@ -148,6 +156,9 @@ def install_runtime_ksteering_hook(
                 probs = torch.softmax(clf((xr - mean) / std), dim=-1)
                 loss = -probs[..., tgt].sum()
                 (g,) = torch.autograd.grad(loss, xr)
+            if constrain_manifold and bundle.manifold_basis is not None:
+                V = bundle.manifold_basis                    # [n_pc, D]
+                g = (g @ V.t()) @ V                          # project onto the real-activation subspace
             gdir = g / (g.norm() + 1e-8)
             x = x - (a * ref / max(1, n_steps)) * gdir
         out_h = hidden.clone()
