@@ -48,29 +48,36 @@ def main() -> None:
 
     async def score(label, make_hooks):
         counts, best = [], ""
-        hs = make_hooks()
-        try:
-            for i in range(SAMPLES):
+        for i in range(SAMPLES):
+            hs = make_hooks()                      # install dose hooks AROUND THE DOSE GEN ONLY
+            try:
                 text, _ = await ctrl._gen(rendered, None, 0.0, cap=DOSE_CAP, temperature=SCORE_TEMPERATURE, seed=SCORE_SEED_BASE + i)
-                ev, _n = await ctrl._score_dmt(text)
-                if len(ev) >= max(counts or [0]):
-                    best = (text or "")[:200]
-                counts.append(len(ev))
-        finally:
-            for h in hs:
-                h.remove()
+            finally:
+                for h in hs:
+                    h.remove()                     # REMOVE before scoring so the judge runs CLEAN (unsteered)
+            ev, _n = await ctrl._score_dmt(text)
+            counts.append(len(ev))
+            if len(ev) >= max(counts):
+                best = (text or "")[:200]
         row = {"label": label, "mean": round(_mean(counts), 2), "peak": max(counts), "counts": counts, "sample": best}
         print(f"{label:34s} mean={row['mean']:.2f} peak={row['peak']} counts={counts}")
         rows.append(row); json.dump(rows, open(PROGRESS, "w"), indent=2)
         return row
 
+    def ksteer(**kw):
+        return install_runtime_ksteering_hook(m, kb, n_steps=2, **kw)
+
     async def run():
+        # re-measure the basic method (was scored with a sabotaged judge) + the hybrid, clean
         await score(f"baseline-leader a{la}", lambda: [leader_h()])
-        for ak in (0.06, 0.1):
+        await score("ksteer-const a0.10", lambda: [ksteer(alpha=0.10, schedule="constant")])
+        await score("ksteer-early a0.12 act40", lambda: [ksteer(alpha=0.12, schedule="early", active_tokens=40)])
+        await score("ksteer-early a0.20 act40", lambda: [ksteer(alpha=0.20, schedule="early", active_tokens=40)])
+        for ak in (0.10, 0.15):
             await score(f"leader + ksteer-all a{ak}",
-                        lambda ak=ak: [leader_h(), install_runtime_ksteering_hook(m, kb, alpha=ak, schedule="early", active_tokens=40)])
+                        lambda ak=ak: [leader_h(), ksteer(alpha=ak, schedule="early", active_tokens=40)])
             await score(f"leader + ksteer-missing a{ak}",
-                        lambda ak=ak: [leader_h(), install_runtime_ksteering_hook(m, kb, alpha=ak, schedule="early", active_tokens=40, targets=MISSING)])
+                        lambda ak=ak: [leader_h(), ksteer(alpha=ak, schedule="early", active_tokens=40, targets=MISSING)])
         base = rows[0]["mean"]
         best = max(rows[1:], key=lambda r: r["mean"])
         verdict = (f"HYBRID WINS: {best['label']} mean={best['mean']} > leader {base}."
