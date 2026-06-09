@@ -42,5 +42,31 @@ and the data more fundamentally.
 6. **Mechanism tweaks** — PENDING. n_steps / line-search / other layers (L16/L24), folded
    onto whichever of the above looks best.
 
+## ⚠️ Scoring bug found (2026-06-09) — invalidated all earlier K-steer numbers
+The test scripts left the steering hook installed during the JUDGE's generation (inside
+`_score_dmt`), so K-steer was steering the judge → corrupted counts. Additive baselines
+were unaffected (their hook lives inside `_gen`). Fix: install/remove dose hooks around the
+DOSE generation only. All numbers above the "Results so far" table that involve K-steer were
+re-measured after this fix.
+
+## Corrected results (clean judge)
+- **pure K-steer is genuinely weak** even clean: constant α0.10 = 0.0; early α0.12 = 1.0;
+  early α0.20 = 0.67. The bug wasn't the whole story — pure K-steer doesn't induce much.
+- **Lead 1, hybrid (leader + ksteer):** discovery run looked like a WIN (leader+ksteer-missing
+  α0.15 = 6.0 vs leader 4.0), but **confirmation on independent seeds (6 samples) killed it**:
+  leader+ksteer-missing α0.15 = **3.33±1.11** vs **leader 3.50±1.89** — statistically identical.
+  The 6.0 was selection bias (max of 8 conditions) on 3 samples.
+- **The objective is brutally noisy**: the leader alone scores **1–6 across 6 seeds (±1.9)**.
+  Detecting a real ~1-feature gain needs high-sample confirmation; 3-sample sweeps mine noise.
+
+## Remaining leads — status
+1. Leader + K-steer hybrid — DONE, **null** (within noise of leader).
+2. Real-DMT-activation classifier — PENDING.
+3. Adversarially-robust classifier — RUNNING (PGD-trained clf → high-sample hybrid test).
+4. Linear-probe steering — PENDING (likely reduces to linear multi-direction, already null).
+5. Finer granularity (31 features) — PENDING.
+6. Mechanism tweaks — PENDING.
+
 ## Verdict
-TBD — updated when a lead wins or all are exhausted.
+TBD — leaning toward "objective is ~3.5±2, noise-dominated; no steering method reliably
+exceeds it" but the gradient-quality leads (robust clf especially) are still being run.
