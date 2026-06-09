@@ -129,6 +129,14 @@ flat (~2-D confirmed → run B1).
 - eff-dim flat at ~2 → structure is genuinely ~2-D → run B1 on the {dominant, agency,
   otherness} subspace.
 
+**RESULT (2026-06-09): no new axes — flat.** Over ~144 candidates (+11 committed), eff-dim
+stayed flat (3.12 → 3.15). `inject` *did* find directions orthogonal to the leader
+(cos ≈ 0.00) but they were **barren** — score 0.5–0.75, feature = `ineffability` only.
+So the orthogonal space is empty of new feature clusters; the productive region is stable
+at ~2–3 axes. Verdict: **stop hunting, proceed to B1** on the known subspace. Reverted the
+hunt knobs to production. (The run also died overnight — Mac sleep killed the detached
+process; restart under `caffeinate` to prevent recurrence.)
+
 ## Honest risks
 
 - The structure may genuinely be ~2-D (modest headroom); B1 still tests the cheap win.
