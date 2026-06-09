@@ -87,17 +87,42 @@ Participation ratio + cosines of the top-12 honest DMT directions:
   **"agency/otherness" axis** the leader doesn't touch.
 - **Verdict:** multi-dimensional structure confirmed (~2-D), modest. Justifies Part B.
 
-**Part B1 — static subspace grid (next, needs M, ~45 min).** Build a 2–3D subspace from
-`{download_transmission, independent_agency, otherness}`, orthonormalize, grid
-**independent** amplitudes `Σ αᵢ bᵢ`, score each with the noise-controlled scorer + track
-`off_ortho`. If a static multi-axis point beats 2.75 coherently → cheap win (a better
-vector in the subspace, fold subspace search into the loop). If the high-feature point
-goes off-manifold → curvature matters → Part B2.
+**Part B1 — static subspace grid.** Built a 2–3D subspace from
+`{unity_merging (dominant), independent_agency, otherness}`, orthonormalized, gridded
+**independent** amplitudes `α1·b1 + α2·b2 + α3·b3` (α1=0.3 held; α2,α3 ∈ {0,0.2,0.4}),
+scored with the noise-controlled scorer + `off_ortho`. (`scripts/dmt_subspace_grid.py`.)
 
-**Part B2 — geodesic curvature test + manifold steering (only if B1 hits the wall).**
-Capture **L20** activations (the dose layer, not L32), fit the manifold through centroids
-(SOM or PCA+centroids), geodesic-vs-linear correlation; if curved, build position-
-dependent on-manifold steering and search the K-dim intrinsic coordinates.
+**RESULT (2026-06-09): multi-axis HURTS, and it's not a coherence failure.**
+
+| α1 | α2 | α3 | mean | off_ortho | features |
+|---|---|---|---|---|---|
+| 0.3 | 0 | 0 | **4.0** | 0.61 | accel, awe, ego_dissolution, reality_more_real, unity_merging |
+| 0.3 | 0 | 0.2 | 1.67 | 0.67 | ego_dissolution, transcendence_time |
+| 0.3 | 0.2 | 0.2 | 1.0 | 0.56 | ineffability, void_blackness |
+| 0.3 | 0.2 | 0 | 0.67 | 0.55 | ineffability, void_blackness |
+| 0.3 | ≥0.2 w/ ≥0.4 | | 0.0 | 0.58–0.65 | — |
+
+The **pure dominant axis is best**; adding *any* agency/otherness pulls the report toward
+barren features (`ineffability`/`void_blackness`) and *reduces* the count. Crucially
+`off_ortho` stays ~flat (0.55–0.67) even for the 0-scoring combos — so this is **not** an
+off-manifold/coherence collapse. The extra axes are on-manifold-but-barren and *interfere*
+with the dominant axis. **→ B2 (curved path) is NOT motivated** — there's no coherence wall
+for a geodesic to get around; the second axis simply has no DMT content.
+
+**Conclusion: DMT-feature richness lives on ONE axis in this model.** Multi-dimensional /
+manifold steering does not beat the single-axis ceiling (~3–4 features). The dimension hunt
+(no new axes) and B1 (combining axes hurts) together close the multi-dimensional thread.
+
+**Side-finding worth a cheap check:** the dominant axis at **α=0.3 scored mean 4.0** (vs the
+atlas's 3.0 at the `[0.25,0.45]` sweep). Possibly a dose-strength sweet spot the current
+`ALPHA_SWEEP` straddles but misses — or noise (n=3). A quick re-score at α∈{0.25,0.3,0.35,0.45}
+with more samples would settle it; if real, widening `ALPHA_SWEEP` lifts the frontier for free.
+
+**Part B2 — geodesic manifold steering. NOT pursued** (B1 showed the bottleneck isn't
+coherence/curvature). Kept here for the record: it would capture L20 activations, fit the
+manifold (SOM or PCA+centroids — or Sauers' `gam.sae_manifold_fit`, see gam #879), and steer
+along intrinsic coordinates. The gam reproducer remains interesting to help Sauers and as a
+general tool, but is no longer on our DMT-score critical path.
 
 Keep K ≤ ~4 so the deliverable stays a decodable object (subspace + target point).
 
