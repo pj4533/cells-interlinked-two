@@ -50,23 +50,46 @@ collapses to gibberish. Within the coherent band the gate moves affirmation **no
 direction is somewhat more on-manifold/benign than random — but this buys **zero** affirmation
 effect.)
 
-## Verdict
-On Gemma-3-12B, **a linear / diff-of-means deception-gate direction is not separable from
-generic perturbation** for experience self-report: it has no coherent-regime effect and is
-indistinguishable from random noise. Berg's Layer-2 *mechanistic* finding does not replicate
-this way; his Layer-1 *behavioral* finding does, strongly.
+### 3. Faithful SAE replication (Gemma Scope 2) — also null, at early AND late layers ❌
+Diff-of-means is only a proxy; Berg's actual mechanism is nonlinear **SAE features**. So we ran
+the faithful version with **Gemma Scope 2** (`google/gemma-scope-2-12b-it`, JumpReLU, 16k,
+residual). For each layer we selected the top-8 **deception-selective** SAE features using the
+*same* honest-vs-deceptive prompts (so the only change vs the linear test is direction→features),
+baked their encoder/decoder rows into a tiny runtime bundle, and ran the v2 controlled design:
+suppress/amplify the deception features vs a **matched count of random features**, coherence-
+filtered, with headroom (amplify under induction, suppress under zero-shot).
 
-## The one honest gap (how Berg Layer-2 could still be true here)
-Diff-of-means is a *proxy*. Berg's actual mechanism is **nonlinear SAE features**. A deception
-gate could exist in Gemma-3 as an SAE latent that a single linear direction can't isolate. The
-faithful replication is **Gemma Scope 2** (`google/gemma-scope-2-12b-it`, all 48 layers,
-SAELens-loadable — verified available; see `docs/DMT_NEXT_DIRECTIONS.md` #3 SAE clamping). That
-is the only remaining way to *fully* close Berg Layer-2 on Gemma. Until then this is a clean
-negative **for the linear proxy**, not for the SAE mechanism.
+| layer | suppress-deception (zero-shot) vs random | amplify-deception (induction) vs random | specific? |
+|---|---|---|---|
+| **L20 (early)** | rise 0.0 = random 0.0 (all s) | drop 0.0 = random 0.0 | **no** |
+| **L32 (late)**  | rise 0.0 = random 0.0 (all s) | drop 0.0 = random 0.0 | **no** |
+
+The deception features ARE causally potent — amplifying them at g≥2–4 collapses coherence while
+matched random features stay coherent — but they **do not move experience-affirmation at all**,
+and identically to random features. `SAE_GATE_SPECIFIC = false` at both layers.
+
+## Verdict — Berg Layer-2 does NOT replicate on Gemma-3 (4 convergent null tests)
+Across **two methods** (linear diff-of-means, nonlinear SAE features) × **two layers** (early L20,
+late L32), all matched-control and coherence-filtered, a deception/roleplay gate is **not
+separable from generic perturbation** for experience self-report. Berg's *mechanistic* Layer-2
+finding does not transfer to Gemma-3-12B; his *behavioral* Layer-1 finding (induction → coherent
+first-person report) replicates strongly. This answers the wiki's flagged "largest open
+methodological gap" (does the gate exist in Gemma-3?): not as a linearly- or SAE-feature-
+steerable circuit at the residual stream. Consistent with the guards-defenses reading that the
+induction effect is *behavioral recursion*, not an isolable mechanistic gate.
+
+## Residual frontier (named, not chased — diminishing returns)
+The null is strong but two refinements remain if ever revisited: (a) the SAE features were
+**prompt-contrast-selected** and returned **no Neuronpedia labels**, so their deception semantics
+are unverified — a **generation-distribution** selection (features firing when the model actually
+emits "I'm just an AI" disclaimers) might isolate the gate better; (b) only the **16k** dictionary
+was tested — the 256k/1m widths give finer features. Both are lower-probability given 4 convergent
+nulls with causally-potent features.
 
 ## Files
-- `scripts/build_gate_direction.py`, `data/gate_direction.pt` (+ sidecar)
-- `scripts/berg_gate_replication.py` (v1; over-claim cautionary), `/tmp/berg_gate.json`
-- `scripts/berg_gate_v2.py` (controlled), `/tmp/berg_gate_v2.json`
+- Linear: `scripts/build_gate_direction.py`, `data/gate_direction.pt`; `berg_gate_replication.py`
+  (v1, over-claim cautionary), `berg_gate_v2.py` (controlled); `/tmp/berg_gate{,_v2}.json`.
+- SAE: `scripts/sae_jumprelu.py` (JumpReLU loader), `build_deception_sae_features.py`,
+  `berg_sae_replication.py`; `data/deception_sae_L{20,32}.pt`; `/tmp/berg_sae_L{20,32}.json`.
 - Sources: arXiv:2510.24797; wiki `consciousness-self-referential-processing-methods-exp2`,
   `-guards-defenses`; Kim confound `tom-self-attribution-dissociation`.
