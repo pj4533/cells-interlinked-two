@@ -1,5 +1,12 @@
 # DMT research — next directions (post-manifold), deep-read
 
+> **UPDATE 2026-06-11 — three of four directions now built & closed, all null:**
+> **#1 K-Steering** exhausted (`docs/KSTEER_EXPLORATION.md`), **#2 Berg gate-suppression**
+> closed at L20+L32, linear+SAE (`docs/BERG_GATE.md`), **#3 SAE clamping** null/degrades
+> (`docs/SAE_CLAMP_DMT.md`). All three converge on the **representational wall** (~3.5 features).
+> Remaining: #4 CAST (untried, speculative) and the genuinely-different lever — **rethink the
+> objective/judge** (is ~3.5 real or a noisy self-report artifact). Stop hunting steering methods.
+
 **Status: research complete, not built.** After the single-vector ceiling and the
 multi-dimensional/manifold dead-end, this catalogs the next candidate directions to
 push the **DMT-feature count** higher, each deep-read from primary sources (not
