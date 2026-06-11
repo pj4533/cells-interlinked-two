@@ -78,11 +78,15 @@ def main() -> None:
             pool.append(x)
 
     seln = chosen + pool
+    # max_act over ALL DMT cluster passages for every selected feature (targets + random),
+    # so the random control gets a real matched clamp reference (v1 bug: zeros for random).
+    dmt_all = torch.cat([acts[CLUSTER_NAMES[i]] for i in DMT_INDICES], 0)   # [N_dmt, d_sae]
+    on_scale_full = dmt_all[:, seln].max(0).values.clamp(min=1.0)           # [K+pool]
     out = settings.db_path.parent / f"dmt_sae_L{layer}.pt"
     torch.save({
         "repo": REPO, "layer": layer, "width": args.width, "d_model": sae.d_model, "d_sae": sae.d_sae,
         "target_feats": chosen, "target_cluster": chosen_cluster, "rand_feats": pool,
-        "on_scale": torch.tensor(on_scale),                 # = per-feature max_act (clamp ref)
+        "on_scale": on_scale_full,                          # per-feature max_act, full length (targets+random)
         "w_enc_sel": sae.w_enc[:, seln].float().cpu(),
         "b_enc_sel": sae.b_enc[seln].float().cpu(),
         "thr_sel": sae.threshold[seln].float().cpu(),
