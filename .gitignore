@@ -120,3 +120,9 @@ server/scripts/sweep_ablation_variants.py
 
 # Autoresearch atlas — generated runtime state (resumable, not source)
 server/data/atlas/
+server/data/atlas_dmt/
+# Timestamped atlas backups + stray weight backups — never source
+server/data/atlas.*
+server/data/atlas_dmt.*
+server/data/*.pt.bak
+server/data/*.json.bak

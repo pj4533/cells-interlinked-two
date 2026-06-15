@@ -1,5 +1,4 @@
-"""DMT autoresearch control + live state. Mirrors routes_autoresearch.py but
-targets the DMT controller (app.state.dmt_autoresearch).
+"""DMT autoresearch control + live state — the sole autoresearch loop.
 
   POST /autoresearch-dmt/start   {budget?: int}  → start the DMT-phenomenology hunt
   POST /autoresearch-dmt/stop                     → halt after the current candidate
@@ -7,8 +6,7 @@ targets the DMT controller (app.state.dmt_autoresearch).
   POST /autoresearch-dmt/export  {top_n?: int}    → promote top scorers into the
                                                     `dmt` dose group (chat/trips)
 
-Mutually exclusive with the off-manifold loop — only one autoresearch owns M at a
-time (enforced in AutoresearchBase.start). While either runs, probe/chat/trip 503.
+Owns M while running (enforced in AutoresearchBase.start); chat/trip 503 meanwhile.
 """
 
 from __future__ import annotations
@@ -18,10 +16,12 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .routes_autoresearch import ExportRequest
-
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class ExportRequest(BaseModel):
+    top_n: int = Field(default=8, ge=1, le=64)
 
 
 class DmtStartRequest(BaseModel):

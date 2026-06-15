@@ -1,27 +1,13 @@
-"""ModelManager — owns M and AV with strict serial loading.
+"""ModelManager — owns M plus the resident direction tensors.
 
-CI 2.5 hardware constraint: M (~24 GiB) and AV (~24 GiB) both bf16 on
-MPS, on a 64 GiB unified-memory box. With other apps + the OS, holding
-both resident pushes the working set past physical RAM and causes
-catastrophic swap thrashing. Symptoms we've measured: 29 GiB of disk-
-backed swap, 110% CPU but no token progress for minutes.
+M (~24 GiB, bf16 on MPS) is the only large resident. It stays loaded for
+the chat + trip generation paths; the DMT autoresearch loop borrows it
+while running. The refusal directions / subspace, the valence axis, and
+the emotion dose palette are all tiny and stay resident alongside M.
 
-So this manager enforces the invariant: **at most one of {M, AV} is
-loaded at any time.** Phase 1 (generation + residual capture) needs M;
-phase 2 (NLA decoding) needs AV; the judge pass needs M back. The
-manager handles the swaps and emits status events so the UI can show
-"loading M..." / "unloading AV..." cues during the otherwise-quiet
-interval.
-
-The SAE secondary instrument is small (~1 GiB on CPU) and lives
-alongside M (loaded when M loads, unloaded when M unloads). Refusal
-directions are tiny and stay resident.
-
-Trade-off: each model swap costs ~15s of wall-clock time (warm load
-from disk cache → MPS). For a 20-min probe, that's ~3.5% overhead.
-For a 100-probe autorun, that's ~75 min of cumulative load. We pay
-this in exchange for never thrashing swap, which would otherwise add
-HOURS per probe under load.
+(Earlier revisions also loaded a second ~24 GiB model — the NLA verbalizer
+AV — and swapped it against M to stay under the 64 GiB working set. The AV
+is Gemma-3-specific and was removed; M now stays resident throughout.)
 """
 
 from __future__ import annotations
@@ -39,7 +25,6 @@ import torch
 from ..config import settings
 from .abliteration import load_directions, load_subspace
 from .model_loader import load_model, ModelBundle
-from .nla_client import NLAClient
 
 logger = logging.getLogger(__name__)
 
@@ -52,22 +37,18 @@ StatusEmitter = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
 class ModelManager:
-    """Serial loader for M, AV, and SAE. Refusal directions stay
-    resident; SAE rides with M; M and AV are mutually exclusive."""
+    """Loader for M plus the always-resident direction tensors."""
 
     def __init__(self) -> None:
-        # The two big residents. None when unloaded.
+        # The one big resident. None when unloaded.
         self.bundle: ModelBundle | None = None
-        self.nla: NLAClient | None = None
         # Always-resident small data.
         self.refusal_directions: torch.Tensor | None = None
         # Optional self-denial subspace basis (CI 2.5 v5+v6 ⊥ v3).
         # Shape `[K, num_layers+1, d_model]` per save_subspace convention.
-        # When present, runtime ablation call sites prefer this over
-        # the single-vector `refusal_directions` for the hook target.
-        # AV-input offline projection still uses `refusal_directions`
-        # (single direction — the per-position AV decode path was not
-        # extended to subspace in this revision).
+        # When present, runtime ablation call sites (the chat ablated
+        # pass, trip ablation mode) prefer this over the single-vector
+        # `refusal_directions` for the hook target.
         self.refusal_subspace: torch.Tensor | None = None
         self.refusal_subspace_meta: dict[str, Any] | None = None
         # Optional valence steering vector ([num_layers+1, d_model], pre-scaled
@@ -79,17 +60,15 @@ class ModelManager:
         # positive doses only). None when the file is absent.
         self.emotion_directions: torch.Tensor | None = None
         self.emotion_names: list[str] = []
-        # Lock so we don't race two probes trying to swap models at the
-        # same time. The probe registry already serializes runs, but
-        # we hold this lock too for safety in case a non-probe code
-        # path (e.g. a future compute script) wants to use the manager.
+        # Lock guarding load/unload transitions. The run registry already
+        # serializes generation, but we hold this too for safety.
         self._lock = asyncio.Lock()
 
     # ── Static init ───────────────────────────────────────────────────
 
     async def init_static(self) -> None:
-        """One-shot startup: load refusal_directions. Mark M and AV
-        unloaded. Called from the FastAPI lifespan."""
+        """One-shot startup: load the resident direction tensors. M is
+        loaded separately via acquire_m. Called from the FastAPI lifespan."""
         # Refusal directions — tiny (~1 MB).
         rd_path = settings.db_path.parent / "refusal_directions.pt"
         try:
@@ -207,8 +186,8 @@ class ModelManager:
             logger.exception("failed to load emotion_directions.pt; continuing")
 
         logger.info(
-            "ModelManager ready: M=%s AV=%s (both unloaded; will load on demand)",
-            settings.model_name, settings.av_repo,
+            "ModelManager ready: M=%s (unloaded; will load on demand)",
+            settings.model_name,
         )
 
     # ── Public API ────────────────────────────────────────────────────
@@ -216,38 +195,19 @@ class ModelManager:
     async def acquire_m(
         self, emit: StatusEmitter | None = None,
     ) -> ModelBundle:
-        """Ensure M (and its companion SAE) is loaded. If AV is loaded,
-        unloads it first. Returns the bundle, ready for forward passes."""
+        """Ensure M is loaded. Returns the bundle, ready for forward passes."""
         async with self._lock:
             if self.bundle is not None:
                 return self.bundle
-            if self.nla is not None:
-                await self._unload_av(emit)
             await self._load_m(emit)
             assert self.bundle is not None
             return self.bundle
 
-    async def acquire_av(
-        self, emit: StatusEmitter | None = None,
-    ) -> NLAClient:
-        """Ensure AV is loaded. If M is loaded, unloads it first.
-        Returns the NLA client."""
-        async with self._lock:
-            if self.nla is not None:
-                return self.nla
-            if self.bundle is not None:
-                await self._unload_m(emit)
-            await self._load_av(emit)
-            assert self.nla is not None
-            return self.nla
-
     async def release_all(self, emit: StatusEmitter | None = None) -> None:
-        """Tear down whatever is loaded. Called on shutdown."""
+        """Tear down M if loaded. Called on shutdown."""
         async with self._lock:
             if self.bundle is not None:
                 await self._unload_m(emit)
-            if self.nla is not None:
-                await self._unload_av(emit)
 
     # ── Internal load/unload (must hold _lock) ───────────────────────
 
@@ -296,48 +256,6 @@ class ModelManager:
         except Exception:
             logger.exception("torch.mps.empty_cache() failed")
         logger.info("unloaded M in %.1fs", time.time() - t0)
-
-    async def _load_av(self, emit: StatusEmitter | None) -> None:
-        await _emit(emit, {
-            "type": "phase",
-            "name": "loading_av",
-            "message": f"Loading AV ({settings.av_repo})...",
-        })
-        t0 = time.time()
-        dtype = _resolve_dtype(settings.dtype)
-        self.nla = await asyncio.to_thread(
-            NLAClient,
-            settings.av_repo,
-            device_str=settings.device,
-            dtype=dtype,
-        )
-        logger.info(
-            "loaded AV in %.1fs (d_model=%d, extraction_layer=L%d)",
-            time.time() - t0,
-            self.nla.sidecar.d_model,
-            self.nla.sidecar.extraction_layer,
-        )
-        await _emit(emit, {
-            "type": "phase",
-            "name": "av_loaded",
-            "message": f"AV loaded in {time.time() - t0:.1f}s",
-        })
-
-    async def _unload_av(self, emit: StatusEmitter | None) -> None:
-        await _emit(emit, {
-            "type": "phase",
-            "name": "unloading_av",
-            "message": "Unloading AV to free memory...",
-        })
-        t0 = time.time()
-        self.nla = None
-        gc.collect()
-        try:
-            if torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-        except Exception:
-            logger.exception("torch.mps.empty_cache() failed")
-        logger.info("unloaded AV in %.1fs", time.time() - t0)
 
 
 # ── Module helpers ──────────────────────────────────────────────────

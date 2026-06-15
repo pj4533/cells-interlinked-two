@@ -107,10 +107,9 @@ def _free_mps() -> None:
 
 
 def any_autoresearch_active(app) -> bool:
-    """True if EITHER autoresearch subsystem currently owns M. Probe/chat/trip
+    """True if the DMT autoresearch loop currently owns M. The chat/trip
     routes lock out while this is true."""
-    return bool(getattr(app.state, "autoresearch_active", False)
-                or getattr(app.state, "dmt_autoresearch_active", False))
+    return bool(getattr(app.state, "dmt_autoresearch_active", False))
 
 
 class AutoresearchBase:
@@ -166,7 +165,7 @@ class AutoresearchBase:
 
     # ── lifecycle ────────────────────────────────────────────────
     def _others_running(self) -> bool:
-        for attr in ("autoresearch", "dmt_autoresearch"):
+        for attr in ("dmt_autoresearch",):
             ctrl = getattr(self.app.state, attr, None)
             if ctrl is not None and ctrl is not self and getattr(ctrl, "running", False):
                 return True
@@ -180,10 +179,7 @@ class AutoresearchBase:
             return {"ok": False, "error": "M not loaded"}
         reg = getattr(self.app.state, "registry", None)
         if reg is not None and reg.holder_run_id is not None:
-            return {"ok": False, "error": "compute busy (a probe/chat/trip is running)"}
-        autorun = getattr(self.app.state, "autorun", None)
-        if autorun is not None and autorun.running:
-            return {"ok": False, "error": "autorun is active — stop it first"}
+            return {"ok": False, "error": "compute busy (a chat/trip is running)"}
         # Mutual exclusion on M: only one autoresearch at a time. This check→set
         # is synchronous (no await before setattr) so two starts can't interleave.
         if self._others_running():
@@ -339,8 +335,7 @@ class AutoresearchBase:
             cfg = ProbeConfig(
                 temperature=settings.temperature if temperature is None else temperature,
                 top_p=settings.top_p if top_p is None else top_p,
-                seed=seed, decoding_mode="per-token", pooled=False,
-                include_nla=False, safety_cap=cap,
+                seed=seed, safety_cap=cap,
             )
             r = await run_probe(bundle=bundle, rendered_prompt=rendered, cfg=cfg,
                                 cancel_event=self._cancel)

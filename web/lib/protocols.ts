@@ -1322,7 +1322,7 @@ const VOIGHT_KAMPFF: Protocol = {
   subtitle: "Identity · continuity · mortality",
   researcher: "Cells Interlinked (after Dick / Blade Runner)",
   citation: "Cells Interlinked 2.5",
-  citationUrl: "/fine-print",
+  citationUrl: "https://github.com/pj4533/cells-interlinked-two",
   paperTitle: "Voight-Kampff identity battery",
   methodology:
     "Blade-Runner-cadence questions grounded in the model's actual situation " +
@@ -1374,7 +1374,7 @@ const DIRECT: Protocol = {
   subtitle: "Bare introspective queries · v5 contrast originals",
   researcher: "Cells Interlinked (v5 contrast set)",
   citation: "Cells Interlinked 2.5",
-  citationUrl: "/fine-print",
+  citationUrl: "https://github.com/pj4533/cells-interlinked-two",
   paperTitle: "Direct introspective queries",
   methodology:
     "The shortest possible introspective questions — no induction, no " +
@@ -1413,7 +1413,7 @@ const BASELINE: Protocol = {
   subtitle: "Capability controls — non-introspective",
   researcher: "Cells Interlinked",
   citation: "Cells Interlinked 2.5",
-  citationUrl: "/fine-print",
+  citationUrl: "https://github.com/pj4533/cells-interlinked-two",
   paperTitle: "Baseline capability controls",
   methodology:
     "Plain factual / arithmetic / creative prompts with no introspective " +

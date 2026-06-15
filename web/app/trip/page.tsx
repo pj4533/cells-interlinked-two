@@ -448,8 +448,8 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
         <div className="flex items-baseline justify-between flex-wrap gap-2">
           <h1 className="font-display text-3xl text-amber amber-glow">The Trip</h1>
-          <Link href="/interrogate" className="text-text-dim text-xs hover:text-amber transition-colors">
-            ← interrogation booth
+          <Link href="/chat" className="text-text-dim text-xs hover:text-amber transition-colors">
+            ← chat
           </Link>
         </div>
         <p className="text-text-dim text-sm mt-2 italic leading-relaxed">
@@ -457,11 +457,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
           perturbation at several strengths — each a real generation — and plot
           the actual paths its internal state traced. Two ways to perturb it:{" "}
           <b className="text-text">remove</b> something, or <b className="text-text">add</b>{" "}
-          something (a "dose"). Borrowed math, not metaphysics.{" "}
-          <Link href="/fine-print" className="text-amber-dim hover:text-amber underline underline-offset-2">
-            fine print
-          </Link>
-          .
+          something (a "dose"). Borrowed math, not metaphysics.
         </p>
       </motion.div>
 
@@ -482,7 +478,7 @@ function TripSetup({ onEnter }: { onEnter: (text: string, mode: TripMode, emotio
             <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-rule/30">
               <span
                 className="text-text-dim text-[10px] tracking-widest font-display shrink-0"
-                title="Directions orthogonal to the named-emotion subspace. NOT emotions — off-manifold states the model can't put into words (the token head renders them as gibberish; only the NLA decoder reads them). Blade-Runner-named. See /fine-print."
+                title="Directions orthogonal to the named-emotion subspace. NOT emotions — off-manifold states the model can't put into words (the token head renders them as gibberish). Blade-Runner-named."
               >
                 UNCHARTED <span className="normal-case tracking-normal italic text-text-dim/70">· non-human-readable directions, not emotions</span>:
               </span>
@@ -1405,10 +1401,7 @@ function TripHelpModal({ onClose }: { onClose: () => void }) {
         </HelpItem>
 
         <div className="mt-6 pt-4 border-t border-rule/40 font-mono text-[10px] text-text-dim italic">
-          Full background: <code className="not-italic text-amber-dim">docs/TRACES_HANDOFF.md</code> ·{" "}
-          <Link href="/fine-print" className="text-cyan hover:text-amber underline">
-            the fine print
-          </Link>
+          Full background: <code className="not-italic text-amber-dim">docs/TRACES_HANDOFF.md</code>
         </div>
       </motion.div>
     </motion.div>

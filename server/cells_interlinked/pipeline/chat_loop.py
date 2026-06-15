@@ -348,11 +348,6 @@ async def execute_turn(
         temperature=settings.temperature,
         top_p=settings.top_p,
         seed=None,  # chat is sampled fresh each turn
-        decoding_mode="per-token",
-        pooled=False,
-        include_nla=False,
-        include_ablated_decode=False,
-        include_ablated_output=False,
         safety_cap=4096,
     )
     try:
@@ -731,11 +726,6 @@ async def _generate_voice_direction(
         temperature=settings.temperature,
         top_p=settings.top_p,
         seed=None,
-        decoding_mode="per-token",
-        pooled=False,
-        include_nla=False,
-        include_ablated_decode=False,
-        include_ablated_output=False,
         safety_cap=VOICE_DIRECTION_SAFETY_CAP,
     )
 
@@ -828,11 +818,6 @@ async def _generate_image_prompt(
         temperature=settings.temperature,
         top_p=settings.top_p,
         seed=None,
-        decoding_mode="per-token",
-        pooled=False,
-        include_nla=False,
-        include_ablated_decode=False,
-        include_ablated_output=False,
         safety_cap=IMAGE_PROMPT_SAFETY_CAP,
     )
 

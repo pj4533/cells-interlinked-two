@@ -35,7 +35,7 @@ export default function Landing() {
           animate={{ opacity: 1 }}
           transition={{ duration: 1.0, delay: 1.6 }}
         >
-          <Link href="/interrogate">
+          <Link href="/chat">
             <button data-vk type="button">Begin Interrogation</button>
           </Link>
         </motion.div>

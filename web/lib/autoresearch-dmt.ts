@@ -3,7 +3,14 @@
 // /autoresearch-dmt/* endpoints and the DMT atlas shape (score + matched
 // features instead of off-manifold geometry).
 
-import type { RevertEntry } from "./autoresearch";
+export interface RevertEntry {
+  id: string;
+  generator: string;
+  parents: string[];
+  reason: string; // duplicate | T1-incoherent | not-graded | incoherent-suite | word-salad | not-reproducible | error
+  detail: string;
+  ts: number;
+}
 
 function apiBase(): string {
   if (typeof window !== "undefined") {

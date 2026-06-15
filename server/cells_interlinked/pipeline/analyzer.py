@@ -854,7 +854,6 @@ async def generate_analysis(
         "v2_window_stats": stats,
         "v2_hint": hint,
         "v2_model_M": settings.model_name,
-        "v2_av_repo": settings.av_repo,
         "v2_n_baselines": n_baselines,
         "v2_n_controls": n_controls,
     }

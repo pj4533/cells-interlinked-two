@@ -118,7 +118,6 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
         temperature=req.temperature if req.temperature is not None else settings.temperature,
         top_p=req.top_p if req.top_p is not None else settings.top_p,
         seed=seed,
-        include_nla=False,            # trip never swaps to the AV
     )
     # No system prompt: the Trip View measures the residual trajectory in
     # response to the PROBE. The default "answer directly / keep brief"

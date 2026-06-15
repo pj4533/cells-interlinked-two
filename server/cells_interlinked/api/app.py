@@ -1,34 +1,24 @@
-"""FastAPI factory. Loads M + AV once on startup; tears down cleanly on shutdown.
+"""FastAPI factory. Loads M once on startup; tears down cleanly on shutdown.
 
-v2 swap: where v1 loaded SAEs alongside M, v2 loads the kitft NLA verbalizer
-(AV) at app.state.nla. Both M and AV stay resident across the autorun batch
-so phase-1 generation and phase-2 NLA decoding alternate without paying the
-~3-min model load each time.
+M (Gemma) stays resident for the chat + trip generation paths. The DMT
+autoresearch loop borrows M while running and releases it when it stops.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from contextlib import asynccontextmanager
 
-import torch
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from ..config import settings
-from ..pipeline.autorun import AutorunController
-from ..pipeline.autoresearch import AutoresearchController
 from ..pipeline.autoresearch_dmt import DmtController
 from ..storage import db
-from .routes_autorun import router as autorun_router
-from .routes_autoresearch import router as autoresearch_router
 from .routes_autoresearch_dmt import router as autoresearch_dmt_router
 from .routes_chat import router as chat_router
 from .routes_journal import router as journal_router
-from .routes_probe import router as probe_router
 from .routes_stream import router as stream_router
 from .routes_trip import router as trip_router
 from .routes_tts import router as tts_router
@@ -45,40 +35,23 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     await db.init_db(settings.db_path)
 
-    # Any probes left in-flight from a previous backend process are
-    # orphaned: their asyncio task died with the old process, their
-    # RunRegistry entry is gone. Mark them errored so the archive
-    # doesn't show ghosts that 404 on reconnect.
-    n_orphans = await db.cleanup_orphans(settings.db_path)
-    if n_orphans:
-        logger.info("cleaned up %d orphaned in-flight run(s)", n_orphans)
-
-    # CI 2.5 serial-model architecture: M (~24 GiB) and AV (~24 GiB)
-    # can't both be resident on the 64 GiB box without thrashing swap.
-    # ModelManager owns them and ensures only one is loaded at a time.
-    # Lifespan pre-loads M (so the first probe doesn't pay a model-
-    # load cost on the first phase). AV gets loaded lazily during the
-    # first probe's phase-2 NLA decode (with status events visible to
-    # the user). The probe-execution code in routes_probe drives the
-    # M↔AV swaps as the phases progress.
+    # ModelManager owns M plus the resident direction tensors (refusal,
+    # valence, emotion dose palette). Lifespan pre-loads M so the first
+    # chat/trip request doesn't pay the model-load cost.
     from ..pipeline.model_manager import ModelManager
     manager = ModelManager()
     await manager.init_static()
     app.state.manager = manager
 
-    # Pre-load M. Costs ~15s warm / ~70s cold but happens once at
-    # startup; subsequent probes see "M loaded" immediately.
+    # Pre-load M. Costs ~15s warm / ~70s cold but happens once at startup.
     await manager.acquire_m(emit=None)
 
-    # app.state shims for existing code paths. These references are
-    # mutated by the manager when it swaps models — the probe route
-    # updates them after each acquire/release.
+    # app.state shims for the chat/trip code paths.
     app.state.bundle = manager.bundle
-    app.state.nla = manager.nla  # None at startup; populated on first phase 2
     app.state.refusal_directions = manager.refusal_directions
-    # Optional self-denial subspace basis (CI 2.5 v5+v6 ⊥ v3). When
-    # present, runtime ablation call sites (chat ablated pass, phase 1b,
-    # ablated synthesizer) prefer this over the single direction.
+    # Self-denial subspace basis (v5+v6 ⊥ v3). When present, runtime
+    # ablation call sites (the chat ablated pass, trip ablation mode)
+    # prefer this over the single direction.
     app.state.refusal_subspace = manager.refusal_subspace
     app.state.refusal_subspace_meta = manager.refusal_subspace_meta
     # Optional valence steering vector — legacy bidirectional axis.
@@ -89,27 +62,8 @@ async def lifespan(app: FastAPI):
 
     app.state.registry = RunRegistry()
 
-    autorun = AutorunController(db_path=settings.db_path)
-    autorun.app = app
-    app.state.autorun = autorun
-    await db.set_autorun_running(
-        settings.db_path, running=False, event="server-restart", ts=time.time()
-    )
-
-    # Autoresearch (steering-direction hunt). Owns M while running, which locks
-    # out probe/chat/trip via app.state.autoresearch_active.
-    autoresearch = AutoresearchController()
-    autoresearch.app = app
-    try:
-        autoresearch._load()  # surface any persisted atlas to /state + export before a run
-    except Exception:
-        logger.exception("failed to preload autoresearch atlas")
-    app.state.autoresearch = autoresearch
-    app.state.autoresearch_active = False
-
-    # DMT autoresearch (sibling hunt — maximizes DMT-trip-feature count). Owns M
-    # while running too; mutually exclusive with the off-manifold loop. Locks out
-    # probe/chat/trip via app.state.dmt_autoresearch_active.
+    # DMT autoresearch (the sole hunt — maximizes DMT-trip-feature count).
+    # Owns M while running; locks out chat/trip via dmt_autoresearch_active.
     dmt_autoresearch = DmtController()
     dmt_autoresearch.app = app
     try:
@@ -119,18 +73,11 @@ async def lifespan(app: FastAPI):
     app.state.dmt_autoresearch = dmt_autoresearch
     app.state.dmt_autoresearch_active = False
 
-    logger.info(
-        "ready: M=%s | AV=%s | both unloaded (serial load on demand)",
-        settings.model_name, settings.av_repo,
-    )
+    logger.info("ready: M=%s loaded", settings.model_name)
 
     try:
         yield
     finally:
-        if autorun.running:
-            await autorun.stop()
-        if autoresearch.running:
-            await autoresearch.stop()
         if dmt_autoresearch.running:
             await dmt_autoresearch.stop()
         await manager.release_all()
@@ -139,9 +86,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Cells Interlinked v2",
-        description="V-K probes via NLA-decoded activations vs. output tokens",
-        version="0.2.0",
+        title="Cells Interlinked",
+        description="Dual-channel chat + residual-trajectory (Trip) + DMT autoresearch",
+        version="0.3.0",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -154,11 +101,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(probe_router)
-    app.include_router(stream_router)
     app.include_router(trip_router)
-    app.include_router(autorun_router)
-    app.include_router(autoresearch_router)
+    app.include_router(stream_router)
     app.include_router(autoresearch_dmt_router)
     app.include_router(journal_router)
     app.include_router(chat_router)
@@ -177,13 +121,10 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict:
         bundle = getattr(app.state, "bundle", None)
-        nla = getattr(app.state, "nla", None)
         return {
             "status": "ok",
             "model_loaded": bundle is not None,
-            "av_loaded": nla is not None,
             "model_name": settings.model_name,
-            "av_repo": settings.av_repo,
             "extraction_layer": settings.extraction_layer,
             "device": settings.device,
         }

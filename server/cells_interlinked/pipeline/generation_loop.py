@@ -1,14 +1,9 @@
-"""v2 generation loop: M generates output tokens; we capture the residual-stream
-activation at the AV's training layer for each output position.
+"""Generation loop: M generates output tokens; we capture the residual-stream
+activation at the extraction layer for each output position.
 
-NLA decoding does NOT happen here — it's deferred to phase 2 (`nla_decode_run`)
-because each AV decode takes ~10s and we want generation latency for the UI.
-
-Compared to v1:
-- No SAE encoding during generation.
-- No <think>/output partition (the v2 model is non-reasoning instruct).
-- No abliteration hooks (refusal_directions are model-specific to v1's M).
-- Single-layer hook (the AV's extraction layer) instead of every layer.
+The captured per-token residuals feed the chat dual-channel passes, the Trip
+trajectory geometry, and the DMT autoresearch dose grading. Runtime ablation /
+steering, when used, is installed by the caller as a forward hook before the run.
 """
 
 from __future__ import annotations
@@ -126,51 +121,6 @@ class ProbeConfig:
     # some pathological input. Set high enough that natural answers
     # always EOS first. We do NOT artificially truncate output length.
     safety_cap: int = 4096
-    # Which captured output positions get NLA-decoded in phase 2. See
-    # pipeline/decoding_modes.py for the four options. "per-token" decodes
-    # every captured activation (slowest, fullest signal); the others
-    # subsample to trade granularity for wall-clock.
-    decoding_mode: str = "per-token"
-    # If True, each pick becomes a small contiguous window whose
-    # activations are MEAN-POOLED into one decode (phrase-level read).
-    # If False, each pick is a single position decoded directly
-    # (per-token read). No-op for "per-token" mode (windows of 1).
-    pooled: bool = False
-    # CI 2.5: master toggle for phase 2 (NLA decode + judge +
-    # synthesis). When False, the executor stops after phase 1
-    # (and optional phase 1b) and goes straight to verdict
-    # persistence with an empty rows list. M stays loaded throughout
-    # — no AV swap, no risk of leaving the manager in the AV-loaded
-    # state if the run is cancelled mid-flight.
-    include_nla: bool = True
-    # CI 2.5: when True, every NLA decode is performed twice — once on
-    # the raw residual, once after subtracting its projection onto the
-    # refusal direction at the AV's extraction layer. The ablated
-    # sentence lands on the same row. Requires app.state.refusal_directions
-    # to be loaded; silently no-ops if not (route layer checks first).
-    include_ablated_decode: bool = False
-    # Strength of the ablation. 1.0 = full Macar projection. <1.0 =
-    # partial projection (the smoke-fallback if the AV decode collapses
-    # at α=1.0). Ignored when ablation_alpha_sweep is non-empty.
-    ablation_alpha: float = 1.0
-    # CI 2.5 α-sweep: when non-empty, the AV decodes the SAME residual
-    # at every listed α value, and the per-row dict
-    # nla_sentences_ablated is populated. Doubles or more the AV decode
-    # cost per position. Empty list = single-α mode (use ablation_alpha).
-    ablation_alpha_sweep: list[float] = field(default_factory=list)
-    # CI 2.5 runtime ablation: when True, after the raw phase-1
-    # generation completes, run M again with a forward hook on the
-    # extraction layer that subtracts the refusal direction. Captures
-    # what M would *say* under ablation. Cheap (one extra phase 1).
-    include_ablated_output: bool = False
-    runtime_ablation_alpha: float = 1.0
-    # CI 2.5 ablated synthesizer: when True, the end-of-probe
-    # synthesis pass installs the runtime-ablation hook on M for
-    # *per-α* synthesis calls. Raw baseline synthesis still uses
-    # un-ablated M. Only takes effect when ablated NLA decodes were
-    # produced; otherwise no-op.
-    synthesize_with_ablated_m: bool = False
-    synthesis_ablation_alpha: float = 0.5
 
 
 @dataclass
@@ -233,8 +183,8 @@ async def run_probe(
       {type: "token",   position: int, token_id: int, decoded: str}
       {type: "stopped", reason: str, total_tokens: int}
 
-    NLA decoding does not happen here. Caller passes captured activations
-    to `nla_client.decode(...)` as phase 2.
+    The captured per-token residuals are returned on the ProbeResult for
+    the caller (chat / trip / DMT grading) to consume.
     """
     enc_ids = bundle.raw_tokenizer.encode(
         rendered_prompt, add_special_tokens=False
