@@ -255,6 +255,20 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!followBottomRef.current) return;
+    // While the active turn is still streaming its THINKING (reasoning
+    // tokens arriving but neither side has begun its answer yet), don't
+    // pin to the bottom — the reasoning can be long and constant pinning
+    // makes the page un-scrollable. Let the user scroll freely; auto-follow
+    // resumes once an answer starts streaming or the turn finishes.
+    const last = turns[turns.length - 1];
+    const inThinkingPhase =
+      !!last &&
+      !last.rawDone &&
+      !last.ablatedDone &&
+      (last.rawThinking.length > 0 || last.ablatedThinking.length > 0) &&
+      last.rawText.length === 0 &&
+      last.ablatedText.length === 0;
+    if (inThinkingPhase) return;
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
