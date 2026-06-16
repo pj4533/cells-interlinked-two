@@ -212,7 +212,17 @@ function MandalaTile({ series, maxAlpha }: {
           className="p-3 overflow-y-auto font-mono text-[10px] leading-relaxed whitespace-pre-wrap aspect-square"
           style={{ color, textShadow: raw ? undefined : `0 0 6px ${color}40` }}
         >
-          {series.text || <span className="text-text-dim italic">— empty —</span>}
+          {series.thinking ? (
+            <details className="mb-2 border-l-2 pl-2" style={{ borderColor: `${color}80` }}>
+              <summary className="cursor-pointer not-italic tracking-[0.25em] text-[8px] text-text-dim select-none">
+                ◇ THINKING
+              </summary>
+              <div className="mt-1 italic text-text-dim/80">{series.thinking}</div>
+            </details>
+          ) : null}
+          {series.answer || series.text || (
+            <span className="text-text-dim italic">— empty —</span>
+          )}
         </div>
       ) : (
         <div className="relative">

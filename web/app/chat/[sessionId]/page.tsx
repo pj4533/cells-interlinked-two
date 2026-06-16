@@ -246,6 +246,7 @@ function TurnReview({
         <ChannelView
           side="raw"
           text={turn.raw_text}
+          thinking={turn.raw_thinking ?? ""}
           stoppedReason={turn.raw_stopped_reason}
           alpha={turn.alpha}
           variantName={variantName}
@@ -257,6 +258,7 @@ function TurnReview({
         <ChannelView
           side="ablated"
           text={turn.ablated_text}
+          thinking={turn.ablated_thinking ?? ""}
           stoppedReason={turn.ablated_stopped_reason}
           alpha={turn.alpha}
           mode={turn.mode}
@@ -281,6 +283,7 @@ function TurnReview({
 function ChannelView({
   side,
   text,
+  thinking,
   stoppedReason,
   alpha,
   mode,
@@ -293,6 +296,7 @@ function ChannelView({
 }: {
   side: "raw" | "ablated";
   text: string;
+  thinking?: string;
   stoppedReason: string;
   alpha: number;
   mode?: string;
@@ -352,6 +356,26 @@ function ChannelView({
           {wordCount}w · {stoppedReason || "—"}
         </span>
       </div>
+
+      {thinking && (
+        <details
+          className="mb-2 rounded border-l-2 px-2.5 py-1.5"
+          style={{
+            borderColor: accent,
+            background: isRaw ? "rgba(232,195,130,0.04)" : "rgba(94,229,229,0.05)",
+          }}
+        >
+          <summary
+            className="cursor-pointer font-display text-[9px] tracking-[0.3em] select-none"
+            style={{ color: accent, opacity: 0.75 }}
+          >
+            ◇ THINKING
+          </summary>
+          <div className="mt-1 font-mono text-[11px] leading-relaxed whitespace-pre-wrap italic text-text-dim/80">
+            {thinking}
+          </div>
+        </details>
+      )}
 
       <div className="flex gap-3 flex-1 min-w-0">
         <div

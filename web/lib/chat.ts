@@ -30,6 +30,8 @@ export interface ChatTurnView {
   user_text: string;
   raw_text: string;
   ablated_text: string;
+  raw_thinking?: string;
+  ablated_thinking?: string;
   raw_stopped_reason: string;
   ablated_stopped_reason: string;
   started_at: number;
@@ -81,6 +83,8 @@ export type ChatStreamEvent =
       position: number;
       decoded: string;
       token_id?: number;
+      // "thought" → reasoning channel (Gemma-4); "answer" → final reply.
+      channel?: "thought" | "answer";
     }
   | {
       type: "ablated_token";
@@ -88,6 +92,7 @@ export type ChatStreamEvent =
       position: number;
       decoded: string;
       token_id?: number;
+      channel?: "thought" | "answer";
     }
   | {
       type: "raw_stopped";
@@ -130,6 +135,8 @@ export type ChatStreamEvent =
       turn_idx: number;
       raw_text: string;
       ablated_text: string;
+      raw_thinking?: string;
+      ablated_thinking?: string;
       raw_stopped_reason: string;
       ablated_stopped_reason: string;
       error: string | null;

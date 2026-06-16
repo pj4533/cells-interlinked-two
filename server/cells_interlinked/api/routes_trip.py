@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..pipeline.autoresearch_base import any_autoresearch_active
 from ..pipeline.generation_loop import ProbeConfig, ProbeResult, run_probe
+from ..pipeline.thinking import ThinkingSplitter, split_thinking
 from ..pipeline.trajectory import (
     assemble_geometry,
     build_series,
@@ -124,7 +125,7 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
     # instruction is folded in front of the user turn on Gemma, which makes
     # the model emit acknowledgment boilerplate ("Okay, I understand…") and
     # truncates introspection — contaminating the very tokens we plot.
-    rendered = bundle.render_prompt(req.prompt, system_prompt=None)
+    rendered = bundle.render_prompt(req.prompt, system_prompt=None, enable_thinking=True)
 
     state = RunState(run_id=run_id, prompt_text=req.prompt)
     app.state.registry.add(state)
@@ -216,15 +217,20 @@ async def _execute_trip(
         q: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
         async def fwd() -> None:
+            splitter = ThinkingSplitter(bundle.thought_open_id, bundle.thought_close_id)
             while True:
                 evt = await q.get()
                 et = evt.get("type")
                 if et == "token":
+                    channel, text = splitter.feed(evt["token_id"], evt["decoded"])
+                    if channel is None:
+                        continue  # delimiter / channel-name token — suppress
                     await state.emit({
                         "type": "trip_token",
                         "alpha": alpha,
                         "position": evt["position"],
-                        "decoded": evt["decoded"],
+                        "decoded": text,
+                        "channel": channel,
                     })
                 elif et == "stopped":
                     break
@@ -285,6 +291,10 @@ async def _execute_trip(
                 [c.decoded for c in raw.captured],
                 raw.output_text, 0.0, raw.stopped_reason, basis,
             )
+            raw_series.thinking, raw_series.answer = split_thinking(
+                [c.token_id for c in raw.captured], [c.decoded for c in raw.captured],
+                bundle.thought_open_id, bundle.thought_close_id,
+            )
         except Exception as exc:
             logger.exception("trip raw geometry failed")
             await state.emit({"type": "error", "message": f"geometry: {exc}"})
@@ -335,6 +345,10 @@ async def _execute_trip(
                 except Exception:
                     logger.exception("trip ablated series build failed (α=%.2f)", a)
                     continue
+                ser.thinking, ser.answer = split_thinking(
+                    [c.token_id for c in res.captured], [c.decoded for c in res.captured],
+                    bundle.thought_open_id, bundle.thought_close_id,
+                )
                 series.append(ser)
                 await state.emit({"type": "trip_series", "layer": layer, "series": ser.to_dict()})
 

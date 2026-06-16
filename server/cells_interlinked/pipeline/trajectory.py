@@ -131,6 +131,11 @@ class TrajectorySeries:
     degeneracy: float = 0.0
     coherent: bool = True
     regime: str = "baseline"         # "baseline" | "expansion" | "collapse"
+    # Gemma-4 reasoning split of `text`: the thought block and the final
+    # answer. Empty when thinking is off. The trajectory geometry covers the
+    # FULL path (thought + answer); these are for the text panel only.
+    thinking: str = ""
+    answer: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -139,6 +144,8 @@ class TrajectorySeries:
             "coords": self.coords,
             "tokens": self.tokens,
             "text": self.text,
+            "thinking": self.thinking,
+            "answer": self.answer,
             "n_tokens": self.n_tokens,
             "eff_dim": self.eff_dim,
             "spectral_entropy": self.spectral_entropy,

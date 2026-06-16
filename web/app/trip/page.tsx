@@ -107,8 +107,11 @@ function TripPageInner() {
         break;
       }
       case "trip_token": {
-        const e = evt as { alpha: number; decoded: string };
+        const e = evt as { alpha: number; decoded: string; channel?: "thought" | "answer" };
         const key = String(e.alpha);
+        // Reasoning tokens stream into the live text too (so the charging
+        // field still reflects activity); the final per-α split into
+        // thinking vs answer comes from the trip_series payload.
         setLiveText((prev) => ({ ...prev, [key]: (prev[key] || "") + e.decoded }));
         break;
       }

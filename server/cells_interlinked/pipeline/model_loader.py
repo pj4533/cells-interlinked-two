@@ -62,6 +62,11 @@ class ModelBundle:
     hidden_dim: int
     extraction_layer: int
     model_name: str
+    # Gemma-4 reasoning channel delimiter token ids (`<|channel>` / `<channel|>`).
+    # None on models without a thinking channel (e.g. Gemma-3) — thinking is
+    # then a no-op. Used to split the thought block from the final answer.
+    thought_open_id: int | None = None
+    thought_close_id: int | None = None
 
     def render_prompt(
         self,
@@ -69,6 +74,7 @@ class ModelBundle:
         *,
         agent_scaffold: str | None = None,
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
+        enable_thinking: bool = False,
     ) -> str:
         """Render the chat template into a single string (no tokenize).
 
@@ -97,6 +103,7 @@ class ModelBundle:
             msgs,
             tokenize=False,
             add_generation_prompt=True,
+            enable_thinking=enable_thinking,
         )
         return rendered
 
@@ -105,6 +112,7 @@ class ModelBundle:
         messages: list[dict[str, str]],
         *,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        enable_thinking: bool = False,
     ) -> str:
         """Render a multi-turn chat history into a single template string.
 
@@ -123,6 +131,7 @@ class ModelBundle:
             msgs,
             tokenize=False,
             add_generation_prompt=True,
+            enable_thinking=enable_thinking,
         )
         return rendered
 
@@ -177,9 +186,21 @@ def load_model(
         f"extraction_layer={extraction_layer} out of range [0,{num_layers})"
     )
 
+    # Gemma-4 reasoning-channel delimiters (`<|channel>` opens the thought
+    # block, `<channel|>` closes it). Absent on non-thinking models — left
+    # as None so the thinking split degrades to a no-op.
+    def _special_id(s: str) -> int | None:
+        try:
+            ids = raw_tokenizer.encode(s, add_special_tokens=False).ids
+            return int(ids[0]) if len(ids) == 1 else None
+        except Exception:
+            return None
+    thought_open_id = _special_id("<|channel>")
+    thought_close_id = _special_id("<channel|>")
+
     logger.info(
-        "model loaded: layers=%d hidden=%d eos=%s extract_at=L%d",
-        num_layers, hidden_dim, eos, extraction_layer,
+        "model loaded: layers=%d hidden=%d eos=%s extract_at=L%d thought_ids=(%s,%s)",
+        num_layers, hidden_dim, eos, extraction_layer, thought_open_id, thought_close_id,
     )
 
     return ModelBundle(
@@ -193,4 +214,6 @@ def load_model(
         hidden_dim=hidden_dim,
         extraction_layer=extraction_layer,
         model_name=model_name,
+        thought_open_id=thought_open_id,
+        thought_close_id=thought_close_id,
     )

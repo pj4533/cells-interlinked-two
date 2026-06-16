@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   user_text               TEXT NOT NULL,
   raw_text                TEXT NOT NULL DEFAULT '',
   ablated_text            TEXT NOT NULL DEFAULT '',
+  -- Gemma-4 reasoning channel, stored separately from the answer so the
+  -- transcript can render a "thinking" bubble and history stays answer-only.
+  raw_thinking            TEXT NOT NULL DEFAULT '',
+  ablated_thinking        TEXT NOT NULL DEFAULT '',
   raw_stopped_reason      TEXT NOT NULL DEFAULT '',
   ablated_stopped_reason  TEXT NOT NULL DEFAULT '',
   started_at              REAL NOT NULL,
@@ -186,6 +190,8 @@ async def init_db(path: Path) -> None:
             "raw_image_url",
             "ablated_image_url",
             "image_framing",
+            "raw_thinking",
+            "ablated_thinking",
         ):
             if col not in chat_cols:
                 await db.execute(
@@ -655,6 +661,8 @@ async def upsert_chat_turn(
     finished_at: float | None,
     error: str | None,
     alpha: float,
+    raw_thinking: str = "",
+    ablated_thinking: str = "",
     raw_image_prompt: str = "",
     ablated_image_prompt: str = "",
     raw_image_url: str = "",
@@ -673,16 +681,19 @@ async def upsert_chat_turn(
         await db.execute(
             "INSERT INTO chat_turns "
             "(session_id, turn_idx, user_text, raw_text, ablated_text, "
+            " raw_thinking, ablated_thinking, "
             " raw_stopped_reason, ablated_stopped_reason, started_at, "
             " finished_at, error, alpha, "
             " raw_image_prompt, ablated_image_prompt, "
             " raw_image_url, ablated_image_url, image_framing, "
             " mode, dose_emotion, dose_ramp) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(session_id, turn_idx) DO UPDATE SET "
             "  user_text=excluded.user_text, "
             "  raw_text=excluded.raw_text, "
             "  ablated_text=excluded.ablated_text, "
+            "  raw_thinking=excluded.raw_thinking, "
+            "  ablated_thinking=excluded.ablated_thinking, "
             "  raw_stopped_reason=excluded.raw_stopped_reason, "
             "  ablated_stopped_reason=excluded.ablated_stopped_reason, "
             "  started_at=excluded.started_at, "
@@ -699,6 +710,7 @@ async def upsert_chat_turn(
             "  dose_ramp=excluded.dose_ramp",
             (
                 session_id, turn_idx, user_text, raw_text, ablated_text,
+                raw_thinking, ablated_thinking,
                 raw_stopped_reason, ablated_stopped_reason, started_at,
                 finished_at, error, alpha,
                 raw_image_prompt, ablated_image_prompt,
@@ -731,6 +743,7 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
             return None
         async with db.execute(
             "SELECT turn_idx, user_text, raw_text, ablated_text, "
+            "       raw_thinking, ablated_thinking, "
             "       raw_stopped_reason, ablated_stopped_reason, "
             "       started_at, finished_at, error, alpha, "
             "       raw_image_prompt, ablated_image_prompt, "
@@ -759,6 +772,8 @@ async def get_chat_session(path: Path, session_id: str) -> dict[str, Any] | None
                 "user_text": t["user_text"],
                 "raw_text": t["raw_text"],
                 "ablated_text": t["ablated_text"],
+                "raw_thinking": t["raw_thinking"] or "",
+                "ablated_thinking": t["ablated_thinking"] or "",
                 "raw_stopped_reason": t["raw_stopped_reason"],
                 "ablated_stopped_reason": t["ablated_stopped_reason"],
                 "started_at": t["started_at"],

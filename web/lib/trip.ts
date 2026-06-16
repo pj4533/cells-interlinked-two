@@ -22,6 +22,10 @@ export interface TripSeries {
   coords: number[][]; // [N][3] in the shared raw-PCA basis
   tokens: string[];
   text: string;
+  // Gemma-4 reasoning split of `text` (empty when thinking is off). The 3-D
+  // trajectory covers the full path; these are for the text panel.
+  thinking?: string;
+  answer?: string;
   n_tokens: number;
   eff_dim: number;
   spectral_entropy: number;
@@ -75,7 +79,7 @@ export type TripEvent =
   | { type: "queued"; holder_run_id: string | null; position: number }
   | { type: "running" }
   | { type: "phase"; name: string; alpha?: number }
-  | { type: "trip_token"; alpha: number; position: number; decoded: string }
+  | { type: "trip_token"; alpha: number; position: number; decoded: string; channel?: "thought" | "answer" }
   | { type: "trip_series"; layer: number; series: TripSeries }
   | ({ type: "trip_geometry" } & TripPayload)
   | { type: "done" }

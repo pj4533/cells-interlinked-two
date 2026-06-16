@@ -174,6 +174,8 @@ class TurnView(BaseModel):
     user_text: str
     raw_text: str
     ablated_text: str
+    raw_thinking: str = ""
+    ablated_thinking: str = ""
     raw_stopped_reason: str
     ablated_stopped_reason: str
     started_at: float
@@ -238,6 +240,8 @@ def _turn_to_view(t: ChatTurn) -> TurnView:
         user_text=t.user_text,
         raw_text=t.raw_text,
         ablated_text=t.ablated_text,
+        raw_thinking=t.raw_thinking,
+        ablated_thinking=t.ablated_thinking,
         raw_stopped_reason=t.raw_stopped_reason,
         ablated_stopped_reason=t.ablated_stopped_reason,
         started_at=t.started_at,
@@ -365,6 +369,8 @@ async def _rehydrate_session(sid: str, request: Request) -> ChatSession | None:
             dose_ramp=t.get("dose_ramp") if t.get("dose_ramp") is not None else 16,
             raw_text=t["raw_text"],
             ablated_text=t["ablated_text"],
+            raw_thinking=t.get("raw_thinking", ""),
+            ablated_thinking=t.get("ablated_thinking", ""),
             raw_stopped_reason=t["raw_stopped_reason"],
             ablated_stopped_reason=t["ablated_stopped_reason"],
             started_at=t["started_at"],
@@ -551,6 +557,8 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                     user_text=turn.user_text,
                     raw_text=turn.raw_text,
                     ablated_text=turn.ablated_text,
+                    raw_thinking=turn.raw_thinking,
+                    ablated_thinking=turn.ablated_thinking,
                     raw_stopped_reason=turn.raw_stopped_reason,
                     ablated_stopped_reason=turn.ablated_stopped_reason,
                     started_at=turn.started_at,
@@ -576,6 +584,8 @@ async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnRespons
                 "turn_idx": turn.turn_idx,
                 "raw_text": turn.raw_text,
                 "ablated_text": turn.ablated_text,
+                "raw_thinking": turn.raw_thinking,
+                "ablated_thinking": turn.ablated_thinking,
                 "raw_stopped_reason": turn.raw_stopped_reason,
                 "ablated_stopped_reason": turn.ablated_stopped_reason,
                 "error": turn.error,

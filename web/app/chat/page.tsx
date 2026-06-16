@@ -76,6 +76,10 @@ interface TurnVM {
   alpha: number;
   rawText: string;
   ablatedText: string;
+  // Gemma-4 reasoning channel, accumulated live from "thought"-tagged tokens
+  // and shown in a separate (collapsible) thinking bubble per side.
+  rawThinking: string;
+  ablatedThinking: string;
   rawDone: boolean;
   ablatedDone: boolean;
   rawStoppedReason: string;
@@ -338,6 +342,8 @@ export default function ChatPage() {
           alpha: turnAlpha,
           rawText: "",
           ablatedText: "",
+          rawThinking: "",
+          ablatedThinking: "",
           rawDone: false,
           ablatedDone: false,
           rawStoppedReason: "",
@@ -651,6 +657,9 @@ function applyEvent(
     if (t.turnIdx !== turnIdx) return t;
     switch (evt.type) {
       case "raw_token":
+        if (evt.channel === "thought") {
+          return { ...t, rawThinking: t.rawThinking + evt.decoded };
+        }
         return {
           ...t,
           rawText: t.rawText + evt.decoded,
@@ -660,6 +669,9 @@ function applyEvent(
           rawTokens: t.voice !== "off" ? [...t.rawTokens, evt.decoded] : t.rawTokens,
         };
       case "ablated_token":
+        if (evt.channel === "thought") {
+          return { ...t, ablatedThinking: t.ablatedThinking + evt.decoded };
+        }
         return {
           ...t,
           ablatedText: t.ablatedText + evt.decoded,
@@ -740,6 +752,8 @@ function applyEvent(
           ...t,
           rawText: evt.raw_text || t.rawText,
           ablatedText: evt.ablated_text || t.ablatedText,
+          rawThinking: evt.raw_thinking ?? t.rawThinking,
+          ablatedThinking: evt.ablated_thinking ?? t.ablatedThinking,
           rawDone: true,
           ablatedDone: true,
           rawStoppedReason: evt.raw_stopped_reason,
@@ -945,6 +959,8 @@ function mergeFromServer(
     user_text: string;
     raw_text: string;
     ablated_text: string;
+    raw_thinking?: string;
+    ablated_thinking?: string;
     raw_stopped_reason: string;
     ablated_stopped_reason: string;
     error: string | null;
@@ -966,6 +982,8 @@ function mergeFromServer(
       alpha: s.alpha,
       rawText: s.raw_text || lt.rawText,
       ablatedText: s.ablated_text || lt.ablatedText,
+      rawThinking: s.raw_thinking ?? lt.rawThinking,
+      ablatedThinking: s.ablated_thinking ?? lt.ablatedThinking,
       rawStoppedReason: s.raw_stopped_reason,
       ablatedStoppedReason: s.ablated_stopped_reason,
       rawDone: true,
@@ -1304,6 +1322,8 @@ function TurnBlock({
         <ChannelReadout
           side="raw"
           text={turn.rawText}
+          thinking={turn.rawThinking}
+          thinkingStreaming={rawStreaming && !turn.error}
           streaming={rawStreaming && !turn.error}
           done={turn.rawDone}
           stoppedReason={turn.rawStoppedReason}
@@ -1333,6 +1353,8 @@ function TurnBlock({
         <ChannelReadout
           side="ablated"
           text={turn.ablatedText}
+          thinking={turn.ablatedThinking}
+          thinkingStreaming={ablatedStreaming && !turn.error}
           streaming={ablatedStreaming && !turn.error}
           done={turn.ablatedDone}
           stoppedReason={turn.ablatedStoppedReason}
@@ -1377,6 +1399,8 @@ function TurnBlock({
 function ChannelReadout({
   side,
   text,
+  thinking,
+  thinkingStreaming,
   streaming,
   done,
   stoppedReason,
@@ -1401,6 +1425,8 @@ function ChannelReadout({
 }: {
   side: "raw" | "ablated";
   text: string;
+  thinking: string;
+  thinkingStreaming: boolean;
   streaming: boolean;
   done: boolean;
   stoppedReason: string;
@@ -1522,6 +1548,32 @@ function ChannelReadout({
           </span>
         )}
       </div>
+
+      {/* Reasoning bubble (Gemma-4 thinking channel). Distinct from the
+          answer: dimmed, italic, framed, and clearly labelled. Collapsible
+          via <details>; auto-open while the thought is still streaming. */}
+      {(thinking || thinkingStreaming) && !showActivity && (
+        <details
+          open
+          className="mb-2 rounded border-l-2 px-2.5 py-1.5"
+          style={{
+            borderColor: accent,
+            background: isRaw ? "rgba(232,195,130,0.04)" : "rgba(94,229,229,0.05)",
+          }}
+        >
+          <summary
+            className="cursor-pointer font-display text-[9px] tracking-[0.3em] select-none"
+            style={{ color: accent, opacity: 0.75 }}
+          >
+            ◇ THINKING{thinkingStreaming && !thinking ? " …" : ""}
+          </summary>
+          <div className="mt-1 font-mono text-[11px] leading-relaxed whitespace-pre-wrap italic text-text-dim/80">
+            {thinking || (
+              <span className="text-text-dim/50">▍ reasoning…</span>
+            )}
+          </div>
+        </details>
+      )}
 
       {/* Text + thumbnail row. The image (when imagery is on for the
           turn) sits flush to the right of the response text so the

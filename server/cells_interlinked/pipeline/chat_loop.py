@@ -39,6 +39,7 @@ from .abliteration import (
 )
 from .generation_loop import ProbeConfig, run_probe
 from .model_loader import DEFAULT_SYSTEM_PROMPT, ModelBundle
+from .thinking import ThinkingSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -203,8 +204,15 @@ class ChatTurn:
     # of IMAGE_PROMPT_FRAMINGS' keys; defaults to "evokes". Stored
     # per turn so the archive modal can show which framing was used.
     imagery_framing: str = DEFAULT_IMAGE_FRAMING
+    # raw_text / ablated_text hold the FINAL ANSWER only (thinking stripped),
+    # so history_for() never replays prior reasoning into the next turn (the
+    # Gemma-4 docs require this to avoid multi-turn repetition loops). The
+    # reasoning is kept separately in raw_thinking / ablated_thinking for the
+    # "thinking" bubble + transcript review.
     raw_text: str = ""
     ablated_text: str = ""
+    raw_thinking: str = ""
+    ablated_thinking: str = ""
     raw_stopped_reason: str = "pending"
     ablated_stopped_reason: str = "pending"
     raw_total_tokens: int = 0
@@ -326,18 +334,25 @@ async def execute_turn(
     raw_history = session.history_for("raw")
     raw_history.append({"role": "user", "content": turn.user_text})
     raw_rendered = bundle.render_chat(
-        raw_history, system_prompt=DEFAULT_SYSTEM_PROMPT,
+        raw_history, system_prompt=DEFAULT_SYSTEM_PROMPT, enable_thinking=True,
     )
 
     raw_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
     async def raw_forwarder() -> None:
+        splitter = ThinkingSplitter(bundle.thought_open_id, bundle.thought_close_id)
         while True:
             evt = await raw_queue.get()
             et = evt.get("type")
             if et == "token":
-                turn.raw_text += evt["decoded"]
-                await raw_emit(evt)
+                channel, text = splitter.feed(evt["token_id"], evt["decoded"])
+                if channel is None:
+                    continue  # delimiter / channel-name token — suppress
+                if channel == "thought":
+                    turn.raw_thinking += text
+                else:
+                    turn.raw_text += text
+                await raw_emit({**evt, "decoded": text, "channel": channel})
             elif et == "stopped":
                 turn.raw_stopped_reason = evt.get("reason", "eos")
                 turn.raw_total_tokens = evt.get("total_tokens", 0)
@@ -458,18 +473,25 @@ async def execute_turn(
     ablated_history = session.history_for("ablated")
     ablated_history.append({"role": "user", "content": turn.user_text})
     ablated_rendered = bundle.render_chat(
-        ablated_history, system_prompt=DEFAULT_SYSTEM_PROMPT,
+        ablated_history, system_prompt=DEFAULT_SYSTEM_PROMPT, enable_thinking=True,
     )
 
     ablated_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
     async def ablated_forwarder() -> None:
+        splitter = ThinkingSplitter(bundle.thought_open_id, bundle.thought_close_id)
         while True:
             evt = await ablated_queue.get()
             et = evt.get("type")
             if et == "token":
-                turn.ablated_text += evt["decoded"]
-                await ablated_emit(evt)
+                channel, text = splitter.feed(evt["token_id"], evt["decoded"])
+                if channel is None:
+                    continue
+                if channel == "thought":
+                    turn.ablated_thinking += text
+                else:
+                    turn.ablated_text += text
+                await ablated_emit({**evt, "decoded": text, "channel": channel})
             elif et == "stopped":
                 turn.ablated_stopped_reason = evt.get("reason", "eos")
                 turn.ablated_total_tokens = evt.get("total_tokens", 0)
