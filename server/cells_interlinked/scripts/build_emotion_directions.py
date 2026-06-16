@@ -23,8 +23,7 @@ import torch
 from ..config import settings
 from ..pipeline.abliteration import _last_token_hidden_states
 from ..pipeline.model_loader import load_model
-from .manifold_steering_probe import EMO
-from .steering_probe_v2 import NEG_EMOTION, POS_EMOTION
+from ..pipeline.emotion_prompts import EMO, NEG_EMOTION, POS_EMOTION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("build_emotion")

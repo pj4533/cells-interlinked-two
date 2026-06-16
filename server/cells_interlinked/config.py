@@ -22,9 +22,10 @@ class Settings:
     server_host: str = os.getenv("SERVER_HOST", "127.0.0.1")
     server_port: int = int(os.getenv("SERVER_PORT", "8000"))
 
-    # Default to Gemma-3-12B-IT (the Gemma-4 cutover is a separate step).
-    # ~24GB on 64GB MPS at bf16. Override via env if needed.
-    model_name: str = os.getenv("MODEL_NAME", "google/gemma-3-12b-it")
+    # Gemma-4-12B-it. Same text backbone as Gemma-3-12B (48 layers, hidden
+    # 3840), so L32 capture + all direction-tensor shapes carry over. ~24GB
+    # on 64GB MPS at bf16. Set MODEL_NAME=google/gemma-3-12b-it to roll back.
+    model_name: str = os.getenv("MODEL_NAME", "google/gemma-4-12B-it")
     extraction_layer: int = int(os.getenv("EXTRACTION_LAYER", "32"))
 
     temperature: float = float(os.getenv("TEMPERATURE", "0.7"))

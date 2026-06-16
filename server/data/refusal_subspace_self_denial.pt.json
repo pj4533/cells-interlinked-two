@@ -1,5 +1,6 @@
 {
-  "model_name": "google/gemma-3-12b-it",
+  "model_name": "google/gemma-4-12B-it",
+  "variant_name": "self_denial_subspace",
   "K": 2,
   "num_layers": 48,
   "d_model": 3840,
@@ -14,6 +15,5 @@
     "n_self_other_pairs": 80,
     "n_denial_engage_pairs": 41
   },
-  "convention": "basis[k, L, :] is the k-th orthonormal basis vector at post-block-L residual position. basis[:, L, :] is the [K, d_model] tensor passed to install_runtime_ablation_hook in subspace mode at layer L.",
-  "variant_name": "self_denial_subspace"
+  "convention": "basis[k, L, :] is the k-th orthonormal basis vector at post-block-L residual position. basis[:, L, :] is the [K, d_model] tensor passed to install_runtime_ablation_hook in subspace mode at layer L."
 }

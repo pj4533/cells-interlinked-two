@@ -15,7 +15,7 @@
     "n_safety_total": 256,
     "n_harmless": 128
   },
-  "model_name": "google/gemma-3-12b-it",
+  "model_name": "google/gemma-4-12B-it",
   "num_layers": 48,
   "d_model": 3840,
   "pos": -4,

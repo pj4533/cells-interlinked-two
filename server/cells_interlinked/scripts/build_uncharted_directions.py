@@ -32,9 +32,7 @@ import torch
 from ..config import settings
 from ..pipeline.abliteration import gram_schmidt
 from ..pipeline.model_loader import load_model
-from .steering_probe import capture_all
-from .manifold_steering_probe import EMO
-from .uncharted_emotions_v2 import EXTRA, NAMED
+from ..pipeline.emotion_prompts import EMO, EXTRA, NAMED, capture_all
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("build_uncharted")
