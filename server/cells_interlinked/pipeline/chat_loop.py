@@ -44,9 +44,11 @@ from .thinking import ThinkingSplitter
 logger = logging.getLogger(__name__)
 
 
-# Phase 1b safety cap also applies to chat ablation: no-EOS loops at
-# strong α would tie up the model.
-ABLATED_SAFETY_CAP = 1024
+# Runaway guard for the chat ablated pass (off-manifold no-EOS loops at
+# strong α would otherwise generate forever / grow the KV cache to OOM).
+# Bumped 1024 → 4096 to match the raw pass now that thinking mode makes a
+# legitimate reply (reasoning + answer) routinely exceed 1024 tokens.
+ABLATED_SAFETY_CAP = 4096
 
 # Channel β can be driven two ways, mirroring the Trip View:
 #   "ablate" → remove the refusal projection at the extraction layer (L32);

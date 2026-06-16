@@ -236,8 +236,11 @@ async def _execute_trip(
                     break
 
         task = asyncio.create_task(fwd())
-        # Intervened runs get the tighter cap (off-manifold no-EOS loops).
-        cfg_run = cfg if install_fn is None else _dc.replace(cfg, safety_cap=1024)
+        # Intervened runs share the same runaway guard as the raw run. The
+        # cap only exists to bound off-manifold no-EOS loops (which would grow
+        # the KV cache to OOM); 4096 gives thinking-mode reasoning room to
+        # finish before EOS instead of truncating legitimate runs.
+        cfg_run = cfg if install_fn is None else _dc.replace(cfg, safety_cap=4096)
         hook = None
         if install_fn is not None:
             hook = install_fn(alpha)
