@@ -10,12 +10,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   fetchDmtState,
+  fetchDmtCells,
   startDmt,
   stopDmt,
   exportDmt,
   type DmtARState,
   type DmtAtlasEntry,
   type DmtCurrentCandidate,
+  type DmtSample,
 } from "@/lib/autoresearch-dmt";
 
 const GEN_COLOR: Record<string, string> = {
@@ -351,6 +353,104 @@ export default function AutoresearchDmtPage() {
   );
 }
 
+// Pink feature tags + the verbatim evidence span that earned each — the same
+// treatment the atlas winner uses, reused for every individual sample.
+function FeatureEvidence({ features, evidence }: { features: string[]; evidence?: Record<string, string> }) {
+  if (!features.length) return <span className="text-text-dim/40 italic text-[10px]">no features</span>;
+  return (
+    <div className="space-y-1">
+      {features.map((f) => (
+        <div key={f} className="flex gap-2 items-baseline leading-snug">
+          <span className="shrink-0 px-1.5 py-0.5 border text-[9px] rounded-sm self-start" style={{ borderColor: "#ff4d9d66", color: "#ff8fc0" }}>
+            {f}
+          </span>
+          {evidence?.[f] ? (
+            <span className="text-text-dim/90 italic text-[10px]">“{evidence[f]}”</span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// One individual dose (run): click to spin down its features+evidence and full text.
+function SampleDrill({ s, idx, winner }: { s: DmtSample; idx: number; winner: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-l border-rule/30 ml-1">
+      <button type="button" onClick={() => setOpen((x) => !x)}
+        className="w-full text-left pl-2 pr-1 py-0.5 flex items-center gap-2 hover:bg-bg-soft/60 transition-colors font-mono text-[10px]">
+        <span className="text-text-dim/50">{open ? "▾" : "▸"}</span>
+        <span className="text-text-dim">run #{idx + 1}</span>
+        <span className="tabular-nums" style={{ color: winner ? "#ff8fc0" : undefined }}>{s.count} feats{winner ? " ★" : ""}</span>
+        {!open && s.features.length > 0 && (
+          <span className="text-text-dim/50 truncate">{s.features.join(", ")}</span>
+        )}
+      </button>
+      {open && (
+        <div className="pl-4 pr-1 pb-1.5 space-y-1.5">
+          <FeatureEvidence features={s.features} evidence={s.evidence} />
+          <div className="text-[8px] tracking-[0.2em] text-text-dim/50">DOSE TEXT</div>
+          <div className="italic text-text-dim/90 leading-snug whitespace-pre-wrap max-h-56 overflow-y-auto pr-1 text-[10px]">
+            {s.text || <span className="text-text-dim/40">(empty)</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Per-α breakdown with per-individual-run drill-down. `samplesByAlpha` may be
+// partial (live, filling in) or fully loaded (atlas, lazy-fetched). The best α
+// auto-opens; within each α the highest-count run is flagged ★ winner.
+function PerAlphaDetail({ alphas, perAlpha, samplesByAlpha, bestAlpha }: {
+  alphas: string[];
+  perAlpha: Record<string, { mean: number; counts: number[] }>;
+  samplesByAlpha: Record<string, DmtSample[]>;
+  bestAlpha: number | null;
+}) {
+  return (
+    <div className="space-y-1">
+      {alphas.map((a) => {
+        const agg = perAlpha[a];
+        const samples = samplesByAlpha[a] ?? [];
+        const isBestAlpha = bestAlpha != null && String(bestAlpha) === a;
+        const winIdx = samples.length ? samples.reduce((bi, s, i, arr) => (s.count > arr[bi].count ? i : bi), 0) : -1;
+        return (
+          <AlphaBlock key={a} alpha={a} agg={agg} samples={samples} isBestAlpha={isBestAlpha} winIdx={winIdx} />
+        );
+      })}
+    </div>
+  );
+}
+
+function AlphaBlock({ alpha, agg, samples, isBestAlpha, winIdx }: {
+  alpha: string;
+  agg?: { mean: number; counts: number[] };
+  samples: DmtSample[];
+  isBestAlpha: boolean;
+  winIdx: number;
+}) {
+  const [open, setOpen] = useState(isBestAlpha);
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen((x) => !x)}
+        className="w-full text-left flex items-center gap-2 font-mono text-[10px] tabular-nums hover:bg-bg-soft/50 py-0.5">
+        <span className="text-text-dim/50">{open ? "▾" : "▸"}</span>
+        <span className="w-12" style={{ color: isBestAlpha ? "#5ee5e5" : "#5ee5e5aa" }}>α{alpha}{isBestAlpha ? " ★" : ""}</span>
+        {agg ? <span className="w-16 text-text">{agg.mean.toFixed(2)} avg</span> : <span className="w-16 text-text-dim/40 italic">pending</span>}
+        {agg && <span className="text-text-dim/80">[{agg.counts.join(", ")}]</span>}
+        <span className="text-text-dim/40">{samples.length ? `${samples.length} run${samples.length === 1 ? "" : "s"}` : ""}</span>
+      </button>
+      {open && samples.length > 0 && (
+        <div className="space-y-0.5 mb-1">
+          {samples.map((s, i) => <SampleDrill key={i} s={s} idx={i} winner={i === winIdx} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Live in-progress candidate: an atlas-entry-styled card (cyan / IN PROGRESS)
 // that streams the per-α / per-sample results in as the backend scores them.
 function InProgressPanel({ current }: { current: DmtCurrentCandidate }) {
@@ -398,61 +498,23 @@ function InProgressPanel({ current }: { current: DmtCurrentCandidate }) {
                 </span>
               </div>
 
-              <div className="space-y-0.5">
-                <div className="text-[8px] tracking-[0.2em] text-text-dim/50">
-                  PER-α · mean over completed samples, counts stream in
-                </div>
-                {p.alphas.map((a) => {
-                  const cell = p.per_alpha[a];
-                  const done = cell?.counts.length ?? 0;
-                  return (
-                    <div key={a} className="flex items-baseline gap-2 tabular-nums">
-                      <span className="w-12 text-cyan/80">α{a}</span>
-                      {cell ? (
-                        <>
-                          <span className="w-16 text-text">{cell.mean.toFixed(2)} avg</span>
-                          <span className="text-text-dim/80">[{cell.counts.join(", ")}]</span>
-                          <span className="text-text-dim/40">{done}/{p.samples_per_cell}</span>
-                        </>
-                      ) : (
-                        <span className="text-text-dim/40 italic">pending…</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {best && best.matched_features.length > 0 && (
-                <div className="pt-1 space-y-1">
-                  <div className="text-[8px] tracking-[0.2em] text-text-dim/50">
-                    BEST SO FAR · {best.score.toFixed(2)} avg @ α{best.best_alpha} — {best.matched_features.length} features
-                  </div>
-                  {best.matched_features.map((f) => (
-                    <div key={f} className="flex gap-2 items-baseline leading-snug">
-                      <span
-                        className="shrink-0 px-1.5 py-0.5 border text-[9px] rounded-sm self-start"
-                        style={{ borderColor: "#5ee5e566", color: "#9fecec" }}
-                      >
-                        {f}
-                      </span>
-                      {best.matched_evidence?.[f] ? (
-                        <span className="text-text-dim/90 italic text-[10px]">“{best.matched_evidence[f]}”</span>
-                      ) : null}
-                    </div>
-                  ))}
+              {best && best.score > 0 && (
+                <div className="text-[9px] text-text-dim/70">
+                  best so far: <span className="text-cyan">{best.score.toFixed(2)} avg @ α{best.best_alpha}</span>
                 </div>
               )}
 
-              {best?.sample ? (
-                <div className="pt-1">
-                  <div className="text-[8px] tracking-[0.2em] text-text-dim/50 mb-0.5">
-                    BEST DOSE RESPONSE · α {best.best_alpha} (so far)
-                  </div>
-                  <div className="italic text-text-dim/90 leading-snug whitespace-pre-wrap max-h-48 overflow-y-auto pr-1">
-                    {best.sample}
-                  </div>
+              <div className="space-y-0.5">
+                <div className="text-[8px] tracking-[0.2em] text-text-dim/50">
+                  PER-α · click an α, then a run, to read its text + features (★ = winner)
                 </div>
-              ) : null}
+                <PerAlphaDetail
+                  alphas={p.alphas}
+                  perAlpha={p.per_alpha}
+                  samplesByAlpha={Object.fromEntries(p.alphas.map((a) => [a, p.per_alpha[a]?.samples ?? []]))}
+                  bestAlpha={best?.best_alpha ?? null}
+                />
+              </div>
             </>
           )}
         </div>
@@ -463,6 +525,19 @@ function InProgressPanel({ current }: { current: DmtCurrentCandidate }) {
 
 function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
   const [open, setOpen] = useState(false);
+  // Per-run detail is lazy-loaded on first expand (kept out of the polled state).
+  const [cells, setCells] = useState<Record<string, DmtSample[]> | null>(null);
+  const [cellsErr, setCellsErr] = useState(false);
+  useEffect(() => {
+    if (!open || cells || cellsErr) return;
+    let alive = true;
+    fetchDmtCells(e.id).then((d) => {
+      if (!alive) return;
+      if (d && Object.keys(d.cells).length) setCells(d.cells);
+      else setCellsErr(true);
+    });
+    return () => { alive = false; };
+  }, [open, cells, cellsErr, e.id]);
   const c = genColor(e.generator);
   const pct = Math.max(3, Math.round((e.score / maxScore) * 100));
   return (
@@ -543,10 +618,29 @@ function AtlasRow({ e, maxScore }: { e: DmtAtlasEntry; maxScore: number }) {
           ) : null}
           {e.sample ? (
             <div className="pt-1">
-              <div className="text-[8px] tracking-[0.2em] text-text-dim/50 mb-0.5">DOSE RESPONSE · α {e.best_alpha}</div>
+              <div className="text-[8px] tracking-[0.2em] text-text-dim/50 mb-0.5">WINNING DOSE RESPONSE · α {e.best_alpha}</div>
               <div className="italic text-text-dim/90 leading-snug whitespace-pre-wrap max-h-56 overflow-y-auto pr-1">
                 {e.sample}
               </div>
+            </div>
+          ) : null}
+          {e.per_alpha ? (
+            <div className="pt-1.5 border-t border-rule/20">
+              <div className="text-[8px] tracking-[0.2em] text-text-dim/50 mb-0.5">
+                ALL RUNS · click an α, then a run, for its text + features (★ = winner)
+              </div>
+              {cells ? (
+                <PerAlphaDetail
+                  alphas={Object.keys(e.per_alpha)}
+                  perAlpha={e.per_alpha}
+                  samplesByAlpha={cells}
+                  bestAlpha={e.best_alpha}
+                />
+              ) : cellsErr ? (
+                <span className="text-text-dim/40 italic text-[10px]">(per-run detail unavailable — entry predates this feature)</span>
+              ) : (
+                <span className="text-text-dim/40 italic text-[10px]">loading runs…</span>
+              )}
             </div>
           ) : null}
         </div>

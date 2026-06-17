@@ -55,6 +55,16 @@ async def dmt_state(request: Request) -> dict:
     return _controller(request).state()
 
 
+@router.get("/autoresearch-dmt/cells/{vid}")
+async def dmt_cells(vid: str, request: Request) -> dict:
+    """Per-α / per-dose detail for one committed atlas entry (lazy-loaded on
+    row expand — kept out of the polled /state to keep it light)."""
+    detail = _controller(request).entry_cells(vid)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"no atlas entry {vid!r}")
+    return detail
+
+
 @router.post("/autoresearch-dmt/export")
 async def dmt_export(req: ExportRequest, request: Request) -> dict:
     """Promote the top-N DMT directions into the dose palette (chat/trips)."""

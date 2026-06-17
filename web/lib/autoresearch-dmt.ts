@@ -49,15 +49,24 @@ export interface DmtEvent {
   revert?: RevertEntry;
 }
 
+// One individual dose (run): its feature count, the features it matched, the
+// verbatim evidence span per feature, and the full dose-response text.
+export interface DmtSample {
+  count: number;
+  features: string[];
+  evidence: Record<string, string>;
+  text: string;
+}
+
 // Live per-α / per-sample progress of the candidate currently being scored,
 // published by the backend during _score_candidate (absent in the "distinct"
-// stage and on older backends). counts[] grows one entry per completed sample.
+// stage and on older backends). counts[]/samples[] grow per completed sample.
 export interface DmtProgress {
   alphas: string[];
   samples_per_cell: number;
   samples_total: number;
   samples_done: number;
-  per_alpha: Record<string, { mean: number; counts: number[] }>;
+  per_alpha: Record<string, { mean: number; counts: number[]; samples?: DmtSample[] }>;
   best: {
     score: number;
     best_alpha: number | null;
@@ -65,6 +74,25 @@ export interface DmtProgress {
     matched_evidence?: Record<string, string>;
     sample: string;
   };
+}
+
+// Lazy-loaded per-α / per-dose detail for a committed atlas entry.
+export interface DmtCellsDetail {
+  id: string;
+  best_alpha: number | null;
+  cells: Record<string, DmtSample[]>;
+}
+
+export async function fetchDmtCells(id: string): Promise<DmtCellsDetail | null> {
+  try {
+    const res = await fetch(`${API}/autoresearch-dmt/cells/${encodeURIComponent(id)}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as DmtCellsDetail;
+  } catch {
+    return null;
+  }
 }
 
 export interface DmtCurrentCandidate {

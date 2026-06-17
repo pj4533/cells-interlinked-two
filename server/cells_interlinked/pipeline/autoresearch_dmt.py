@@ -320,8 +320,14 @@ class DmtController(AutoresearchBase):
         matched_features/matched_evidence/sample (from the best sample), per_alpha
         ({α: {mean, counts}})."""
         rendered = self.app.state.bundle.render_prompt(DOSE_PROMPTS[0], system_prompt=None)
+        # Per-sample detail (every dose: its text, features, evidence quotes) is
+        # retained in `cells` so the UI can drill into any individual run — not
+        # just the per-α mean or the single winning sample. Text is capped to
+        # bound payload/disk. Stripped from the polled /state (lazy endpoint).
+        cap = 2500
         best = {"score": 0.0, "peak": 0, "best_alpha": None, "best_prompt": DOSE_PROMPTS[0],
-                "matched_features": [], "matched_evidence": {}, "sample": "", "per_alpha": {}}
+                "matched_features": [], "matched_evidence": {}, "sample": "",
+                "per_alpha": {}, "cells": {}}
         # Live progress published into self.current so the monitor UI can watch
         # the in-flight candidate fill in per-α / per-sample. Purely additive —
         # does not affect scoring, the gates, or the return value.
@@ -339,6 +345,7 @@ class DmtController(AutoresearchBase):
             self.current["progress"] = prog
         for alpha in ALPHA_SWEEP:
             counts: list[int] = []
+            samples: list[dict] = []           # full per-dose detail for this α
             cell_best = (-1, {}, "")           # (count, evidence, text)
             for i in range(SAMPLES_PER_CELL):
                 if self._stop_requested:
@@ -347,17 +354,23 @@ class DmtController(AutoresearchBase):
                                               temperature=SCORE_TEMPERATURE, seed=seed_base + i)
                 ev, _n1 = await self._score_dmt(text)
                 counts.append(len(ev))
+                samples.append({
+                    "count": len(ev), "features": sorted(ev.keys()),
+                    "evidence": ev, "text": (text or "")[:cap],
+                })
                 if len(ev) > cell_best[0]:
                     cell_best = (len(ev), ev, text or "")
                 if prog is not None:
                     prog["samples_done"] += 1
                     prog["per_alpha"][str(alpha)] = {
-                        "mean": round(sum(counts) / len(counts), 2), "counts": list(counts),
+                        "mean": round(sum(counts) / len(counts), 2),
+                        "counts": list(counts), "samples": list(samples),
                     }
             if not counts:
                 break
             mean = sum(counts) / len(counts)
             best["per_alpha"][str(alpha)] = {"mean": round(mean, 2), "counts": counts}
+            best["cells"][str(alpha)] = samples
             if mean > best["score"]:
                 best.update({
                     "score": round(mean, 2), "peak": cell_best[0], "best_alpha": alpha,
@@ -402,7 +415,20 @@ class DmtController(AutoresearchBase):
             "frontier_advance": res["score"] > self.frontier,
             "frontier_at_commit": round(self.frontier, 2),
             "sample": res["sample"], "committed_at": time.time(),
+            # Full per-α / per-dose detail (text + features + evidence). Heavy, so
+            # state() strips it from the polled atlas; the /cells/{id} endpoint
+            # serves it on demand when a row is expanded.
+            "cells": res.get("cells", {}),
         }
+
+    def entry_cells(self, vid: str) -> dict | None:
+        """Per-α / per-sample detail for one committed entry (for the lazy
+        atlas-row drill-down). None if the id isn't in the atlas."""
+        for e in self.atlas:
+            if e["id"] == vid:
+                return {"id": vid, "best_alpha": e.get("best_alpha"),
+                        "cells": e.get("cells", {})}
+        return None
 
     # ── generator override: crossover from the best ──────────────
     def _crossover(self):

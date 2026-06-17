@@ -217,7 +217,10 @@ class AutoresearchBase:
             "frontier": self.frontier,
             "started_at": self.started_at,
             "atlas_size": len(self.atlas),
-            "atlas": self.atlas,
+            # Strip the heavy per-sample "cells" detail from the polled atlas —
+            # it's lazy-loaded per entry via the /cells/{id} endpoint. The
+            # in-flight candidate's live detail rides on `current` (bounded).
+            "atlas": [{k: v for k, v in e.items() if k != "cells"} for e in self.atlas],
             "reverts": list(self.reverts),
             "recent_events": list(self.events)[-60:],
             "current": self.current,
