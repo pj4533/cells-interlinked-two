@@ -70,8 +70,12 @@ _FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEN
 # Cost: |ALPHA_SWEEP| × SAMPLES_PER_CELL doses per candidate. Reliability was chosen
 # over speed; DOSE_CAP halved (1024) and the α-sweep kept small to keep candidates
 # tractable (~12–15 min each). All tunable.
-ALPHA_SWEEP = [0.25, 0.45]   # two low dose points (best draws historically clustered here)
-SAMPLES_PER_CELL = 4         # stochastic doses averaged per α (lower temp below compensates for one fewer)
+# Gemma-4 re-grid (2026-06-17): a wide α scan on 4 directions (sublime/awe/
+# gen35_crossover peak at 0.45; rapture peaks at 0.35; all collapse by ~0.6+) showed
+# the productive band is 0.3–0.5 and the old [0.25, 0.45] under-scored 0.35-peakers
+# (rapture: true mean 3.5 at 0.35, but recorded 1.75). This brackets the band evenly.
+ALPHA_SWEEP = [0.30, 0.40, 0.50]
+SAMPLES_PER_CELL = 6         # stochastic doses averaged per α; bumped 4→6 (per-sample counts are bimodal/noisy)
 DOSE_CAP = 1024              # runaway backstop; halved from 2048 to afford the repeated sampling
 
 # ── noise control (2026-06-07) ───────────────────────────────────────
