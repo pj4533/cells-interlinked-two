@@ -49,6 +49,24 @@ export interface DmtEvent {
   revert?: RevertEntry;
 }
 
+// Live per-α / per-sample progress of the candidate currently being scored,
+// published by the backend during _score_candidate (absent in the "distinct"
+// stage and on older backends). counts[] grows one entry per completed sample.
+export interface DmtProgress {
+  alphas: string[];
+  samples_per_cell: number;
+  samples_total: number;
+  samples_done: number;
+  per_alpha: Record<string, { mean: number; counts: number[] }>;
+  best: {
+    score: number;
+    best_alpha: number | null;
+    matched_features: string[];
+    matched_evidence?: Record<string, string>;
+    sample: string;
+  };
+}
+
 export interface DmtCurrentCandidate {
   id: string;
   generator: string;
@@ -57,6 +75,7 @@ export interface DmtCurrentCandidate {
   score?: number;
   best_alpha?: number;
   max_cos?: number;
+  progress?: DmtProgress;
 }
 
 export interface DmtARState {

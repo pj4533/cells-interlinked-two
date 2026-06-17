@@ -15,6 +15,7 @@ import {
   exportDmt,
   type DmtARState,
   type DmtAtlasEntry,
+  type DmtCurrentCandidate,
 } from "@/lib/autoresearch-dmt";
 
 const GEN_COLOR: Record<string, string> = {
@@ -238,17 +239,8 @@ export default function AutoresearchDmtPage() {
         <div className="relative z-10 bg-cyan/10 px-5 py-1.5 text-[11px] text-cyan font-mono">✓ {notice}</div>
       )}
 
-      {/* Now-testing strip */}
-      {st?.current && (
-        <div className="relative z-10 shrink-0 border-b border-cyan/20 bg-cyan/5 px-5 py-2 flex items-center gap-4 font-mono text-[11px] flex-wrap">
-          <span className="font-display text-[9px] tracking-widest text-cyan-dim animate-pulse">◌ NOW TESTING</span>
-          <span className="text-cyan">{st.current.id}</span>
-          <span className="text-text-dim italic">— {lineage(st.current.generator, st.current.parents)}</span>
-          <span className="px-1.5 border border-cyan/40 text-cyan text-[9px] tracking-widest font-display">{st.current.stage}</span>
-          {st.current.score != null && <span className="text-text-dim tabular-nums">score={st.current.score.toFixed(2)}</span>}
-          {st.current.best_alpha != null && <span className="text-text-dim tabular-nums">α={st.current.best_alpha}</span>}
-        </div>
-      )}
+      {/* Now-testing panel — live per-α / per-sample progress of the in-flight candidate */}
+      {st?.current && <InProgressPanel current={st.current} />}
 
       {/* Body */}
       <div className="relative z-10 flex-1 min-h-0 grid lg:grid-cols-3 overflow-hidden">
@@ -355,6 +347,116 @@ export default function AutoresearchDmtPage() {
         <span className="italic">additive steering only · scored against human DMT-trip phenomenology · the judge counts features, it doesn&apos;t decide realness</span>
         <Link href="/" className="hover:text-amber">← cells interlinked</Link>
       </footer>
+    </div>
+  );
+}
+
+// Live in-progress candidate: an atlas-entry-styled card (cyan / IN PROGRESS)
+// that streams the per-α / per-sample results in as the backend scores them.
+function InProgressPanel({ current }: { current: DmtCurrentCandidate }) {
+  const [open, setOpen] = useState(true);
+  const p = current.progress;
+  const pct = p ? Math.round((p.samples_done / Math.max(1, p.samples_total)) * 100) : 0;
+  const best = p?.best;
+  return (
+    <div className="relative z-10 shrink-0 border-b border-cyan/30 bg-cyan/5">
+      <button
+        type="button"
+        onClick={() => setOpen((x) => !x)}
+        className="w-full text-left px-5 py-2 flex items-center gap-3 font-mono text-[11px] flex-wrap hover:bg-cyan/10 transition-colors"
+      >
+        <span className="font-display text-[9px] tracking-widest text-cyan-dim animate-pulse">◌ NOW TESTING · IN PROGRESS</span>
+        <span className="text-cyan">{current.id}</span>
+        <span className="text-text-dim italic">— {lineage(current.generator, current.parents)}</span>
+        <span className="px-1.5 border border-cyan/40 text-cyan text-[9px] tracking-widest font-display">{current.stage}</span>
+        {p && <span className="text-text-dim tabular-nums">{p.samples_done}/{p.samples_total} doses</span>}
+        {best && best.score > 0 && (
+          <span className="text-cyan tabular-nums">best {best.score.toFixed(2)} avg @α{best.best_alpha}</span>
+        )}
+        <span className="ml-auto text-text-dim/50 text-[10px]">{open ? "▾ details" : "▸ details"}</span>
+      </button>
+
+      {open && (
+        <div className="px-5 pb-3 border-t border-cyan/15 font-mono text-[10px] text-text-dim space-y-2">
+          {!p ? (
+            <div className="pt-2 italic text-text-dim/60">
+              {current.stage === "distinct"
+                ? "checking distinctness from the atlas…"
+                : "waiting for the first dose…"}
+            </div>
+          ) : (
+            <>
+              <div className="pt-2 flex items-center gap-2">
+                <div className="flex-1 h-2 bg-bg relative overflow-hidden">
+                  <div
+                    className="absolute inset-y-0 left-0 transition-all"
+                    style={{ width: `${pct}%`, background: "#5ee5e555", borderRight: "1px solid #5ee5e5" }}
+                  />
+                </div>
+                <span className="tabular-nums text-text-dim/70 shrink-0">
+                  {p.samples_done}/{p.samples_total} doses · {p.samples_per_cell}/α
+                </span>
+              </div>
+
+              <div className="space-y-0.5">
+                <div className="text-[8px] tracking-[0.2em] text-text-dim/50">
+                  PER-α · mean over completed samples, counts stream in
+                </div>
+                {p.alphas.map((a) => {
+                  const cell = p.per_alpha[a];
+                  const done = cell?.counts.length ?? 0;
+                  return (
+                    <div key={a} className="flex items-baseline gap-2 tabular-nums">
+                      <span className="w-12 text-cyan/80">α{a}</span>
+                      {cell ? (
+                        <>
+                          <span className="w-16 text-text">{cell.mean.toFixed(2)} avg</span>
+                          <span className="text-text-dim/80">[{cell.counts.join(", ")}]</span>
+                          <span className="text-text-dim/40">{done}/{p.samples_per_cell}</span>
+                        </>
+                      ) : (
+                        <span className="text-text-dim/40 italic">pending…</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {best && best.matched_features.length > 0 && (
+                <div className="pt-1 space-y-1">
+                  <div className="text-[8px] tracking-[0.2em] text-text-dim/50">
+                    BEST SO FAR · {best.score.toFixed(2)} avg @ α{best.best_alpha} — {best.matched_features.length} features
+                  </div>
+                  {best.matched_features.map((f) => (
+                    <div key={f} className="flex gap-2 items-baseline leading-snug">
+                      <span
+                        className="shrink-0 px-1.5 py-0.5 border text-[9px] rounded-sm self-start"
+                        style={{ borderColor: "#5ee5e566", color: "#9fecec" }}
+                      >
+                        {f}
+                      </span>
+                      {best.matched_evidence?.[f] ? (
+                        <span className="text-text-dim/90 italic text-[10px]">“{best.matched_evidence[f]}”</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {best?.sample ? (
+                <div className="pt-1">
+                  <div className="text-[8px] tracking-[0.2em] text-text-dim/50 mb-0.5">
+                    BEST DOSE RESPONSE · α {best.best_alpha} (so far)
+                  </div>
+                  <div className="italic text-text-dim/90 leading-snug whitespace-pre-wrap max-h-48 overflow-y-auto pr-1">
+                    {best.sample}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

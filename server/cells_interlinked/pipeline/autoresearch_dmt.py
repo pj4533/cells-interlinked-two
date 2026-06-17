@@ -322,6 +322,21 @@ class DmtController(AutoresearchBase):
         rendered = self.app.state.bundle.render_prompt(DOSE_PROMPTS[0], system_prompt=None)
         best = {"score": 0.0, "peak": 0, "best_alpha": None, "best_prompt": DOSE_PROMPTS[0],
                 "matched_features": [], "matched_evidence": {}, "sample": "", "per_alpha": {}}
+        # Live progress published into self.current so the monitor UI can watch
+        # the in-flight candidate fill in per-α / per-sample. Purely additive —
+        # does not affect scoring, the gates, or the return value.
+        prog = None
+        if self.current is not None:
+            prog = {
+                "alphas": [str(a) for a in ALPHA_SWEEP],
+                "samples_per_cell": SAMPLES_PER_CELL,
+                "samples_total": len(ALPHA_SWEEP) * SAMPLES_PER_CELL,
+                "samples_done": 0,
+                "per_alpha": {},   # {α: {mean, counts}} — counts grow sample-by-sample
+                "best": {"score": 0.0, "best_alpha": None, "matched_features": [],
+                         "matched_evidence": {}, "sample": ""},
+            }
+            self.current["progress"] = prog
         for alpha in ALPHA_SWEEP:
             counts: list[int] = []
             cell_best = (-1, {}, "")           # (count, evidence, text)
@@ -334,6 +349,11 @@ class DmtController(AutoresearchBase):
                 counts.append(len(ev))
                 if len(ev) > cell_best[0]:
                     cell_best = (len(ev), ev, text or "")
+                if prog is not None:
+                    prog["samples_done"] += 1
+                    prog["per_alpha"][str(alpha)] = {
+                        "mean": round(sum(counts) / len(counts), 2), "counts": list(counts),
+                    }
             if not counts:
                 break
             mean = sum(counts) / len(counts)
@@ -344,6 +364,12 @@ class DmtController(AutoresearchBase):
                     "matched_features": sorted(cell_best[1].keys()),
                     "matched_evidence": cell_best[1], "sample": cell_best[2],
                 })
+                if prog is not None:
+                    prog["best"] = {
+                        "score": round(mean, 2), "best_alpha": alpha,
+                        "matched_features": sorted(cell_best[1].keys()),
+                        "matched_evidence": cell_best[1], "sample": (cell_best[2] or "")[:1200],
+                    }
         return best
 
     # ── atlas helpers ────────────────────────────────────────────
