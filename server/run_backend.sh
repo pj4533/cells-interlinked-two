@@ -18,7 +18,9 @@ set -euo pipefail
 cd "$(dirname "$0")"            # server/
 SESSION=ci-backend
 
-running() { screen -list 2>/dev/null | grep -q "\.${SESSION}"; }
+# Note: `screen -list` exits non-zero in normal cases, which under `pipefail`
+# would mask a grep match — so match the captured output with bash globbing.
+running() { [[ "$(screen -list 2>/dev/null || true)" == *".${SESSION}"* ]]; }
 
 case "${1:-start}" in
   start)
