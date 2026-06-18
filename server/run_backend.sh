@@ -20,13 +20,18 @@ SESSION=ci-backend
 
 # Note: `screen -list` exits non-zero in normal cases, which under `pipefail`
 # would mask a grep match — so match the captured output with bash globbing.
+LOG=/tmp/ci_backend.log
+
 running() { [[ "$(screen -list 2>/dev/null || true)" == *".${SESSION}"* ]]; }
 
 case "${1:-start}" in
   start)
     if running; then echo "already running (screen session '${SESSION}')"; exit 0; fi
-    screen -dmS "$SESSION" caffeinate -is uv run python -m cells_interlinked
-    echo "started backend in detached screen '${SESSION}'"
+    # Redirect to a logfile (append, with a start marker) so a death leaves a
+    # diagnosable tail — screen's own buffer is lost when the session dies.
+    echo "===== backend start $(date '+%F %T') =====" >> "$LOG"
+    screen -dmS "$SESSION" bash -c "caffeinate -is uv run python -m cells_interlinked >> '$LOG' 2>&1"
+    echo "started backend in detached screen '${SESSION}' (log: $LOG)"
     echo "  attach: ./run_backend.sh attach   stop: ./run_backend.sh stop"
     ;;
   stop)
