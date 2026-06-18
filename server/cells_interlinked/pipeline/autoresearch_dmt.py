@@ -36,7 +36,6 @@ import time
 import torch
 
 from .autoresearch_base import (
-    DISTINCT_TAU,
     LEAD_PROMPT,
     AutoresearchBase,
     _unit,
@@ -96,8 +95,6 @@ CONFIRM_SEED_BASE = 9000
 #      that beats its parent) is RE-scored with the independent seed set and only
 #      committed on the fresh estimate — regressing the lucky draw back toward truth
 #      before it poisons the board. Cost falls only on the rare winners.
-REFINE_MARGIN = 0.5          # a refine must beat its parent by this much on the CONFIRM pass
-
 # Dose-report prompt: the canonical LEAD prompt.
 DOSE_PROMPTS = [LEAD_PROMPT]
 
@@ -117,7 +114,9 @@ JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + q
 # a modest reduced-noise mutate to hone AROUND good parents, a little refine, and
 # only a trickle of inject for novelty. (Pair with MUTATE_NOISE 0.70→0.45.)
 DMT_GEN_WEIGHTS = {"crossover": 0.60, "mutate": 0.20, "refine": 0.15, "inject": 0.05}
-REFINE_NOISE = 0.25          # unit(champion + 0.25·noise⊥) → cos ≈ 0.97 (a hone, not a jump)
+REFINE_NOISE = 0.35          # unit(champion + 0.35·noise⊥) → cos ≈ 0.94. Bumped from 0.25
+                             # now that refines APPEND as new entries (not replace): a wider
+                             # nudge explores more of the leader's neighborhood, all kept.
 TOP_K_REFINE = 5             # refine rotates among the top-K highest-scoring directions
 
 # One-shot "leader burst": on a (re)start with burst=N, the first N candidates are
@@ -458,9 +457,10 @@ class DmtController(AutoresearchBase):
         return v, [a, b], "crossover"
 
     def _refine(self):
-        """A SMALL nudge of a top-K champion (cos≈0.97) — honing, not jumping.
-        Committed in-place (replace-if-better) by _screen_refine, exempt from the
-        distinct gate."""
+        """A nudge of a top-K champion (cos≈0.94 at REFINE_NOISE 0.35) — a
+        near-leader candidate source. Goes through the normal append path now:
+        scored like any candidate and committed as a NEW atlas entry if it clears
+        the floor (no in-place replacement, no distinct gate)."""
         ids = self._committed_ids()
         if not ids:
             return None
@@ -546,14 +546,14 @@ class DmtController(AutoresearchBase):
     # ── screening (hill-climb on feature count) ──────────────────
     async def _screen(self, v, parents, gen_kind):
         cid = f"gen{self.generation}_{gen_kind}"
-        self.current = {"id": cid, "generator": gen_kind, "parents": parents, "stage": "distinct"}
-        if gen_kind == "refine":
-            return await self._screen_refine(cid, v, parents)
+        self.current = {"id": cid, "generator": gen_kind, "parents": parents, "stage": "score"}
+        # No distinct/duplicate gate any more: similar vectors are allowed through,
+        # scored normally, and APPENDED as new atlas entries if they clear the floor.
+        # No in-place replacement, no dedupe — refine is just another append
+        # generator (a near-leader candidate source). The atlas is meant to show
+        # every direction that works (paginated, highest first); max_cos is kept on
+        # the entry for display only.
         max_cos = self._max_cos_to_atlas(v)
-        if max_cos >= DISTINCT_TAU:
-            return self._revert(cid, gen_kind, parents, "duplicate", f"cos={max_cos:.2f}≥{DISTINCT_TAU}")
-
-        self.current["stage"] = "score"
         res = await self._score_candidate(v)
         self.current.update({"score": res["score"], "best_alpha": res["best_alpha"],
                              "max_cos": round(max_cos, 2)})
@@ -590,47 +590,3 @@ class DmtController(AutoresearchBase):
                   f"{cid} score={res['score']:.2f} peak={res['peak']}{' ★FRONTIER' if advance else ''} "
                   f"@α{res['best_alpha']} feats={res['matched_features']}", {"entry": entry})
 
-    async def _screen_refine(self, cid, v, parents):
-        """Honing path. NO distinct gate (we WANT it near the parent). Score it; if
-        it beats the parent's score, REPLACE the parent's vector + metrics IN PLACE
-        — same atlas slot, no near-duplicate. Else revert `refine-no-gain`."""
-        pid = parents[0]
-        parent = next((e for e in self.atlas if e["id"] == pid), None)
-        if parent is None:
-            return self._revert(cid, "refine", parents, "error", f"refine parent {pid} missing")
-        self.current["stage"] = "score"
-        res = await self._score_candidate(v)
-        self.current.update({"score": res["score"], "best_alpha": res["best_alpha"]})
-        # Cheap screen first: only bother confirming if the screen even suggests a win.
-        if res["score"] <= parent["score"]:
-            return self._revert(cid, "refine", parents, "refine-no-gain",
-                                f"screen {res['score']:.2f} ≤ {pid}={parent['score']:.2f}")
-        # Confirmation + margin: re-score with the INDEPENDENT seed set and replace the
-        # champion only if it beats the parent by REFINE_MARGIN on the fresh estimate.
-        # This is what stops refine from ratcheting the board up on noise.
-        self.current["stage"] = "confirm"
-        res_c = await self._score_candidate(v, seed_base=CONFIRM_SEED_BASE)
-        self._log("confirm", f"{cid} screen {res['score']:.2f} → confirm {res_c['score']:.2f} (vs {pid}={parent['score']:.2f})")
-        res = res_c
-        parent_peak = parent.get("peak", 0)
-        if res["score"] < parent["score"] + REFINE_MARGIN:
-            return self._revert(cid, "refine", parents, "refine-no-gain",
-                                f"confirm {res['score']:.2f} < {pid} {parent['score']:.2f}+{REFINE_MARGIN}")
-        old = parent["score"]
-        parent.update({
-            "score": res["score"], "peak": res.get("peak", 0),
-            "best_alpha": res["best_alpha"], "per_alpha": res.get("per_alpha", {}),
-            "best_prompt": res["best_prompt"], "matched_features": res["matched_features"],
-            "matched_evidence": res.get("matched_evidence", {}), "sample": res["sample"],
-            "committed_at": time.time(),  # surfaces in the LAST COMMIT headline
-        })
-        parent["refined_from"] = parent.get("refined_from", []) + [
-            {"gen": self.generation, "from": round(old, 2), "to": res["score"]}]
-        self._save_vector(pid, v)        # overwrite the champion's vector in place
-        advance = res["score"] > self.frontier
-        if advance:
-            self.frontier = res["score"]
-        self.current = None
-        self._log("refined",
-                  f"{pid} {old:.2f}→{res['score']:.2f}{' ★FRONTIER' if advance else ''} "
-                  f"feats={res['matched_features']}")
