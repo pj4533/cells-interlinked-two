@@ -49,7 +49,8 @@ GEN_CAP = 200              # dosed generation window
 RAW_CAP = 200              # raw baseline window (off-manifold)
 GEN_RAMP = 16              # dose ramp length (matches the trips steering hook)
 DISTINCT_TAU = 0.90        # max cosine to an existing atlas direction (dedupe)
-MUTATE_NOISE = 0.70        # mutate = unit(base + 0.70·noise⊥): cos≈0.82 to parent
+MUTATE_NOISE = 0.45        # mutate = unit(base + 0.45·noise⊥): cos≈0.91 to parent (Gemma-4:
+                           # 0.70 jumped off-manifold → score 0; stay nearer the productive parent)
 GEN_WEIGHTS = {"crossover": 0.60, "mutate": 0.25, "inject": 0.15}
 
 # Seed pool — the named good-emotion vectors + the uncharted directions. Both

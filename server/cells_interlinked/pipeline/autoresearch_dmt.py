@@ -108,14 +108,15 @@ DOSE_PROMPTS = [LEAD_PROMPT]
 MIN_SCORE_TO_COMMIT = 1.0
 JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
 
-# Generator mix — rebalanced to what the atlas data says works. Tally over the
-# committed atlas: mutate produced the leader and 5 of the top 12 (max 6, mean 3.0)
-# from only ~20% of the budget; inject discovered the leader's PARENT (random
-# exploration is how the off-axis productive regions get found at all); crossover
-# ate 40% of the budget and produced ZERO top performers (it averages the sparse
-# off-axis spikes back toward the emotion-like bulk of the atlas). So: pour budget
-# into discover (inject) → hone (mutate/refine), and nearly drop crossover.
-DMT_GEN_WEIGHTS = {"crossover": 0.05, "mutate": 0.40, "refine": 0.25, "inject": 0.30}
+# Generator mix. The earlier inject/mutate-heavy split was tuned on GEMMA-3 (where
+# random exploration found off-axis spikes and crossover regressed to the mean).
+# On GEMMA-4 the first overnight run flatly inverted that: mutate (0.70 noise) +
+# inject produced 16 straight score=0.00 (off-manifold gibberish), while the lone
+# crossover was the only search commit. So on Gemma-4 the productive region is too
+# small to hit randomly — exploit it. Pour budget into crossover-of-the-top, keep
+# a modest reduced-noise mutate to hone AROUND good parents, a little refine, and
+# only a trickle of inject for novelty. (Pair with MUTATE_NOISE 0.70→0.45.)
+DMT_GEN_WEIGHTS = {"crossover": 0.60, "mutate": 0.20, "refine": 0.15, "inject": 0.05}
 REFINE_NOISE = 0.25          # unit(champion + 0.25·noise⊥) → cos ≈ 0.97 (a hone, not a jump)
 TOP_K_REFINE = 5             # refine rotates among the top-K highest-scoring directions
 
