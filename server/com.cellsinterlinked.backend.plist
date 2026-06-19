@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cellsinterlinked.backend</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/pj4533/Developer/cells-interlinked-two/server/ci_backend_supervised.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/pj4533/Developer/cells-interlinked-two/server</string>
+
+    <!-- Restart on ANY exit (the overnight death was a graceful SIGTERM with no
+         kernel trace; KeepAlive=true is agnostic to cause). -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Start when the agent is loaded (login / install / reboot). -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Don't thrash if it crashes during the ~30-60s model load. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/pj4533/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/ci_backend.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/ci_backend.log</string>
+</dict>
+</plist>

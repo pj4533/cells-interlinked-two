@@ -1,48 +1,79 @@
 #!/usr/bin/env bash
-# Durable backend launcher for unattended (overnight / multi-hour) runs.
+# Backend control for unattended (overnight / multi-hour) runs.
 #
-# The backend runs inside a DETACHED `screen` session, so it lives in its own
-# process session independent of whatever terminal — or agent — started it.
-# That's the fix for the overnight death: the previous launch was a `nohup &`
-# child of the launching session's process group, which got SIGTERM'd when that
-# session was torn down. A screen server daemonizes away from that group.
+# Backed by a launchd LaunchAgent (com.cellsinterlinked.backend) instead of the
+# old detached `screen`. WHY: the backend kept dying overnight — a graceful
+# SIGTERM with no kernel/jetsam trace (the log ended on a multiprocessing
+# resource_tracker cleanup warning, which only prints on a clean interpreter
+# shutdown). `screen` does not relaunch a killed child, so the box sat idle.
+# launchd KeepAlive restarts on ANY exit cause, and RunAtLoad brings it back
+# after login/reboot. The agent runs server/ci_backend_supervised.sh, which
+# execs `caffeinate -is uv run python -m cells_interlinked` and (in the
+# background) re-POSTs /autoresearch-dmt/start once the model is ready, so the
+# DMT hunt resumes on every restart.
 #
-# `caffeinate -is` keeps the Mac awake (idle + system sleep) for the run's
-# lifetime. Does NOT survive a reboot — restart manually after one.
-#
-#   ./run_backend.sh          start (no-op if already running)
-#   ./run_backend.sh stop     stop the session
-#   ./run_backend.sh attach   watch it live (detach again with Ctrl-a d)
-#   ./run_backend.sh status   is it up?
-set -euo pipefail
+#   ./run_backend.sh install    install + load the launchd agent (first time)
+#   ./run_backend.sh start      load/kick the agent (start it)
+#   ./run_backend.sh stop       unload the agent (stops it; no auto-restart)
+#   ./run_backend.sh restart    kickstart -k (kill + relaunch)
+#   ./run_backend.sh status     is it up? (launchd state + health)
+#   ./run_backend.sh attach     tail the live log (Ctrl-c to detach)
+#   ./run_backend.sh uninstall  unload + remove the agent
+set -uo pipefail
 cd "$(dirname "$0")"            # server/
-SESSION=ci-backend
 
-# Note: `screen -list` exits non-zero in normal cases, which under `pipefail`
-# would mask a grep match — so match the captured output with bash globbing.
+LABEL=com.cellsinterlinked.backend
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+DOMAIN="gui/$(id -u)"
+SERVICE="${DOMAIN}/${LABEL}"
 LOG=/tmp/ci_backend.log
 
-running() { [[ "$(screen -list 2>/dev/null || true)" == *".${SESSION}"* ]]; }
+loaded() { launchctl print "$SERVICE" >/dev/null 2>&1; }
 
-case "${1:-start}" in
+case "${1:-status}" in
+  install)
+    # Copy the repo-tracked plist into LaunchAgents on a fresh checkout.
+    if [[ ! -f "$PLIST" ]]; then
+      if [[ -f "${LABEL}.plist" ]]; then
+        mkdir -p "$HOME/Library/LaunchAgents"
+        cp "${LABEL}.plist" "$PLIST" && echo "copied ${LABEL}.plist -> $PLIST"
+      else
+        echo "missing plist: $PLIST (and no repo copy ./${LABEL}.plist)"; exit 1
+      fi
+    fi
+    if loaded; then echo "already installed; use 'restart' to bounce it"; exit 0; fi
+    launchctl bootstrap "$DOMAIN" "$PLIST" && echo "installed + started ($LABEL)"
+    echo "  log: $LOG   status: ./run_backend.sh status"
+    ;;
   start)
-    if running; then echo "already running (screen session '${SESSION}')"; exit 0; fi
-    # Redirect to a logfile (append, with a start marker) so a death leaves a
-    # diagnosable tail — screen's own buffer is lost when the session dies.
-    echo "===== backend start $(date '+%F %T') =====" >> "$LOG"
-    screen -dmS "$SESSION" bash -c "caffeinate -is uv run python -m cells_interlinked >> '$LOG' 2>&1"
-    echo "started backend in detached screen '${SESSION}' (log: $LOG)"
-    echo "  attach: ./run_backend.sh attach   stop: ./run_backend.sh stop"
+    if loaded; then
+      launchctl kickstart "$SERVICE" && echo "started (was loaded)"
+    else
+      launchctl bootstrap "$DOMAIN" "$PLIST" && echo "loaded + started"
+    fi
     ;;
   stop)
-    if running; then screen -S "$SESSION" -X quit && echo "stopped"; else echo "(not running)"; fi
+    if loaded; then launchctl bootout "$SERVICE" && echo "stopped (agent unloaded; no auto-restart until 'start')"; else echo "(not loaded)"; fi
     ;;
-  attach)
-    screen -r "$SESSION"
+  restart)
+    if loaded; then launchctl kickstart -k "$SERVICE" && echo "restarted"; else launchctl bootstrap "$DOMAIN" "$PLIST" && echo "loaded + started"; fi
     ;;
   status)
-    if running; then echo "up — $(curl -s --max-time 4 http://localhost:8000/health || echo 'health check failed')"; else echo "down"; fi
+    if loaded; then
+      state=$(launchctl print "$SERVICE" 2>/dev/null | grep -E "state = |pid = " | tr -s ' ' | sed 's/^ *//')
+      echo "agent loaded — ${state:-(no pid yet)}"
+      echo "health: $(curl -s --max-time 4 http://localhost:8000/health || echo 'not responding yet')"
+    else
+      echo "down (agent not loaded) — './run_backend.sh install' or 'start'"
+    fi
+    ;;
+  attach)
+    echo "tailing $LOG (Ctrl-c to detach; the backend keeps running)"; tail -f "$LOG"
+    ;;
+  uninstall)
+    if loaded; then launchctl bootout "$SERVICE" 2>/dev/null; fi
+    echo "agent unloaded (plist left at $PLIST; rm it to fully remove)"
     ;;
   *)
-    echo "usage: $0 {start|stop|attach|status}"; exit 1 ;;
+    echo "usage: $0 {install|start|stop|restart|status|attach|uninstall}"; exit 1 ;;
 esac
