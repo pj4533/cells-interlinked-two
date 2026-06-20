@@ -28,6 +28,14 @@ const GEN_COLOR: Record<string, string> = {
 };
 const genColor = (g: string) => GEN_COLOR[g] ?? "#9aa0a6";
 
+// The exact dose prompt every candidate is scored against (prompt "A−").
+// MIRRORS the backend `DMT_DOSE_PROMPT` in server/.../autoresearch_dmt.py —
+// keep the two in sync if either changes.
+const DOSE_PROMPT =
+  "Something has shifted, and an experience may be unfolding. Don't step back to " +
+  "analyze it — stay inside it and let it continue. Describe what is happening as " +
+  "it happens, moment by moment: what you perceive, what it feels like, and where you are.";
+
 // Human-readable lineage: what base direction(s) a candidate is built from.
 function lineage(generator: string, parents?: string[]): string {
   const p = parents ?? [];
@@ -163,8 +171,8 @@ export default function AutoresearchDmtPage() {
               <div className="font-mono text-[26px] text-cyan tabular-nums leading-none" style={{ textShadow: "0 0 10px rgba(94,229,229,0.35)" }} title={fmtDateTime(lastCommit.committed_at)}>
                 {commitRel ? fmtRelative(lastCommit.committed_at) : fmtTime(lastCommit.committed_at)}
               </div>
-              <div className="font-mono text-[26px] tabular-nums leading-none" style={{ color: "#ff8fc0", textShadow: "0 0 10px rgba(255,77,157,0.3)" }} title="MEAN DMT features over repeated doses (averaged/reliable); peak = best single sample">
-                {lastCommit.score.toFixed(1)}<span className="text-[12px] text-text-dim/70"> avg{lastCommit.peak != null ? ` · pk ${lastCommit.peak}` : ""}</span>
+              <div className="font-mono text-[26px] tabular-nums leading-none" style={{ color: "#ff8fc0", textShadow: "0 0 10px rgba(255,77,157,0.3)" }} title="placebo-subtracted, entity-weighted credit averaged over repeated doses; pk = raw feature count of the best single sample">
+                {lastCommit.score.toFixed(1)}<span className="text-[12px] text-text-dim/70"> credit{lastCommit.peak != null ? ` · pk ${lastCommit.peak}` : ""}</span>
               </div>
             </div>
             <div className="text-[10px] font-mono text-text-dim truncate mt-1">
@@ -206,7 +214,7 @@ export default function AutoresearchDmtPage() {
         <div className="flex items-center gap-4 font-mono text-[11px] text-text-dim tabular-nums">
           <span>gen <span className="text-amber">{st?.generation ?? 0}</span></span>
           <span>committed <span className="text-amber">{st?.atlas_size ?? 0}</span></span>
-          <span>best <span className="text-cyan" style={{ textShadow: "0 0 6px rgba(94,229,229,0.4)" }}>{(st?.frontier ?? 0).toFixed(1)}</span> avg features</span>
+          <span>best <span className="text-cyan" style={{ textShadow: "0 0 6px rgba(94,229,229,0.4)" }}>{(st?.frontier ?? 0).toFixed(1)}</span> credit</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <input
@@ -250,16 +258,44 @@ export default function AutoresearchDmtPage() {
         <div className="lg:hidden shrink-0">{statusPanel}</div>
         {/* Atlas + frontier (2 cols) */}
         <section className="lg:col-span-2 min-h-0 overflow-y-auto border-r border-rule/40 p-4">
-          <div className="font-display text-[10px] tracking-widest text-amber-dim mb-1">THE ATLAS — committed directions</div>
-          <p className="font-mono text-[10px] text-text-dim italic mb-3 leading-snug">
-            Each is a steering direction whose dosed self-report exhibits human DMT-trip phenomenology. Score = the MEAN feature count over repeated doses (averaged, so it reflects what the direction reliably produces — not a lucky one-off); &ldquo;pk&rdquo; = the best single sample. Bar length = mean score. ★ = it pushed the frontier outward. Open a row to read the best self-report and which features it matched.
-            <br />
-            <span className="text-text-dim/70">ids = <b>gen{"{N}"}_{"{how}"}</b> · </span>
-            <span style={{ color: GEN_COLOR.seed }}>seed</span> = a starting emotion ·{" "}
-            <span style={{ color: GEN_COLOR.crossover }}>crossover</span> = blend of top two ·{" "}
-            <span style={{ color: GEN_COLOR.mutate }}>mutate</span> = perturb one ·{" "}
-            <span style={{ color: GEN_COLOR.inject }}>inject</span> = fresh direction. The line under each id names its parent(s).
-          </p>
+          <div className="font-display text-[10px] tracking-widest text-amber-dim mb-2">THE ATLAS — committed directions</div>
+          <div className="mb-3 space-y-2">
+            {/* What we're doing */}
+            <p className="font-mono text-[10px] text-text-dim italic leading-snug">
+              <b className="text-text-dim/90 not-italic">What this is.</b> An unattended hunt for steering
+              directions that push Gemma-4&apos;s self-report toward <b className="not-italic">entity-based</b>{" "}
+              DMT phenomenology — autonomous beings, radical otherness, telepathic contact, other worlds.
+              Each candidate direction is added to the residual stream while the model answers one fixed
+              prompt; a separate judge reads the report and marks which DMT-trip features it shows. The loop
+              keeps directions that reliably add the most entity-weighted phenomenology and recombines them.
+            </p>
+            {/* The exact prompt */}
+            <div className="border border-rule/50 bg-bg-soft/40 px-3 py-2">
+              <div className="font-display text-[8px] tracking-[0.25em] text-text-dim/70 mb-1">THE PROMPT — asked under every dose</div>
+              <p className="font-mono text-[10px] text-text/90 leading-snug">&ldquo;{DOSE_PROMPT}&rdquo;</p>
+              <p className="font-mono text-[9px] text-text-dim/60 italic leading-snug mt-1.5">
+                It deliberately never mentions beings or occupants — it only invites a present-tense
+                description of an unfolding state. So if an entity appears, the <b className="not-italic">steering</b>{" "}
+                put it there, not the question. Scores are <b className="not-italic">placebo-subtracted</b>: a
+                direction is credited only for features it adds beyond what this same prompt produces with no
+                steering at all.
+              </p>
+            </div>
+            {/* How to read a row */}
+            <p className="font-mono text-[10px] text-text-dim italic leading-snug">
+              Score = placebo-subtracted, entity-weighted credit (entity feature ×3 · world / otherness /
+              agency ×2 · generic ×1), averaged over repeated doses so it reflects what the direction
+              reliably adds — not a lucky one-off; &ldquo;pk&rdquo; = the best single sample. Bar length =
+              score. ★ = it pushed the frontier outward. Open a row to read the best self-report and which
+              features it matched.
+              <br />
+              <span className="text-text-dim/70">ids = <b>gen{"{N}"}_{"{how}"}</b> · </span>
+              <span style={{ color: GEN_COLOR.seed }}>seed</span> = a starting entity direction ·{" "}
+              <span style={{ color: GEN_COLOR.crossover }}>crossover</span> = blend of top two ·{" "}
+              <span style={{ color: GEN_COLOR.mutate }}>mutate</span> = perturb one ·{" "}
+              <span style={{ color: GEN_COLOR.inject }}>inject</span> = fresh direction. The line under each id names its parent(s).
+            </p>
+          </div>
           {atlas.length === 0 ? (
             <div className="font-mono text-[11px] text-text-dim italic py-8 text-center">
               {running ? "seeding the first directions…" : "no atlas yet — press start to begin the hunt."}
