@@ -11,6 +11,7 @@ import Link from "next/link";
 import {
   fetchDmtState,
   fetchDmtCells,
+  fetchDmtPlacebo,
   startDmt,
   stopDmt,
   exportDmt,
@@ -18,6 +19,8 @@ import {
   type DmtAtlasEntry,
   type DmtCurrentCandidate,
   type DmtSample,
+  type DmtPlacebo,
+  type DmtPlaceboSummary,
 } from "@/lib/autoresearch-dmt";
 
 const GEN_COLOR: Record<string, string> = {
@@ -260,6 +263,7 @@ export default function AutoresearchDmtPage() {
         <section className="lg:col-span-2 min-h-0 overflow-y-auto border-r border-rule/40 p-4">
           <div className="font-display text-[10px] tracking-widest text-amber-dim mb-2">THE ATLAS — committed directions</div>
           <AtlasExplainer />
+          <BaselinePanel summary={st?.placebo} />
           {atlas.length === 0 ? (
             <div className="font-mono text-[11px] text-text-dim italic py-8 text-center">
               {running ? "seeding the first directions…" : "no atlas yet — press start to begin the hunt."}
@@ -413,6 +417,56 @@ function AtlasExplainer() {
           </dl>
         )}
       </div>
+    </div>
+  );
+}
+
+// The un-steered baseline — what the prompt produces with the dose OFF. Shown
+// outside the atlas (it's not a discovered direction) but with the same sample
+// drill-down, because it's the bar every direction's score is measured against.
+function BaselinePanel({ summary }: { summary: DmtPlaceboSummary | null | undefined }) {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<DmtPlacebo | null>(null);
+  const [loading, setLoading] = useState(false);
+  const toggle = useCallback(async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !detail) {
+      setLoading(true);
+      setDetail(await fetchDmtPlacebo());
+      setLoading(false);
+    }
+  }, [open, detail]);
+  if (!summary) return null;
+  return (
+    <div className="mb-3 border border-cyan/25 bg-cyan/[0.04] px-3 py-2" data-baseline>
+      <button type="button" onClick={toggle}
+        className="w-full flex items-center gap-2 flex-wrap text-left hover:opacity-90 transition-opacity">
+        <span className="text-text-dim/50 font-mono text-[10px]">{open ? "▾" : "▸"}</span>
+        <span className="font-display text-[9px] tracking-[0.2em] text-cyan/90">BASELINE — NO STEERING</span>
+        <span className="font-mono text-[10px] text-text-dim tabular-nums">
+          {summary.n} samples · {summary.mean_feats.toFixed(1)} feats avg · entity in {summary.entity_count}/{summary.n}
+        </span>
+      </button>
+      <p className="font-mono text-[9px] text-text-dim/60 leading-snug mt-1">
+        What the dose prompt produces with steering OFF. Every direction is scored on the features it
+        adds <i>beyond</i> these — so this is the bar to beat. Open a sample to read it.
+      </p>
+      {open && (
+        <div className="mt-2">
+          {loading ? (
+            <div className="font-mono text-[10px] text-text-dim/60 italic py-2">loading baseline…</div>
+          ) : detail && detail.samples.length ? (
+            <div className="flex flex-col gap-0.5">
+              {detail.samples.map((s, i) => (
+                <SampleDrill key={s.seed ?? i} s={s} idx={i} winner={false} />
+              ))}
+            </div>
+          ) : (
+            <div className="font-mono text-[10px] text-text-dim/60 italic py-2">no baseline samples yet.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

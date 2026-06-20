@@ -65,6 +65,17 @@ async def dmt_cells(vid: str, request: Request) -> dict:
     return detail
 
 
+@router.get("/autoresearch-dmt/placebo")
+async def dmt_placebo(request: Request) -> dict:
+    """The un-steered baseline: what the dose prompt produces with NO steering,
+    with full per-sample features/evidence/text (same drill-down as the atlas).
+    Every direction's placebo-subtracted score is measured against this."""
+    detail = _controller(request).placebo_detail()
+    if detail is None:
+        raise HTTPException(status_code=404, detail="no placebo baseline computed yet")
+    return detail
+
+
 @router.post("/autoresearch-dmt/export")
 async def dmt_export(req: ExportRequest, request: Request) -> dict:
     """Promote the top-N DMT directions into the dose palette (chat/trips)."""

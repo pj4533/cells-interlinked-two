@@ -95,6 +95,30 @@ export async function fetchDmtCells(id: string): Promise<DmtCellsDetail | null> 
   }
 }
 
+// The un-steered baseline: what the dose prompt produces with NO steering — the
+// bar every direction's placebo-subtracted score is measured against. The
+// lightweight summary rides on /state; the full samples come from /placebo.
+export interface DmtPlaceboSummary {
+  n: number;
+  mean_feats: number;
+  entity_count: number;
+  computed_at: number;
+  prompt: string;
+}
+export interface DmtPlacebo extends DmtPlaceboSummary {
+  samples: (DmtSample & { seed?: number })[];
+}
+
+export async function fetchDmtPlacebo(): Promise<DmtPlacebo | null> {
+  try {
+    const res = await fetch(`${API}/autoresearch-dmt/placebo`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as DmtPlacebo;
+  } catch {
+    return null;
+  }
+}
+
 export interface DmtCurrentCandidate {
   id: string;
   generator: string;
@@ -117,6 +141,7 @@ export interface DmtARState {
   reverts: RevertEntry[];
   recent_events: DmtEvent[];
   current: DmtCurrentCandidate | null;
+  placebo?: DmtPlaceboSummary | null; // un-steered baseline summary (samples via /placebo)
 }
 
 export async function fetchDmtState(): Promise<DmtARState | null> {

@@ -384,6 +384,7 @@ class DmtController(AutoresearchBase):
         seeds = (list(range(SCORE_SEED_BASE, SCORE_SEED_BASE + SAMPLES_PER_CELL)) +
                  list(range(CONFIRM_SEED_BASE, CONFIRM_SEED_BASE + SAMPLES_PER_CELL)))
         baseline: dict[int, set] = {}
+        samples: list[dict] = []           # full per-sample detail for the UI
         for s in seeds:
             if self._stop_requested:
                 break
@@ -391,12 +392,54 @@ class DmtController(AutoresearchBase):
                                       temperature=SCORE_TEMPERATURE, seed=s)
             ev, _ = await self._score_dmt(text)
             baseline[s] = set(ev.keys())
+            samples.append({"seed": s, "count": len(ev), "features": sorted(ev.keys()),
+                            "evidence": ev, "text": (text or "")[:2500]})
         self._placebo_baseline = baseline
-        mean = sum(len(v) for v in baseline.values()) / max(1, len(baseline))
-        ent = sum(1 for v in baseline.values() if v & _ENTITY_FEATS)
+        n = len(samples)
+        mean = sum(x["count"] for x in samples) / max(1, n)
+        ent = sum(1 for x in samples if set(x["features"]) & _ENTITY_FEATS)
+        # Persist the full baseline so the UI can show it (same sample drill-down
+        # as the atlas) and so it survives a restart for display when idle.
+        self._placebo = {
+            "computed_at": time.time(), "n": n, "mean_feats": round(mean, 2),
+            "entity_count": ent, "prompt": DOSE_PROMPTS[0], "samples": samples,
+        }
+        try:
+            self._placebo_path().write_text(json.dumps(self._placebo))
+        except Exception:
+            logger.exception("failed to persist placebo baseline")
         self._log("placebo",
-                  f"prompt-A baseline on {len(baseline)} un-steered samples: "
+                  f"prompt-A− baseline on {n} un-steered samples: "
                   f"mean {mean:.1f} feats/sample, {ent} already show an entity trait")
+
+    def _placebo_path(self):
+        return self._atlas_dir() / "placebo.json"
+
+    def placebo_detail(self) -> dict | None:
+        """Full un-steered baseline (samples + features + evidence + text) for the
+        UI. In-memory if computed this run, else lazy-loaded from disk."""
+        p = getattr(self, "_placebo", None)
+        if p is not None:
+            return p
+        f = self._placebo_path()
+        if f.exists():
+            try:
+                self._placebo = json.loads(f.read_text())
+                return self._placebo
+            except Exception:
+                return None
+        return None
+
+    def _placebo_summary(self) -> dict | None:
+        p = self.placebo_detail()
+        if not p:
+            return None
+        return {k: p.get(k) for k in ("n", "mean_feats", "entity_count", "computed_at", "prompt")}
+
+    def state(self) -> dict:
+        s = super().state()
+        s["placebo"] = self._placebo_summary()  # lightweight summary; samples via /placebo
+        return s
 
     async def _score_candidate(self, v, seed_base: int = SCORE_SEED_BASE) -> dict:
         """Dose REPEATEDLY per α and AVERAGE. For each α, run SAMPLES_PER_CELL
