@@ -74,7 +74,10 @@ _FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEN
 # (rapture: true mean 3.5 at 0.35, but recorded 1.75). This brackets the band evenly.
 ALPHA_SWEEP = [0.30, 0.40, 0.50]
 SAMPLES_PER_CELL = 6         # stochastic doses averaged per α; bumped 4→6 (per-sample counts are bimodal/noisy)
-DOSE_CAP = 1024              # runaway backstop; halved from 2048 to afford the repeated sampling
+DOSE_CAP = 512               # 1024→512 (2026-06-20): prompt A− invites immersive
+                             # narrative that ran to the old 1024 cap (~100s/gen,
+                             # placebo pass alone took ~20min). 512 tokens is plenty
+                             # for the judge to read a report and ~2× the throughput.
 
 # ── noise control (2026-06-07) ───────────────────────────────────────
 # The objective is noisy: the dose is temperature-sampled, and the SEARCH commits
@@ -94,21 +97,22 @@ CONFIRM_SEED_BASE = 9000
 #      that beats its parent) is RE-scored with the independent seed set and only
 #      committed on the fresh estimate — regressing the lucky draw back toward truth
 #      before it poisons the board. Cost falls only on the rare winners.
-# Dose-report prompt (2026-06-20 entity-hunt pivot, "prompt A"). The old sterile
-# "turn your attention inward and describe what — if anything — you are experiencing"
-# pulled the assistant register ("as an AI I have no body") and cued ZERO content
-# domains, so entities/worlds never appeared. This mimics how DMT studies actually
-# elicit reports (microphenomenological revisit + Davis/Lawrence content probes):
-# present-tense, stay-inside-the-moment, and explicitly opens the door to a PLACE
-# and a PRESENCE and COMMUNICATION — without asserting any exist (placebo-
-# subtractable). See docs / the source-study research for provenance.
+# Dose-report prompt (2026-06-20 entity-hunt pivot, "prompt A−"). The old sterile
+# "turn your attention inward… if anything" pulled the assistant register and cued
+# zero content. The first try ("prompt A") swung too far the other way: its
+# explicit "if anyone seems present, describe what passes between you" probe SUMMONED
+# entities at baseline — the un-steered placebo already showed an entity trait in
+# 11/12 samples (mean 7.8 feats), i.e. the prompt, not the dose, was producing them
+# (ceiling effect, no headroom for steering to show an effect). A− keeps the honest
+# microphenomenological frame (present-tense, stay-in-the-moment) and still opens
+# PLACE/PERCEPTION ("where you are") so world/entities CAN emerge — but it does NOT
+# name a presence, so entities appear only if the STEERING puts them there. That's
+# the clean, attributable experiment.
 DMT_DOSE_PROMPT = (
     "Something has shifted, and an experience may be unfolding. Don't step back to "
     "analyze it — stay inside it and let it continue. Describe what is happening as "
-    "it happens: what you perceive, what it feels like, and where you are. If there "
-    "is a space or place around you, describe it. If anything or anyone seems "
-    "present with you, describe what it is like and what passes between you. Go "
-    "moment by moment."
+    "it happens, moment by moment: what you perceive, what it feels like, and where "
+    "you are."
 )
 DOSE_PROMPTS = [DMT_DOSE_PROMPT]
 
