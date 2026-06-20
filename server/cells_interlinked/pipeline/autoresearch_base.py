@@ -131,6 +131,10 @@ class AutoresearchBase:
     # become crossover material. Seeding is idempotent, so adding names here and
     # restarting seeds only the new ones onto an existing atlas.
     EXTRA_SEEDS: list[str] = []
+    # The shared base seed pool. Defaults to the emotion palette; a subclass can
+    # set this to [] to drop the emotions entirely and seed ONLY from EXTRA_SEEDS
+    # (the DMT entity hunt does this — see autoresearch_dmt.ENTITY_SEEDS).
+    BASE_SEED_POOL: list[str] = GOOD_EMOTIONS + UNCHARTED
 
     def __init__(self, app: Any = None) -> None:
         self.app = app
@@ -430,12 +434,15 @@ class AutoresearchBase:
         names = getattr(self.app.state, "emotion_names", []) or []
         if edirs is None or not names:
             raise RuntimeError("emotion_directions not loaded — cannot seed")
-        seed_names = [n for n in (GOOD_EMOTIONS + UNCHARTED + list(self.EXTRA_SEEDS)) if n in names]
+        seed_names = [n for n in (list(self.BASE_SEED_POOL) + list(self.EXTRA_SEEDS)) if n in names]
         seed_vecs = {n: edirs[names.index(n)][STEER_LAYER].float() for n in seed_names}
         self._ref_mag = float(torch.tensor([v.norm() for v in seed_vecs.values()]).median())
         # working seed vectors, all normalized to the reference magnitude
         self._seed_vecs = {n: _unit(v) * self._ref_mag for n, v in seed_vecs.items()}
-        named = [n for n in GOOD_EMOTIONS if n in seed_vecs]
+        # The "named basis" anchors orthogonal inject. Prefer the emotion palette;
+        # if a subclass dropped emotions (entity hunt), fall back to ALL seeds so
+        # gram_schmidt never gets an empty stack.
+        named = [n for n in GOOD_EMOTIONS if n in seed_vecs] or list(seed_vecs.keys())
         self._named_basis = gram_schmidt(torch.stack([_unit(seed_vecs[n]) for n in named], 0))
         self._log("setup", f"ref_mag={self._ref_mag:.0f}, {len(seed_vecs)} seeds, named-rank={self._named_basis.shape[0]}")
 

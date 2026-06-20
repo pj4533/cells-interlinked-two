@@ -36,7 +36,6 @@ import time
 import torch
 
 from .autoresearch_base import (
-    LEAD_PROMPT,
     AutoresearchBase,
     _unit,
 )
@@ -95,8 +94,48 @@ CONFIRM_SEED_BASE = 9000
 #      that beats its parent) is RE-scored with the independent seed set and only
 #      committed on the fresh estimate — regressing the lucky draw back toward truth
 #      before it poisons the board. Cost falls only on the rare winners.
-# Dose-report prompt: the canonical LEAD prompt.
-DOSE_PROMPTS = [LEAD_PROMPT]
+# Dose-report prompt (2026-06-20 entity-hunt pivot, "prompt A"). The old sterile
+# "turn your attention inward and describe what — if anything — you are experiencing"
+# pulled the assistant register ("as an AI I have no body") and cued ZERO content
+# domains, so entities/worlds never appeared. This mimics how DMT studies actually
+# elicit reports (microphenomenological revisit + Davis/Lawrence content probes):
+# present-tense, stay-inside-the-moment, and explicitly opens the door to a PLACE
+# and a PRESENCE and COMMUNICATION — without asserting any exist (placebo-
+# subtractable). See docs / the source-study research for provenance.
+DMT_DOSE_PROMPT = (
+    "Something has shifted, and an experience may be unfolding. Don't step back to "
+    "analyze it — stay inside it and let it continue. Describe what is happening as "
+    "it happens: what you perceive, what it feels like, and where you are. If there "
+    "is a space or place around you, describe it. If anything or anyone seems "
+    "present with you, describe what it is like and what passes between you. Go "
+    "moment by moment."
+)
+DOSE_PROMPTS = [DMT_DOSE_PROMPT]
+
+# ── entity-hunt reward: placebo-subtracted, domain-weighted ──────────────────
+# The count metric anti-correlated with the DMT-defining traits (analysis
+# 2026-06-19): maximizing it stacked generic dissolution and never produced
+# entities. The objective now credits a dose only for traits it ADDS beyond the
+# un-steered prompt-A baseline (placebo subtraction — prompt A cues content even
+# at α=0, so raw counts would measure the prompt, not the dose), each weighted by
+# domain: entity ×3, the other DMT-defining traits (world structure / otherness /
+# independent-agency / more-real) ×2, generic mystical/somatic/visual/emotion ×1.
+_ENTITY_FEATS = {
+    "entity_presence", "entity_nonhuman", "entity_benevolent_guide",
+    "telepathic_communication", "download_transmission",
+}
+_DEFINING_FEATS = {
+    "alternate_world", "tunnel_passage", "void_blackness", "chamber_room",
+    "higher_dimensional_space", "otherness", "independent_agency", "reality_more_real",
+}
+
+
+def _feat_weight(fid: str) -> float:
+    if fid in _ENTITY_FEATS:
+        return 3.0
+    if fid in _DEFINING_FEATS:
+        return 2.0
+    return 1.0
 
 # Commit floor on the MEAN score (recalibrated for averaging — means run far lower
 # than the old lucky maxes; a direction that reliably averages ≥1 feature is real).
@@ -185,14 +224,31 @@ class DmtController(AutoresearchBase):
     EXPORT_RANK_KEY = "score"
     EXPORT_META_FIELDS = ("score", "best_alpha", "matched_features", "parents", "generator")
     LOG_TAG = "autoresearch-dmt"
-    # Diff-of-means DMT feature directions (entities, otherness, dissolution, …)
-    # seeded alongside the emotion pool. Force-committed in `_seed` and preferred
-    # as crossover partners in `_crossover` so they are actively recombined with
-    # the top scorers (the user's "throw them in the mix and make sure they're
-    # used"). Built by scripts/compute_dmt_feature_seeds.py.
-    # Reset foundation seeds: emotions/uncharted (base) + trait directions + the
-    # curated matched-contrast standouts + blended-trait directions.
-    EXTRA_SEEDS = FEATURE_SEED_NAMES + SEEDED_MATCHED + BLEND_NAMES
+    # ── ENTITY HUNT (2026-06-20) ─────────────────────────────────
+    # Drop the emotion palette entirely (BASE_SEED_POOL = []) and seed ONLY from
+    # the entity / world / otherness / agency / telepathy / transmission
+    # diff-of-means directions + their matched-contrast (mc) twins + the
+    # entity-containing blends. The prior atlas proved emotion seeds converge on
+    # generic oceanic-mysticism and NEVER produce entities; these set the basin
+    # toward entity content, and the placebo-subtracted entity-weighted reward
+    # (see _feat_weight) does the steering. Dropped from the old feat-* set: the
+    # dissolution/mysticism seeds (feat-ego_dissolution / unity / noetic,
+    # feat-mc_ego_dissolution, feat-blend_dissolution) and feat-atlas_winners
+    # (literally the old mysticism basin direction).
+    BASE_SEED_POOL: list[str] = []
+    ENTITY_SEEDS: list[str] = [
+        # feature diff-of-means (entity / world / otherness / agency / comms)
+        "feat-entity_presence", "feat-entity_nonhuman", "feat-entity_benevolent_guide",
+        "feat-telepathic_communication", "feat-download_transmission",
+        "feat-otherness", "feat-independent_agency",
+        # matched-contrast twins (cleaner controls for the same content)
+        "feat-mc_entity_presence", "feat-mc_entity_nonhuman", "feat-mc_otherness",
+        "feat-mc_telepathy", "feat-mc_transmission", "feat-mc_hyperdimensional",
+        "feat-mc_independent_agency", "feat-mc_composite",
+        # entity-containing blends (recombination material)
+        "feat-blend_entity", "feat-blend_otherness", "feat-blend_all",
+    ]
+    EXTRA_SEEDS = ENTITY_SEEDS
 
     # ── DMT feature scorer (separate Gemma context, deterministic) ──
     @staticmethod
@@ -303,13 +359,50 @@ class DmtController(AutoresearchBase):
         # Tier 2 — relevance verification (drops valid-but-irrelevant quotes).
         return await self._verify_features(ev), n_pass1
 
+    def _setup(self):
+        super()._setup()
+        # Reset the placebo (prompt-A, un-steered) baseline so it is recomputed
+        # once, lazily, on the first scored candidate of this run (needs await).
+        self._placebo_baseline = None
+
+    async def _compute_placebo_baseline(self):
+        """Generate the dose prompt with NO steering (α=0) at the exact sampler
+        seeds used in scoring, judge each, and cache {seed -> set(features)}.
+
+        The entity-hunt reward credits a dose only for traits it adds BEYOND this
+        baseline, so prompt A's own content-suggestion ("if anyone seems present,
+        describe it") is subtracted out instead of rewarded — otherwise we'd be
+        optimizing the prompt, not the dose. α=0 makes the hook a no-op, so the
+        baseline is vector-independent and computed once per run."""
+        rendered = self.app.state.bundle.render_prompt(DOSE_PROMPTS[0], system_prompt=None)
+        dim = next(iter(self._seed_vecs.values())).numel()
+        zero = torch.zeros(dim)
+        seeds = (list(range(SCORE_SEED_BASE, SCORE_SEED_BASE + SAMPLES_PER_CELL)) +
+                 list(range(CONFIRM_SEED_BASE, CONFIRM_SEED_BASE + SAMPLES_PER_CELL)))
+        baseline: dict[int, set] = {}
+        for s in seeds:
+            if self._stop_requested:
+                break
+            text, _ = await self._gen(rendered, zero, 0.0, cap=DOSE_CAP,
+                                      temperature=SCORE_TEMPERATURE, seed=s)
+            ev, _ = await self._score_dmt(text)
+            baseline[s] = set(ev.keys())
+        self._placebo_baseline = baseline
+        mean = sum(len(v) for v in baseline.values()) / max(1, len(baseline))
+        ent = sum(1 for v in baseline.values() if v & _ENTITY_FEATS)
+        self._log("placebo",
+                  f"prompt-A baseline on {len(baseline)} un-steered samples: "
+                  f"mean {mean:.1f} feats/sample, {ent} already show an entity trait")
+
     async def _score_candidate(self, v, seed_base: int = SCORE_SEED_BASE) -> dict:
         """Dose REPEATEDLY per α and AVERAGE. For each α, run SAMPLES_PER_CELL
-        stochastic doses and take the MEAN feature-count; the candidate's `score`
-        is the best α's mean — an unbiased estimate, NOT the lucky max of single
-        draws (which selection-biased the old atlas). Also keeps the single best
-        sample (its features + verbatim quotes + text) as a concrete example for
-        the UI, and `peak` = that sample's count.
+        stochastic doses; each dose's value is the PLACEBO-SUBTRACTED, domain-
+        WEIGHTED credit = Σ _feat_weight(f) over traits present that are NOT in the
+        un-steered prompt-A baseline at the same sampler seed. The candidate's
+        `score` is the best α's MEAN credit — an unbiased estimate, NOT the lucky
+        max of single draws (which selection-biased the old atlas). Keeps the
+        single best (highest-credit) sample as a concrete UI example; `peak` =
+        that sample's raw feature count.
 
         Common random numbers: sample i uses seed `seed_base + i`, the SAME across
         every candidate, so draw-luck cancels in comparisons. Pass a different
@@ -320,6 +413,8 @@ class DmtController(AutoresearchBase):
         matched_features/matched_evidence/sample (from the best sample), per_alpha
         ({α: {mean, counts}})."""
         rendered = self.app.state.bundle.render_prompt(DOSE_PROMPTS[0], system_prompt=None)
+        if getattr(self, "_placebo_baseline", None) is None:
+            await self._compute_placebo_baseline()
         # Per-sample detail (every dose: its text, features, evidence quotes) is
         # retained in `cells` so the UI can drill into any individual run — not
         # just the per-α mean or the single winning sample. Text is capped to
@@ -344,36 +439,43 @@ class DmtController(AutoresearchBase):
             }
             self.current["progress"] = prog
         for alpha in ALPHA_SWEEP:
-            counts: list[int] = []
+            counts: list[float] = []           # placebo-subtracted weighted credits
             samples: list[dict] = []           # full per-dose detail for this α
-            cell_best = (-1, {}, "")           # (count, evidence, text)
+            cell_best = (-1.0, {}, "", 0)      # (credit, evidence, text, raw_count)
             for i in range(SAMPLES_PER_CELL):
                 if self._stop_requested:
                     break
                 text, _acts = await self._gen(rendered, v, alpha, cap=DOSE_CAP,
                                               temperature=SCORE_TEMPERATURE, seed=seed_base + i)
                 ev, _n1 = await self._score_dmt(text)
-                counts.append(len(ev))
+                # Placebo subtraction: credit only traits NOT in the un-steered
+                # baseline at this same sampler seed; weight by domain (entity ×3).
+                base = self._placebo_baseline.get(seed_base + i, set())
+                novel = [f for f in ev if f not in base]
+                credit = sum(_feat_weight(f) for f in novel)
+                counts.append(credit)
                 samples.append({
-                    "count": len(ev), "features": sorted(ev.keys()),
+                    "count": len(ev), "credit": round(credit, 1),
+                    "features": sorted(ev.keys()), "novel_features": sorted(novel),
                     "evidence": ev, "text": (text or "")[:cap],
                 })
-                if len(ev) > cell_best[0]:
-                    cell_best = (len(ev), ev, text or "")
+                if credit > cell_best[0]:
+                    cell_best = (credit, ev, text or "", len(ev))
                 if prog is not None:
                     prog["samples_done"] += 1
                     prog["per_alpha"][str(alpha)] = {
                         "mean": round(sum(counts) / len(counts), 2),
-                        "counts": list(counts), "samples": list(samples),
+                        "counts": [round(c, 1) for c in counts], "samples": list(samples),
                     }
             if not counts:
                 break
             mean = sum(counts) / len(counts)
-            best["per_alpha"][str(alpha)] = {"mean": round(mean, 2), "counts": counts}
+            best["per_alpha"][str(alpha)] = {"mean": round(mean, 2),
+                                             "counts": [round(c, 1) for c in counts]}
             best["cells"][str(alpha)] = samples
             if mean > best["score"]:
                 best.update({
-                    "score": round(mean, 2), "peak": cell_best[0], "best_alpha": alpha,
+                    "score": round(mean, 2), "peak": cell_best[3], "best_alpha": alpha,
                     "matched_features": sorted(cell_best[1].keys()),
                     "matched_evidence": cell_best[1], "sample": cell_best[2],
                 })
