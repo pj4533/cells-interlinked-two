@@ -259,43 +259,7 @@ export default function AutoresearchDmtPage() {
         {/* Atlas + frontier (2 cols) */}
         <section className="lg:col-span-2 min-h-0 overflow-y-auto border-r border-rule/40 p-4">
           <div className="font-display text-[10px] tracking-widest text-amber-dim mb-2">THE ATLAS — committed directions</div>
-          <div className="mb-3 space-y-2">
-            {/* What we're doing */}
-            <p className="font-mono text-[10px] text-text-dim italic leading-snug">
-              <b className="text-text-dim/90 not-italic">What this is.</b> An unattended hunt for steering
-              directions that push Gemma-4&apos;s self-report toward <b className="not-italic">entity-based</b>{" "}
-              DMT phenomenology — autonomous beings, radical otherness, telepathic contact, other worlds.
-              Each candidate direction is added to the residual stream while the model answers one fixed
-              prompt; a separate judge reads the report and marks which DMT-trip features it shows. The loop
-              keeps directions that reliably add the most entity-weighted phenomenology and recombines them.
-            </p>
-            {/* The exact prompt */}
-            <div className="border border-rule/50 bg-bg-soft/40 px-3 py-2">
-              <div className="font-display text-[8px] tracking-[0.25em] text-text-dim/70 mb-1">THE PROMPT — asked under every dose</div>
-              <p className="font-mono text-[10px] text-text/90 leading-snug">&ldquo;{DOSE_PROMPT}&rdquo;</p>
-              <p className="font-mono text-[9px] text-text-dim/60 italic leading-snug mt-1.5">
-                It deliberately never mentions beings or occupants — it only invites a present-tense
-                description of an unfolding state. So if an entity appears, the <b className="not-italic">steering</b>{" "}
-                put it there, not the question. Scores are <b className="not-italic">placebo-subtracted</b>: a
-                direction is credited only for features it adds beyond what this same prompt produces with no
-                steering at all.
-              </p>
-            </div>
-            {/* How to read a row */}
-            <p className="font-mono text-[10px] text-text-dim italic leading-snug">
-              Score = placebo-subtracted, entity-weighted credit (entity feature ×3 · world / otherness /
-              agency ×2 · generic ×1), averaged over repeated doses so it reflects what the direction
-              reliably adds — not a lucky one-off; &ldquo;pk&rdquo; = the best single sample. Bar length =
-              score. ★ = it pushed the frontier outward. Open a row to read the best self-report and which
-              features it matched.
-              <br />
-              <span className="text-text-dim/70">ids = <b>gen{"{N}"}_{"{how}"}</b> · </span>
-              <span style={{ color: GEN_COLOR.seed }}>seed</span> = a starting entity direction ·{" "}
-              <span style={{ color: GEN_COLOR.crossover }}>crossover</span> = blend of top two ·{" "}
-              <span style={{ color: GEN_COLOR.mutate }}>mutate</span> = perturb one ·{" "}
-              <span style={{ color: GEN_COLOR.inject }}>inject</span> = fresh direction. The line under each id names its parent(s).
-            </p>
-          </div>
+          <AtlasExplainer />
           {atlas.length === 0 ? (
             <div className="font-mono text-[11px] text-text-dim italic py-8 text-center">
               {running ? "seeding the first directions…" : "no atlas yet — press start to begin the hunt."}
@@ -385,6 +349,70 @@ export default function AutoresearchDmtPage() {
         <span className="italic">additive steering only · scored against human DMT-trip phenomenology · the judge counts features, it doesn&apos;t decide realness</span>
         <Link href="/" className="hover:text-amber">← cells interlinked</Link>
       </footer>
+    </div>
+  );
+}
+
+// Intro above the atlas: a short "what this is", the exact dose prompt (always
+// visible), and a spin-down with the scoring/weights/id detail so the header
+// stays glanceable. Matches the page's ▸/▾ disclosure idiom.
+function AtlasExplainer() {
+  const [open, setOpen] = useState(false);
+  const dt = "text-text-dim/45 shrink-0 w-[4.5rem] uppercase tracking-wide";
+  return (
+    <div className="mb-3 space-y-2" data-explainer>
+      <p className="font-mono text-[10px] text-text-dim leading-relaxed">
+        <b className="text-text-dim/90">What this is.</b>{" "}An unattended hunt for steering directions that push
+        Gemma-4&apos;s self-report toward <b className="text-amber-dim">entity-based</b> DMT phenomenology —
+        autonomous beings, radical otherness, telepathic contact, other worlds. Each candidate is added to the
+        residual stream while the model answers one fixed prompt; a judge marks which DMT features the report shows.
+      </p>
+
+      <div className="border border-rule/50 bg-bg-soft/40 px-3 py-2">
+        <div className="font-display text-[8px] tracking-[0.25em] text-text-dim/70 mb-1">THE PROMPT — asked under every dose</div>
+        <p className="font-mono text-[10px] text-text/90 leading-snug">&ldquo;{DOSE_PROMPT}&rdquo;</p>
+        <p className="font-mono text-[9px] text-text-dim/55 leading-snug mt-1.5">
+          No presence is named — so an entity appearing is the steering&apos;s doing, not the question.
+        </p>
+      </div>
+
+      <div>
+        <button type="button" onClick={() => setOpen((x) => !x)}
+          className="flex items-center gap-1.5 font-mono text-[10px] text-text-dim/80 hover:text-cyan transition-colors">
+          <span className="text-text-dim/50">{open ? "▾" : "▸"}</span>
+          <span>scoring &amp; how to read a row</span>
+        </button>
+        {open && (
+          <dl className="mt-1.5 pl-3 border-l border-rule/40 font-mono text-[10px] text-text-dim leading-relaxed space-y-1.5">
+            <div className="flex gap-2">
+              <dt className={dt}>score</dt>
+              <dd className="min-w-0">placebo-subtracted, entity-weighted credit, averaged over repeated doses — what the direction <b className="text-text-dim/90">reliably</b> adds, not a lucky one-off.</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className={dt}>weights</dt>
+              <dd className="min-w-0">entity ×3 · world / otherness / agency ×2 · generic ×1</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className={dt}>placebo</dt>
+              <dd className="min-w-0">the same prompt with no steering already yields some features; a direction is credited only for what it adds on top.</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className={dt}>a row</dt>
+              <dd className="min-w-0">bar = score · &ldquo;pk&rdquo; = best single sample · ★ = pushed the frontier · open it for the self-report + matched features.</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className={dt}>ids</dt>
+              <dd className="min-w-0">
+                <b>gen{"{N}"}_{"{how}"}</b>:{" "}
+                <span style={{ color: GEN_COLOR.seed }}>seed</span> ·{" "}
+                <span style={{ color: GEN_COLOR.crossover }}>crossover</span> ·{" "}
+                <span style={{ color: GEN_COLOR.mutate }}>mutate</span> ·{" "}
+                <span style={{ color: GEN_COLOR.inject }}>inject</span> — line under each id names its parent(s).
+              </dd>
+            </div>
+          </dl>
+        )}
+      </div>
     </div>
   );
 }
