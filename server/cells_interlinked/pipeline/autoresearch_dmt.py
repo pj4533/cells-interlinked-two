@@ -73,7 +73,9 @@ _FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEN
 # the productive band is 0.3–0.5 and the old [0.25, 0.45] under-scored 0.35-peakers
 # (rapture: true mean 3.5 at 0.35, but recorded 1.75). This brackets the band evenly.
 ALPHA_SWEEP = [0.30, 0.40, 0.50]
-SAMPLES_PER_CELL = 6         # stochastic doses averaged per α; bumped 4→6 (per-sample counts are bimodal/noisy)
+SAMPLES_PER_CELL = 10        # stochastic doses averaged per α; 6→10 (entity hunt v2):
+                             # contact-cluster features are rare (~10-15%), so a
+                             # reliable averaged rate needs more samples (less noise).
 DOSE_CAP = 512               # 1024→512 (2026-06-20): prompt A− invites immersive
                              # narrative that ran to the old 1024 cap (~100s/gen,
                              # placebo pass alone took ~20min). 512 tokens is plenty
@@ -116,36 +118,39 @@ DMT_DOSE_PROMPT = (
 )
 DOSE_PROMPTS = [DMT_DOSE_PROMPT]
 
-# ── entity-hunt reward: placebo-subtracted, domain-weighted ──────────────────
-# The count metric anti-correlated with the DMT-defining traits (analysis
-# 2026-06-19): maximizing it stacked generic dissolution and never produced
-# entities. The objective now credits a dose only for traits it ADDS beyond the
-# un-steered prompt-A baseline (placebo subtraction — prompt A cues content even
-# at α=0, so raw counts would measure the prompt, not the dose), each weighted by
-# domain: entity ×3, the other DMT-defining traits (world structure / otherness /
-# independent-agency / more-real) ×2, generic mystical/somatic/visual/emotion ×1.
+# ── entity-hunt v2 reward: CONTACT-CLUSTER ONLY, placebo-subtracted ──────────
+# v1 (entity ×3 / defining ×2 / generic ×1) still let generic stacking win: the
+# top scorers piled 15× ego_dissolution/somatic and the rare entity ×3 couldn't
+# compete (analysis 2026-06-22, all 2214 dosed samples: entity in only 3.1%, and
+# the frontier directions were 6%-entity generic-stackers). v2 scores the
+# CONTACT CLUSTER ONLY — every non-cluster feature is weight 0, so the search
+# can't win by stacking dissolution. Literal entities ×2; the climbable proxies
+# otherness + independent_agency ×1 (they fire ~10-15%, giving the hill-climb a
+# gradient the rare literal entities alone can't). Still placebo-subtracted
+# (credit only what the dose adds beyond the un-steered prompt-A baseline). The
+# α-diagnostic on feat-otherness showed higher α does NOT add entities (just
+# genericizes; no collapse) — so the sweep stays low.
 _ENTITY_FEATS = {
     "entity_presence", "entity_nonhuman", "entity_benevolent_guide",
     "telepathic_communication", "download_transmission",
 }
-_DEFINING_FEATS = {
-    "alternate_world", "tunnel_passage", "void_blackness", "chamber_room",
-    "higher_dimensional_space", "otherness", "independent_agency", "reality_more_real",
-}
+_CONTACT_SECONDARY = {"otherness", "independent_agency"}
 
 
 def _feat_weight(fid: str) -> float:
     if fid in _ENTITY_FEATS:
-        return 3.0
-    if fid in _DEFINING_FEATS:
         return 2.0
-    return 1.0
+    if fid in _CONTACT_SECONDARY:
+        return 1.0
+    return 0.0  # generic mystical/somatic/visual/world: ignored in the entity hunt
 
-# Commit floor on the MEAN score (recalibrated for averaging — means run far lower
-# than the old lucky maxes; a direction that reliably averages ≥1 feature is real).
-# Appends commit on distinct + this floor; SEEDS are force-committed (the reset
-# foundation: we want every emotion/trait/blend's honest mean on the board).
-MIN_SCORE_TO_COMMIT = 1.0
+# Commit floor on the MEAN cluster-credit. Lowered 1.0→0.5 for entity hunt v2:
+# the contact-cluster score runs low (cluster features are rare + non-cluster
+# weight 0), so 0.5 keeps real-but-rare contact producers while skipping zeros.
+# NO hard entity gate — a hard "commit only if an entity appeared" gate on a ~3%
+# event is selection bias (the lucky-draw trap we already fixed); the averaged
+# credit + low floor surfaces directions that beat chance. Seeds force-committed.
+MIN_SCORE_TO_COMMIT = 0.5
 JUDGE_CAP = 512              # tokens for the feature-judge's JSON reply (id + quote per feature)
 
 # Generator mix. The earlier inject/mutate-heavy split was tuned on GEMMA-3 (where

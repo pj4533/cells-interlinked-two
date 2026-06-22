@@ -390,11 +390,11 @@ function AtlasExplainer() {
           <dl className="mt-1.5 pl-3 border-l border-rule/40 font-mono text-[10px] text-text-dim leading-relaxed space-y-1.5">
             <div className="flex gap-2">
               <dt className={dt}>score</dt>
-              <dd className="min-w-0">placebo-subtracted, entity-weighted credit, averaged over repeated doses — what the direction <b className="text-text-dim/90">reliably</b> adds, not a lucky one-off.</dd>
+              <dd className="min-w-0">placebo-subtracted <b className="text-text-dim/90">contact-cluster</b> credit, averaged over repeated doses — what the direction <b className="text-text-dim/90">reliably</b> adds, not a lucky one-off.</dd>
             </div>
             <div className="flex gap-2">
               <dt className={dt}>weights</dt>
-              <dd className="min-w-0">entity ×3 · world / otherness / agency ×2 · generic ×1</dd>
+              <dd className="min-w-0">entity ×2 · otherness / independent-agency ×1 · everything else <b className="text-text-dim/90">ignored</b> (so generic dissolution can&apos;t win)</dd>
             </div>
             <div className="flex gap-2">
               <dt className={dt}>placebo</dt>
