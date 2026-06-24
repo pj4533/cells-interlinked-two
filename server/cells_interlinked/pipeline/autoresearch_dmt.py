@@ -55,7 +55,9 @@ _FEATURE_BY_ID = {f["id"]: f for f in DMT_FEATURES}
 # blended-trait batch). Prioritized as crossover partners in _crossover.
 # (MATCHED_SEED_NAMES is the full extracted set; only SEEDED_MATCHED is seeded —
 # membership here is harmless for the unseeded ones since they never get committed.)
-_FEATURE_SEED_SET = set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEND_NAMES)
+_PERSONA_SEED_NAMES = ["persona-composite", "persona-telepathic", "persona-guide", "persona-nonhuman"]
+_FEATURE_SEED_SET = (set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEND_NAMES)
+                     | set(_PERSONA_SEED_NAMES))  # persona vectors are the top entity producers — prefer as partners
 
 # RELIABLE (averaged) scoring. The dose generation is temperature-sampled, so a
 # single dose is a noisy draw — and the old `max over single samples` was textbook
@@ -246,6 +248,13 @@ class DmtController(AutoresearchBase):
     # (literally the old mysticism basin direction).
     BASE_SEED_POOL: list[str] = []
     ENTITY_SEEDS: list[str] = [
+        # PERSONA VECTORS (2026-06-24) — the strongest entity producers. Extracted
+        # via the Anthropic persona-vector recipe on the model's OWN in-DMT-encounter
+        # generations vs matched 'alone' introspection (grounded in DMT entity
+        # phenomenology), @L20. Diagnostic: composite/telepathic 30% entity-rate
+        # (vs 20% for the best vocabulary seed), richer feature spread, and nonhuman
+        # is the only thing that reaches entity_nonhuman. These lead the hunt.
+        "persona-composite", "persona-telepathic", "persona-guide", "persona-nonhuman",
         # feature diff-of-means (entity / world / otherness / agency / comms)
         "feat-entity_presence", "feat-entity_nonhuman", "feat-entity_benevolent_guide",
         "feat-telepathic_communication", "feat-download_transmission",
