@@ -141,10 +141,11 @@ async def dose_emotions(request: Request) -> dict:
     `emotions` = all selectable names; `uncharted` = the subset that are NOT
     emotions but non-human-readable off-manifold directions (so the UI can group
     + caveat them honestly). Empty `emotions` ⇒ dose mode unavailable."""
-    # feat-* are internal DMT-autoresearch seeds (diff-of-means feature directions),
-    # not user-facing doses — keep them out of the picker entirely.
+    # feat-* and persona-* are internal DMT-autoresearch SEEDS (diff-of-means /
+    # persona-vector directions), not user-facing doses — keep them out of the
+    # picker. The curated entity exports live in the `dmt` group (dmt-* names).
     names = [n for n in (getattr(request.app.state, "emotion_names", []) or [])
-             if not n.startswith("feat-")]
+             if not n.startswith("feat-") and not n.startswith("persona-")]
     uncharted: list[str] = []
     research: list[str] = []
     research_meta: dict = {}

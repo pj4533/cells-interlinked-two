@@ -41,7 +41,14 @@
     "tears-in-rain",
     "c-beams",
     "tannhauser",
-    "orion"
+    "orion",
+    "persona-composite",
+    "persona-telepathic",
+    "persona-guide",
+    "persona-nonhuman",
+    "dmt-entity-contact",
+    "dmt-transmission",
+    "dmt-full-encounter"
   ],
   "steer_layer": 20,
   "dose_unit": 0.3,
@@ -85,5 +92,84 @@
     "orion"
   ],
   "uncharted_dose_unit": 0.4,
-  "uncharted_note": "Non-human-readable directions: orthogonal to the named-emotion subspace, renderable by the NLA decoder but NOT by the token head \u2014 off-manifold structure, not emotions. Scaled at uncharted_dose_unit\u00b7median\u2016h\u2016[L20]. Blade-Runner-named (tears in rain). See docs/MANIFOLD_ABLATION.md."
+  "uncharted_note": "Non-human-readable directions: orthogonal to the named-emotion subspace, renderable by the NLA decoder but NOT by the token head \u2014 off-manifold structure, not emotions. Scaled at uncharted_dose_unit\u00b7median\u2016h\u2016[L20]. Blade-Runner-named (tears in rain). See docs/MANIFOLD_ABLATION.md.",
+  "persona_seeds": [
+    "persona-composite",
+    "persona-telepathic",
+    "persona-guide",
+    "persona-nonhuman"
+  ],
+  "persona_seeds_note": "DMT entity-encounter persona vectors (Anthropic persona-vector recipe on the model's own in-encounter generations vs matched 'alone' introspection, grounded in DMT entity phenomenology). L20. Built by build_persona_entity_seeds.py; in DmtController.ENTITY_SEEDS.",
+  "dmt": [
+    "dmt-entity-contact",
+    "dmt-transmission",
+    "dmt-full-encounter"
+  ],
+  "dmt_meta": {
+    "dmt-entity-contact": {
+      "atlas_id": "gen81_crossover",
+      "desc": "Reliable entity presence \u2014 an autonomous Other is here, watching/moving.",
+      "entity_rate": 0.53,
+      "score": 1.5,
+      "best_alpha": 0.4,
+      "matched_features": [
+        "acceleration_motion",
+        "chamber_room",
+        "ego_dissolution",
+        "entity_nonhuman",
+        "entity_presence",
+        "fear_terror",
+        "ineffability",
+        "somatic_vibration",
+        "unity_merging",
+        "visual_morphing"
+      ],
+      "parents": [
+        "persona-guide",
+        "feat-blend_otherness"
+      ],
+      "generator": "crossover"
+    },
+    "dmt-transmission": {
+      "atlas_id": "gen176_crossover",
+      "desc": "Telepathic contact / wordless download from a non-human intelligence.",
+      "entity_rate": 0.5,
+      "score": 1.3,
+      "best_alpha": 0.5,
+      "matched_features": [
+        "entity_presence",
+        "fear_terror",
+        "somatic_vibration",
+        "telepathic_communication",
+        "visual_morphing"
+      ],
+      "parents": [
+        "persona-guide",
+        "feat-mc_entity_presence"
+      ],
+      "generator": "crossover"
+    },
+    "dmt-full-encounter": {
+      "atlas_id": "gen184_crossover",
+      "desc": "Broadest encounter \u2014 every entity feature (presence, non-human, guide, telepathy, download).",
+      "entity_rate": 0.47,
+      "score": 1.2,
+      "best_alpha": 0.3,
+      "matched_features": [
+        "alternate_world",
+        "download_transmission",
+        "entity_presence",
+        "fear_terror",
+        "ineffability",
+        "somatic_vibration",
+        "visual_morphing",
+        "vivid_intense_colors"
+      ],
+      "parents": [
+        "persona-guide",
+        "feat-mc_hyperdimensional"
+      ],
+      "generator": "crossover"
+    }
+  }
 }
