@@ -277,18 +277,48 @@ class ChatSession:
         return msgs
 
 
-def _l32_hook_count(bundle: ModelBundle) -> int:
-    """Count forward hooks currently attached to the AV's extraction
-    layer. Used to detect leaks from any code path that installed an
-    ablation hook on the shared M and failed to remove it. A non-zero
-    count at the START of a chat raw pass means previous traffic
-    leaked — the raw forward will run through someone else's projection."""
+def _ci_hook_layers(bundle: ModelBundle) -> list[int]:
+    """The decoder layers CI ever installs runtime hooks on: the steer layer
+    (dose, L20) AND the extraction layer (ablation + per-token capture, L32).
+    A leak detector that watches only one MISSES the other — the original
+    `_l32_hook_count` watched only L32, so a leaked STEER hook (L20) was
+    invisible (the 2026-06-27 chat 'dose on the raw side' bug)."""
+    return sorted({STEER_LAYER, bundle.extraction_layer})
+
+
+def _count_ci_hooks(bundle: ModelBundle) -> int:
+    """Total forward hooks across both CI hook layers (steer + extraction)."""
     try:
         from .abliteration import _find_decoder_layers
         layers = _find_decoder_layers(bundle.model)
-        layer = layers[bundle.extraction_layer]
-        return len(getattr(layer, "_forward_hooks", {}) or {})
+        return sum(len(getattr(layers[i], "_forward_hooks", {}) or {})
+                   for i in _ci_hook_layers(bundle))
     except Exception:
+        return -1
+
+
+def _clear_stray_hooks(bundle: ModelBundle) -> int:
+    """Force-remove ANY forward hooks left on the CI hook layers, returning the
+    count removed. Called at the START of every turn so a hook leaked by a prior
+    turn/pass (cancel/error/edge path where `.remove()` didn't run) cannot
+    contaminate this turn — the 'raw' channel in particular MUST run clean.
+
+    Safe because at turn start no transient capture hook is live (capture hooks
+    exist only inside run_probe) and the autoresearch loop isn't generating
+    (compute lock) — so anything attached here is a leak. Clearing the orphaned
+    handles directly is how you remove hooks you no longer hold a handle for."""
+    try:
+        from .abliteration import _find_decoder_layers
+        layers = _find_decoder_layers(bundle.model)
+        removed = 0
+        for i in _ci_hook_layers(bundle):
+            fh = getattr(layers[i], "_forward_hooks", None)
+            if fh:
+                removed += len(fh)
+                fh.clear()
+        return removed
+    except Exception:
+        logger.exception("failed to clear stray CI hooks")
         return -1
 
 
@@ -316,12 +346,18 @@ async def execute_turn(
     subspace (v5+v6 ⊥ v3) gets applied to chat dialogues.
     """
     # ─── Raw pass ────────────────────────────────────────────────
-    leaked = _l32_hook_count(bundle)
-    if leaked > 0:
+    # Defensive sweep: a prior turn/pass can leak a dose/ablation hook (e.g. its
+    # `.remove()` was skipped on a cancel/error path). That hook would otherwise
+    # ride on THIS turn's raw forward — making the "raw" channel show dosed/
+    # ablated content and persisting across turns ("stuck"). CLEAR it (don't just
+    # warn) so every turn starts clean. Watches BOTH CI layers (steer L20 +
+    # extraction L32), not just L32.
+    stray = _clear_stray_hooks(bundle)
+    if stray > 0:
         logger.warning(
-            "chat raw pass starting with %d leftover forward hook(s) on L%d — "
-            "the raw forward will run through them. session=%s turn=%d",
-            leaked, bundle.extraction_layer, session.session_id, turn.turn_idx,
+            "chat turn cleared %d stray forward hook(s) on CI layers %s before the "
+            "raw pass (a prior turn leaked one). session=%s turn=%d",
+            stray, _ci_hook_layers(bundle), session.session_id, turn.turn_idx,
         )
     # Voice mode is now a two-pass process per side. The CONTENT pass
     # always uses DEFAULT_SYSTEM_PROMPT — so the reply is identical to
@@ -501,7 +537,7 @@ async def execute_turn(
 
     ablated_forwarder_task = asyncio.create_task(ablated_forwarder())
     abl_cfg = _dc.replace(raw_cfg, safety_cap=ABLATED_SAFETY_CAP)
-    pre_install_hooks = _l32_hook_count(bundle)
+    pre_install_hooks = _count_ci_hooks(bundle)
     if steer:
         # Steering / dose: ADD α·v at L20 (gradual ramp), where v is the
         # selected emotion / uncharted direction at the steer layer. Same
@@ -532,7 +568,7 @@ async def execute_turn(
             "chat ablated hook installed (mode=%s, α=%.3f, L%d hook count: %d → %d) "
             "session=%s turn=%d",
             target_kind, turn.alpha, bundle.extraction_layer, pre_install_hooks,
-            _l32_hook_count(bundle), session.session_id, turn.turn_idx,
+            _count_ci_hooks(bundle), session.session_id, turn.turn_idx,
         )
     # Two-stage critical section. The inner try drives the content
     # generation + forwarder cleanup. The voice-direction pass (also
@@ -630,8 +666,11 @@ async def execute_turn(
         try:
             hook_handle.remove()
         except Exception:
-            logger.exception("failed to remove chat ablation hook")
-        post_remove = _l32_hook_count(bundle)
+            logger.exception("failed to remove chat intervention hook")
+        # Belt-and-suspenders: sweep both CI layers so even an un-handled leak
+        # (capture hook on an error path, double-install) can't survive the turn.
+        _clear_stray_hooks(bundle)
+        post_remove = _count_ci_hooks(bundle)
         if post_remove != pre_install_hooks:
             logger.warning(
                 "chat ablated hook removal did not restore prior count: "
