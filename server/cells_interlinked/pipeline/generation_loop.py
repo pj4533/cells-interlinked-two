@@ -121,6 +121,13 @@ class ProbeConfig:
     # some pathological input. Set high enough that natural answers
     # always EOS first. We do NOT artificially truncate output length.
     safety_cap: int = 4096
+    # thinking_cap (Gemma-4 reasoning models): max tokens spent inside the
+    # <think> channel before we force-inject the thought-close marker so an
+    # ANSWER still gets generated. None/0 = off. Guards against thinking-mode
+    # runaway (e.g. recursive prompts) where the model reasons until safety_cap
+    # and never answers. Budget-forcing à la s1. Only fires if the model is in
+    # thinking mode (bundle has a thought-close id and the channel is open).
+    thinking_cap: int | None = None
 
 
 @dataclass
@@ -208,6 +215,16 @@ async def run_probe(
     stopped_reason = "max"
     total = 0
 
+    # Thinking-budget state. If the model is reasoning and never closes the
+    # <think> channel, we force-inject the close marker after thinking_cap tokens
+    # so an answer still gets generated. close_id None ⇒ not a thinking model ⇒
+    # treat as already closed (cap never fires).
+    close_id = bundle.thought_close_id
+    thinking_cap = cfg.thinking_cap or 0
+    thinking_closed = close_id is None
+    thinking_tokens = 0
+    thinking_capped = False
+
     try:
         # First forward over the prompt — the hook fires here too but we
         # discard since the prompt isn't part of the output we're decoding.
@@ -228,6 +245,23 @@ async def run_probe(
                 generator=generator,
             )
             token_id = int(tok.item())
+
+            # Thinking budget: if reasoning has run past the cap without closing
+            # the channel, override this token with the thought-close marker so
+            # the model transitions to its answer instead of thinking forever.
+            if (thinking_cap and not thinking_closed
+                    and thinking_tokens >= thinking_cap and token_id != close_id):
+                token_id = close_id
+                tok = tok.new_full(tok.shape, close_id)
+                thinking_capped = True
+                logger.warning(
+                    "thinking cap hit (%d tokens) — forcing thought-close to elicit an answer",
+                    thinking_tokens,
+                )
+            if token_id == close_id:
+                thinking_closed = True
+            elif not thinking_closed:
+                thinking_tokens += 1
 
             # Forward + capture for THIS new token. The activation captured
             # is the residual stream that produced token T_t. (Hook fires
@@ -274,6 +308,7 @@ async def run_probe(
             "type": "stopped",
             "reason": stopped_reason,
             "total_tokens": total,
+            "thinking_capped": thinking_capped,
         })
 
     return ProbeResult(

@@ -24,16 +24,24 @@ export PATH="/Users/pj4533/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:
 
 echo "===== backend start $(date '+%F %T') (launchd-supervised) ====="
 
-# Background resumer: wait for the model to finish loading, then resume the DMT
-# autoresearch loop. Idempotent — /start returns {"already_running":true} if the
-# loop is already going, so this is harmless on a no-op restart.
+# Background resumer: wait for the model to load, then resume the DMT loop ONLY
+# IF it was running when the backend went down. The controller writes a
+# run-intent sentinel (data/atlas_dmt/.should_run) on start() and removes it on
+# stop(). So: crash/reboot while running → sentinel present → auto-resume
+# (self-heal); user-stopped or never-started → no sentinel → stay stopped and
+# wait for a manual start. Idempotent either way.
+SENTINEL="data/atlas_dmt/.should_run"
 (
   for _ in $(seq 1 120); do          # up to ~10 min for the ~24 GB model load
     if curl -s --max-time 4 http://localhost:8000/health 2>/dev/null | grep -q '"model_loaded":true'; then
-      sleep 2
-      resp=$(curl -s --max-time 10 -X POST http://localhost:8000/autoresearch-dmt/start \
-               -H 'Content-Type: application/json' -d '{}' 2>/dev/null)
-      echo "[resumer] DMT loop start -> ${resp:-<no response>}"
+      if [[ -f "$SENTINEL" ]]; then
+        sleep 2
+        resp=$(curl -s --max-time 10 -X POST http://localhost:8000/autoresearch-dmt/start \
+                 -H 'Content-Type: application/json' -d '{}' 2>/dev/null)
+        echo "[resumer] was running (sentinel present) → DMT loop start -> ${resp:-<no response>}"
+      else
+        echo "[resumer] no run-intent sentinel — leaving DMT loop stopped (awaiting manual start)"
+      fi
       exit 0
     fi
     sleep 5

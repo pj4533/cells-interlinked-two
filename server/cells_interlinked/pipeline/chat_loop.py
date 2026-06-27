@@ -49,6 +49,13 @@ logger = logging.getLogger(__name__)
 # Bumped 1024 → 4096 to match the raw pass now that thinking mode makes a
 # legitimate reply (reasoning + answer) routinely exceed 1024 tokens.
 ABLATED_SAFETY_CAP = 4096
+# Max tokens spent inside the <think> channel before we force the model to stop
+# reasoning and answer (budget-forcing). Guards the thinking-runaway where a
+# recursive/meditative prompt makes the model reason until safety_cap and emit no
+# answer (the 2026-06-27 12-min hang). 2048 leaves ample room for normal
+# reasoning while bounding runaways; the remaining safety_cap budget covers the
+# answer. Applied to both chat passes (abl_cfg inherits it from raw_cfg).
+CHAT_THINKING_CAP = 2048
 
 # Channel β can be driven two ways, mirroring the Trip View:
 #   "ablate" → remove the refusal projection at the extraction layer (L32);
@@ -402,6 +409,7 @@ async def execute_turn(
         top_p=settings.top_p,
         seed=None,  # chat is sampled fresh each turn
         safety_cap=4096,
+        thinking_cap=CHAT_THINKING_CAP,  # force an answer if reasoning runs away
     )
     try:
         await run_probe(

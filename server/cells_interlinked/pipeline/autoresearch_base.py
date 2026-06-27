@@ -178,6 +178,11 @@ class AutoresearchBase:
 
     async def start(self, budget: int | None = None, burst: int = 0) -> dict:
         if self._running:
+            # Already running (or winding down from a pending stop): re-assert the
+            # run intent — cancel any pending stop and restore the sentinel — so a
+            # start-while-running can't leave it stop-pending or sentinel-less.
+            self._stop_requested = False
+            self._mark_should_run(True)
             return {"ok": True, "already_running": True}
         bundle = getattr(self.app.state, "bundle", None)
         if bundle is None:
@@ -196,18 +201,42 @@ class AutoresearchBase:
         self._burst_remaining = int(burst or 0)
         self._burst_step = 0
         setattr(self.app.state, self.ACTIVE_FLAG, True)
+        self._mark_should_run(True)   # persist intent → resumer auto-starts after a crash/reboot
         self._log("started", f"loop started (budget={budget or '∞'}"
                   f"{f', burst={self._burst_remaining}' if self._burst_remaining else ''})")
         self._loop_task = asyncio.create_task(self._run_loop(budget))
         return {"ok": True, "already_running": False}
 
     async def stop(self) -> dict:
+        # Clear the run-intent sentinel even if not currently running, so an
+        # explicit stop always means "stay stopped across restarts".
+        self._mark_should_run(False)
         if not self._running:
             return {"ok": True, "was_running": False}
         self._stop_requested = True
         self._cancel.set()
         self._log("stopping", "stop requested — halting after the current candidate")
         return {"ok": True, "was_running": True}
+
+    # ── run-intent sentinel (survives restarts) ──────────────────
+    # A file that records "this loop should be running". Set on start(), cleared
+    # on stop(). The launchd resumer (ci_backend_supervised.sh) auto-starts the
+    # loop after a crash/reboot ONLY if this file exists — so a user stop stays
+    # stopped, but a crash-while-running self-heals. First-ever boot has no file,
+    # so the loop waits for a manual start.
+    def _should_run_path(self) -> Path:
+        return self._atlas_dir() / ".should_run"
+
+    def _mark_should_run(self, on: bool) -> None:
+        try:
+            p = self._should_run_path()
+            if on:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(str(time.time()))
+            elif p.exists():
+                p.unlink()
+        except Exception:
+            logger.exception("failed to update run-intent sentinel")
 
     def _log(self, kind: str, msg: str, data: dict | None = None) -> None:
         evt = {"ts": time.time(), "kind": kind, "msg": msg, **(data or {})}
