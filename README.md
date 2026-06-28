@@ -18,6 +18,31 @@ truth.
 
 ---
 
+## The point
+
+> **Use autoresearch to hone in on a set of steering vectors of a chosen
+> character, then save the winners to inhabit them in Chat and the Trip View.**
+
+That's the whole arc. The unattended **autoresearch loop is the telescope** — it
+hill-climbs toward an objective and curates the steering directions that best
+satisfy it into an **atlas**. The interactive instruments — **Chat and Trips —
+are where you actually inhabit** what it found, by dosing with the saved vectors.
+Find, then feel.
+
+The machinery is **objective-agnostic**: swap the judge and the seeds and you hunt
+a different *kind* of vector. **Right now the chosen character is DMT
+entity-encounter phenomenology** — autonomous beings, telepathic contact,
+otherness — and three winners are already in the palette. But that's the current
+direction, not the definition; the next hunt could be for something else entirely.
+
+And it wears a **Blade Runner** mask for the joy of it. The name is the
+*Cells Interlinked* baseline test from *Blade Runner 2049* (the epigraph above is
+its recitation); the framing is Voight-Kampff. The fun theme and the
+methodological honesty live side by side — it's a coherence probe in a
+post-trauma-test costume, not a consciousness test.
+
+---
+
 ## The instruments
 
 ### ◈ Chat — dual-channel dialogue *(primary)*

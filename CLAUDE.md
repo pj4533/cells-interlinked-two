@@ -11,10 +11,20 @@ entity-encounter phenomenology**.
 **It is not a consciousness test.** It's a *stated-vs-computed coherence probe* —
 borrowed math from psychedelic neuroscience and mech-interp, not metaphysics.
 
-> **Current focus:** finding steering vectors that evoke **DMT entity features**
-> (autonomous beings, telepathic contact, otherness) for use as doses in Chat
-> and the Trip View. The autoresearch loop hunts them; three have been exported
-> to the dose palette (see *Autoresearch / the entity hunt* below).
+> **The project, in one line:** use **autoresearch to hone in on a set of steering
+> vectors of a chosen character, then save the winners for use as doses in Chat
+> and the Trip View.** The loop is the telescope (hill-climb an objective → curate
+> an atlas); Chat/Trips are where you inhabit what it found. Find, then feel — all
+> under a **Blade Runner** theme (the *Cells Interlinked* baseline test /
+> Voight-Kampff framing), for the joy of it.
+>
+> **The machinery is objective-agnostic** — swap the judge + seeds and you hunt a
+> different *kind* of vector. **Current direction:** DMT entity-encounter
+> phenomenology (autonomous beings, telepathic contact, otherness); three winners
+> are exported to the dose palette (see *Autoresearch / the entity hunt* below).
+> This direction may change — treat the DMT-entity specifics as the current
+> instantiation, not the project's definition. When the direction changes, update
+> the *current direction* callouts but keep the durable thesis intact.
 
 > **Research first, every session: Drift's knowledge base.** Before web-searching
 > or reasoning from scratch about ablation, introspection, steering, persona
