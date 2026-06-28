@@ -42,6 +42,17 @@ Butlin — see [PROTOCOLS.md](PROTOCOLS.md)), there are operational sets:
 - **VOIGHT‑KAMPFF / DIRECT / BASELINE** — identity probes, bare introspective
   queries, and capability controls.
 
+## Thinking (Gemma-4)
+
+Gemma-4 is a reasoning model — it emits a `<think>` channel before its answer.
+Chat runs with thinking on; each side's reasoning is shown in a **separate, marked
+"thinking" bubble**, and prior-turn thoughts are stripped from the multi-turn
+history (keeping them caused repetition loops). A **thinking-token cap** (2048)
+force-ends a runaway reasoning trace so an answer is always produced — without it,
+a recursive/meditative prompt could make a channel reason to the safety cap and
+emit nothing (a ~12-minute hang). The β-channel hook is cleared at the start of
+every turn so a leaked dose/ablation can never contaminate the raw side.
+
 ## Voice & imagery (optional)
 
 Per turn you can voice one or both channels (TTS with a model‑chosen delivery

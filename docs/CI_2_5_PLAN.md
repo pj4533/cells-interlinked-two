@@ -1,5 +1,12 @@
 # Cells Interlinked 2.5 — Source of Truth
 
+> **⚠ HISTORICAL.** This was the CI 2.5 plan (Gemma-3 era: NLA verbalizer,
+> interrogation booth, off-manifold AR, refusal-ablation channel). The project has
+> since cut over to **Gemma-4** and refocused to **chat (primary) + trip + DMT
+> entity autoresearch + archive + journal**; NLA/probes/off-manifold-AR were
+> removed. For the current state see [`../CLAUDE.md`](../CLAUDE.md) (authoritative)
+> and [`../README.md`](../README.md). Kept as a record of the 2.5 design.
+
 **Status:** Active plan as of 2026-05-12.
 **Supersedes:** all prior CI 2.0 design and planning docs in this folder.
 **Owner:** PJ + Claude Code session.

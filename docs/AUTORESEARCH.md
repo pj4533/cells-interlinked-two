@@ -1,5 +1,11 @@
 # Off-Manifold Autoresearch — hunting the coherent frontier
 
+> **⚠ REMOVED / HISTORICAL.** The off-manifold autoresearch loop, its
+> `/autoresearch` page, `routes_autoresearch.py`, and `OffManifoldController` were
+> removed. The **DMT autoresearch** loop ([AUTORESEARCH_DMT.md](AUTORESEARCH_DMT.md))
+> is now the sole autoresearch loop. This doc is kept as a record of the shared
+> engine's design (`AutoresearchBase`, still used by DMT AR).
+
 `/autoresearch` (footer tab **off-manifold AR**). An unattended loop that hunts
 **steering directions which push the model as far off its default manifold as
 possible while staying coherent.**

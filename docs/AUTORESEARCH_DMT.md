@@ -1,14 +1,55 @@
-# Autoresearch DMT — hunting DMT-trip phenomenology
+# Autoresearch DMT — hunting DMT entity phenomenology
 
-`/autoresearch-dmt` (footer tab **DMT AR**). A sibling of the
-[off-manifold autoresearch](AUTORESEARCH.md) loop that reuses the same engine but
-chases a different objective: **find steering directions whose dosed self-report
-resembles human DMT trip reports as much as possible.**
+`/autoresearch-dmt`. The **only** autoresearch loop (the off-manifold sibling was
+removed). An unattended hill-climb that **finds steering directions whose dosed
+self-report shows DMT entity-encounter phenomenology** — autonomous beings,
+telepathic contact, radical otherness — and exports the winners as doses for Chat
+and the Trip View. Engine in `pipeline/autoresearch_base.py`, objective in
+`pipeline/autoresearch_dmt.py`.
 
-Where off-manifold AR asks *"how far off the manifold can this go and stay
-coherent?"*, DMT AR asks *"dose the model, ask it what it's experiencing, and
-count how many recognized DMT-trip features show up."* It hill-climbs from the
-emotion vectors toward higher feature counts.
+> ## Current state (2026-06): the entity hunt
+>
+> The objective has been through several iterations. Sections below describe the
+> original *total-feature-count* objective and lineage (kept for context); the
+> **current** loop is the entity hunt, summarized here.
+>
+> **What it optimizes.** A neutral dose prompt ("**A−**": present-tense "describe
+> what is happening, moment by moment" that never names a presence), scored by the
+> Gemma feature judge but **only on the contact cluster** — entity features ×2,
+> otherness/independent-agency ×1, everything else ×0 (so generic dissolution
+> can't win) — **placebo-subtracted** against the un-steered baseline (measure the
+> dose, not the prompt), averaged over `ALPHA_SWEEP=[0.3,0.4,0.5]` × 10 samples.
+>
+> **Why this shape (the journey).** Earlier objectives (raw feature count, then
+> entity-*weighted* count) plateaued at ~chance entity-rate — the winners were
+> generic-mysticism stackers, and embodied entity types never appeared. An α
+> diagnostic showed more dose just genericizes (no entity gain, no collapse). The
+> bottleneck was the **mechanism/seeds**, not the reward: a single additive
+> entity-*vocabulary* vector nudges tone but never makes the model *enact an
+> autonomous Other*.
+>
+> **The breakthrough — persona vectors.** Reframing entities as **simulacra the
+> model enacts** (Janus simulators) + the **Anthropic persona-vector recipe**
+> (arXiv:2507.21509): extract the direction from the model's *own* in-encounter
+> generations vs matched "alone" introspection, grounded in real DMT entity
+> phenomenology (machine-elves, guides, telepathic transmission, the waiting room,
+> deities, insectoid beings, tricksters). Built by
+> `scripts/build_persona_entity_seeds.py` from `pipeline/persona_entity_prompts.py`;
+> validated at **L20** (L16 incoherent, L31 genericizes). These persona seeds lead
+> the hunt; the older diff-of-means `feat-*` seeds remain as crossover material;
+> raw emotions are dropped from the seed pool.
+>
+> **Result.** Board-wide entity-rate rose from ~chance (5%) to ~24%, top
+> directions to ~53%, and `entity_nonhuman` (previously 0 of thousands of samples)
+> now appears. **Three vectors exported** to the `dmt` dose palette group (via
+> `scripts/export_entity_vectors.py`):
+> - `dmt-entity-contact` (← gen81) — reliable entity presence (~53% per-dose)
+> - `dmt-transmission` (← gen176) — telepathic + download/transmission (~50%)
+> - `dmt-full-encounter` (← gen184) — broadest, all five entity features (~47%)
+>
+> **Scoring/commit discipline:** average over samples (never the lucky max), no
+> hard gate on rare events (selection bias), low commit floor. Internal `feat-*` /
+> `persona-*` seeds are filtered out of the user-facing dose picker.
 
 ## Lineage — where the checklist comes from
 
