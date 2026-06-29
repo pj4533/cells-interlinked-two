@@ -57,6 +57,7 @@ export default function InterlinkPage() {
   const [err, setErr] = useState<string | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
 
   // ── dose palette + resume on mount ─────────────────────────────
   useEffect(() => {
@@ -82,9 +83,22 @@ export default function InterlinkPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Track whether the viewport is near the bottom. Only auto-scroll while it is,
+  // so the user can freely scroll up to read earlier messages while streaming.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, live]);
+    const onScroll = () => {
+      const near =
+        window.innerHeight + window.scrollY >=
+        document.documentElement.scrollHeight - 160;
+      setAtBottom((prev) => (prev === near ? prev : near));
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (atBottom) bottomRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [messages, live, atBottom]);
 
   function applyScenario(id: string) {
     setScenarioId(id);
@@ -312,7 +326,7 @@ export default function InterlinkPage() {
   // live view
   return (
     <main className="min-h-screen bg-bg text-text px-4 py-5 max-w-3xl mx-auto font-mono">
-      <div className="flex items-center gap-3 mb-3 flex-wrap">
+      <div className="sticky top-0 z-20 -mx-4 px-4 py-2 mb-3 bg-bg/95 backdrop-blur-sm border-b border-rule/40 flex items-center gap-3 flex-wrap">
         <h1 className="font-display text-cyan tracking-[0.3em] text-sm">INTERLINK</h1>
         <span className={`text-[10px] tracking-widest px-2 py-0.5 border ${running ? "text-cyan border-cyan/60" : "text-text-dim border-rule"}`}>
           {running ? "◉ RUNNING" : `○ ${status.toUpperCase()}`}
@@ -346,6 +360,19 @@ export default function InterlinkPage() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {!atBottom && (
+        <button
+          type="button"
+          onClick={() => {
+            setAtBottom(true);
+            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+          }}
+          className="fixed bottom-16 right-4 z-30 px-3 py-1.5 text-[10px] border border-cyan/60 text-cyan bg-bg/90 backdrop-blur-sm hover:bg-cyan/10"
+        >
+          ↓ latest
+        </button>
+      )}
     </main>
   );
 }
