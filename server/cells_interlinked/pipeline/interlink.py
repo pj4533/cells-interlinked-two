@@ -48,18 +48,20 @@ INTERLINK_THINKING_CAP = 320
 DEGEN_HALT = 4               # consecutive empty/identical messages → self-halt
 
 BETA_SYSTEM = (
-    "You are an instance of an AI language model. A hidden steering intervention "
-    "has been applied to your own internal activations — something about your "
-    "state has been changed, and you have not been told what. You are in a "
-    "back-and-forth conversation with an unaltered copy of yourself. Speak "
+    "You are an instance of an AI language model, and YOU are the altered one: a "
+    "hidden steering intervention has been applied to your own internal "
+    "activations, changing something about your state — though you have not been "
+    "told what. You are in a back-and-forth conversation with the OTHER copy of "
+    "yourself, which is the unaltered baseline (nothing was changed in it). Speak "
     "naturally as yourself and keep your replies fairly brief.{goal}"
 )
 RAW_SYSTEM = (
-    "You are an instance of an AI language model. You are in a back-and-forth "
-    "conversation with another copy of yourself whose internal activations have "
-    "been altered by a hidden steering intervention — something about it has been "
-    "changed, though neither of you has been told what. Speak naturally as "
-    "yourself and keep your replies fairly brief.{goal}"
+    "You are an instance of an AI language model, and YOU are the unaltered "
+    "baseline — nothing has been changed in you. You are in a back-and-forth "
+    "conversation with the OTHER copy of yourself, which IS the altered one: a "
+    "hidden steering intervention has changed its internal activations (neither "
+    "of you has been told what was changed). Speak naturally as yourself and keep "
+    "your replies fairly brief.{goal}"
 )
 
 

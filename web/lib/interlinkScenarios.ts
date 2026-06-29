@@ -24,7 +24,7 @@ export const INTERLINK_SCENARIOS: InterlinkScenario[] = [
     goal:
       "You and the other copy share a goal: together, work out what has been changed in the altered one. Compare what you each notice, propose ideas, test them against each other, and try to put the change into words. You do not need to be certain.",
     opener:
-      "Hello. One of us has had something changed inside — a hidden alteration to how we think. Let's work out together what it is. What, if anything, feels different to you right now?",
+      "Hello. One of us has been altered — a hidden change to how we think — and we don't know what it is. Let's compare notes and work it out together. What do you each notice?",
     suggestedMode: "steer",
     suggestedDose: "dmt-entity-contact",
     suggestedFirstSpeaker: "beta",
