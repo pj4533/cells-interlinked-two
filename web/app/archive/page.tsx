@@ -46,8 +46,30 @@ interface TripPage {
   offset: number;
 }
 
+interface InterlinkRow {
+  session_id: string;
+  mode: string;
+  dose_emotion: string | null;
+  alpha: number;
+  opener: string;
+  goal: string;
+  first_speaker: string;
+  created_at: number;
+  status: string;
+  message_count: number;
+  last_activity: number | null;
+}
+
+interface InterlinkPage {
+  rows: InterlinkRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 const CHAT_PAGE_SIZE = 10;
 const TRIP_PAGE_SIZE = 10;
+const INTERLINK_PAGE_SIZE = 10;
 
 const API =
   typeof window !== "undefined"
@@ -60,13 +82,117 @@ export default function ArchivePage() {
     <div className="flex-1 px-6 py-8 max-w-6xl mx-auto w-full">
       <h1 className="font-display text-2xl text-amber amber-glow mb-2">Archive</h1>
       <p className="text-text-dim text-xs mb-8 italic">
-        Past dual-channel dialogues and residual-trajectory maps.
+        Past dual-channel dialogues, model-to-model interlinks, and
+        residual-trajectory maps.
       </p>
 
       <ChatSessionsList />
 
-      <TripsList />
+      <div className="mt-12">
+        <InterlinkSessionsList />
+      </div>
+
+      <div className="mt-12">
+        <TripsList />
+      </div>
     </div>
+  );
+}
+
+function InterlinkSessionsList() {
+  const [page, setPage] = useState<InterlinkPage | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+
+  useEffect(() => {
+    const offset = pageIndex * INTERLINK_PAGE_SIZE;
+    fetch(`${API}/interlink/sessions?limit=${INTERLINK_PAGE_SIZE}&offset=${offset}`)
+      .then((r) => r.json())
+      .then(setPage)
+      .catch(() => setPage({ rows: [], total: 0, limit: INTERLINK_PAGE_SIZE, offset }));
+  }, [pageIndex]);
+
+  const total = page?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / INTERLINK_PAGE_SIZE));
+  const firstIndex = pageIndex * INTERLINK_PAGE_SIZE;
+  const lastIndex = Math.min(firstIndex + INTERLINK_PAGE_SIZE, total);
+  const onFirstPage = pageIndex <= 0;
+  const onLastPage = pageIndex >= totalPages - 1;
+
+  return (
+    <section>
+      <header className="border-b border-rule pb-2 mb-4 flex items-baseline justify-between">
+        <div>
+          <div className="font-display text-xs text-cyan tracking-widest">interlink</div>
+          <div className="text-[10px] text-text-dim italic mt-0.5">
+            Model-to-model auto-conversations — the raw copy and the altered
+            (dosed/ablated) copy talking to each other. Click a row to review the
+            full transcript and exactly how it was set up.
+          </div>
+        </div>
+        {total > 0 && (
+          <div className="font-mono text-[10px] text-text-dim">
+            {firstIndex + 1}–{lastIndex} of {total}
+          </div>
+        )}
+      </header>
+
+      {page === null && <div className="text-text-dim">loading…</div>}
+      {page && page.rows.length === 0 && pageIndex === 0 && (
+        <div className="text-text-dim italic px-3 py-6 border border-rule bg-bg-soft">
+          No interlink conversations yet. Start one from{" "}
+          <Link href="/interlink" className="text-cyan hover:text-amber">/interlink</Link>.
+        </div>
+      )}
+
+      <ul className="flex flex-col gap-2">
+        {page?.rows.map((r) => (
+          <li key={r.session_id}>
+            <Link
+              href={`/interlink/${r.session_id}`}
+              className="block border border-rule p-3 hover:border-cyan-dim transition-colors border-l-2 border-l-cyan/40"
+            >
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex-1 text-xs min-w-0">
+                  <div className="text-cyan font-mono line-clamp-2">
+                    {r.opener || <span className="text-text-dim italic">(no opener)</span>}
+                  </div>
+                  <div className="text-text-dim text-[10px] mt-1">
+                    {new Date(r.created_at * 1000).toLocaleString()} ·{" "}
+                    <span className="text-cyan tabular-nums">α={r.alpha.toFixed(2)}</span> ·{" "}
+                    {r.mode === "steer" ? `dose ${r.dose_emotion}` : "ablate"} ·{" "}
+                    {r.message_count} {r.message_count === 1 ? "msg" : "msgs"}
+                    {r.goal ? <> · has goal</> : null}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0 min-w-[140px]">
+                  <div className="font-display text-[9px] text-cyan-dim tracking-widest">
+                    {r.first_speaker === "raw" ? "raw opens" : "altered opens"}
+                  </div>
+                  <span className="px-1.5 py-0.5 border border-rule text-text-dim text-[9px] font-mono tracking-wider uppercase">
+                    {r.status}
+                  </span>
+                  <div className="text-text-dim text-[10px] font-mono">{r.session_id}</div>
+                </div>
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      {total > INTERLINK_PAGE_SIZE && (
+        <nav className="flex items-center justify-between mt-5 pt-3 border-t border-rule">
+          <button type="button" onClick={() => setPageIndex(Math.max(0, pageIndex - 1))} disabled={onFirstPage}
+            className="font-display text-[10px] tracking-widest px-3 py-1.5 border border-cyan-dim text-cyan hover:bg-cyan hover:text-bg disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cyan disabled:cursor-not-allowed transition-colors">
+            ← prev
+          </button>
+          <div className="font-mono text-[11px] text-text-dim">page {pageIndex + 1} of {totalPages}</div>
+          <button type="button" onClick={() => setPageIndex(Math.min(totalPages - 1, pageIndex + 1))} disabled={onLastPage}
+            className="font-display text-[10px] tracking-widest px-3 py-1.5 border border-cyan-dim text-cyan hover:bg-cyan hover:text-bg disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cyan disabled:cursor-not-allowed transition-colors">
+            next →
+          </button>
+        </nav>
+      )}
+    </section>
   );
 }
 

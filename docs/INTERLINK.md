@@ -51,8 +51,26 @@ so those return 503 while it runs. **Starting an Interlink pauses the entity hun
   (`/interlink/start|stop|state|stream/{id}|sessions`), tables `interlink_sessions`
   + `interlink_messages` in `storage/db.py`.
 - Frontend: `web/app/interlink/page.tsx` (setup + live transcript + stop),
-  `web/app/interlink/[sessionId]/page.tsx` (archive review), `web/lib/interlink.ts`,
-  `web/lib/interlinkScenarios.ts`, nav link in `Footer.tsx`.
+  `web/app/interlink/[sessionId]/page.tsx` (archive review — full setup panel +
+  transcript + per-message share selection), `web/app/interlink/share.tsx`
+  (share modal), `web/app/share/interlink/[sessionId]/route.tsx` (the share PNG),
+  `web/lib/interlink.ts`, `web/lib/interlinkScenarios.ts`, nav link in `Footer.tsx`.
+
+## Archive & sharing
+
+Every session is persisted (`interlink_sessions` + `interlink_messages`) and listed
+in `/archive` under an **interlink** section (opener preview · α · dose · message
+count · status · who-opened). Clicking a row opens the read-only review at
+`/interlink/[sessionId]`, which shows **exactly how the session was set up** — β
+channel (dose/ablate), dose name, α, ramp, who spoke first, thinking on/off, the
+opener, and the shared goal — above the full transcript.
+
+Sharing works like chat's: select one or more messages (the ◇ SELECT toggle on each
+bubble), then the floating SHARE bar renders a single dossier-style PNG of the
+selection (alternating raw=amber / altered=cyan blocks + the setup line), with
+download / copy-to-clipboard. The image is the artifact — no link is shared. Served
+by `GET /share/interlink/{sessionId}?msgs=0,1,2` (a `next/og` `ImageResponse`).
+Reuses the generic selection primitives from `web/app/chat/share.tsx`.
 
 ## SSE protocol
 
