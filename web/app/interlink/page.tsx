@@ -19,8 +19,19 @@ import { fetchDoseEmotions } from "@/lib/trip";
 const RAW_COLOR = "#e8c382"; // α
 const BETA_COLOR = "#5ee5e5"; // β
 
-const ALPHAS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
-const RAMPS = [0, 1, 2, 4, 8, 16];
+const ALPHA_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0];
+const RAMP_PRESETS = [0, 1, 2, 3, 5, 8, 16];
+
+// Chat-style chip classNames.
+const chip = (active: boolean) =>
+  `px-2 py-0.5 border text-[10px] font-mono tabular-nums transition-colors ${
+    active
+      ? "border-cyan text-cyan bg-bg"
+      : "border-rule/40 text-text-dim hover:text-text hover:border-rule"
+  }`;
+const chipGlow = (active: boolean) =>
+  active ? { textShadow: "0 0 6px rgba(94,229,229,0.5)" } : undefined;
+const LABEL = "font-display text-[9px] tracking-[0.35em] text-cyan-dim shrink-0";
 
 interface LivePartial {
   idx: number;
@@ -37,6 +48,8 @@ export default function InterlinkPage() {
   const [mode, setMode] = useState<InterlinkMode>("steer");
   const [dose, setDose] = useState<string>("dmt-entity-contact");
   const [alpha, setAlpha] = useState(0.5);
+  const [customAlpha, setCustomAlpha] = useState(false);
+  const [customAlphaText, setCustomAlphaText] = useState("0.50");
   const [ramp, setRamp] = useState(1);
   const [firstSpeaker, setFirstSpeaker] = useState<InterlinkSide>("beta");
   const [thinking, setThinking] = useState(true);
@@ -203,120 +216,119 @@ export default function InterlinkPage() {
 
         {err && <div className="mb-3 text-[11px] text-warning">⚠ {err}</div>}
 
-        <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">SCENARIO</label>
-        <select
-          value={scenarioId}
-          onChange={(e) => applyScenario(e.target.value)}
-          className="w-full bg-bg-soft border border-rule px-2 py-1.5 text-[11px] mb-1"
-        >
-          {INTERLINK_SCENARIOS.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        <p className="text-[10px] text-text-dim/70 italic mb-4">{getScenario(scenarioId)?.description}</p>
+        {/* SCENARIO — chips */}
+        <div className="flex items-baseline gap-2 flex-wrap mb-1.5">
+          <span className={LABEL}>SCENARIO</span>
+          {INTERLINK_SCENARIOS.map((s) => {
+            const active = scenarioId === s.id;
+            return (
+              <button key={s.id} type="button" onClick={() => applyScenario(s.id)}
+                className={chip(active)} style={chipGlow(active)}>
+                {s.name.split(" (")[0]}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-text-dim/70 italic mb-5 pl-1">{getScenario(scenarioId)?.description}</p>
 
-        <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">OPENER (the kickoff message)</label>
-        <textarea
-          value={opener}
-          onChange={(e) => setOpener(e.target.value)}
-          rows={3}
-          className="w-full bg-bg-soft border border-rule px-2 py-1.5 text-[11px] mb-4 resize-y"
-        />
+        {/* OPENER */}
+        <span className={`${LABEL} block mb-1`}>OPENER</span>
+        <textarea value={opener} onChange={(e) => setOpener(e.target.value)} rows={3}
+          className="w-full bg-bg-soft border border-rule/60 px-3 py-2 text-[12px] mb-4 resize-y focus:border-cyan focus:outline-none" />
 
-        <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">
-          SHARED GOAL (appended to both sides' context — optional)
-        </label>
-        <textarea
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          rows={2}
-          className="w-full bg-bg-soft border border-rule px-2 py-1.5 text-[11px] mb-4 resize-y"
-        />
+        {/* GOAL */}
+        <span className={`${LABEL} block mb-1`}>SHARED&nbsp;GOAL <span className="text-text-dim/40 tracking-normal">· appended to both sides · optional</span></span>
+        <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={2}
+          className="w-full bg-bg-soft border border-rule/60 px-3 py-2 text-[12px] mb-5 resize-y focus:border-cyan focus:outline-none" />
 
-        <div className="flex flex-wrap gap-4 mb-4">
-          {/* mode */}
-          <div>
-            <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">β INTERVENTION</label>
-            <div className="flex gap-1">
-              {(["steer", "ablate"] as InterlinkMode[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m)}
-                  className={`px-3 py-1 text-[10px] border ${mode === m ? "border-cyan text-cyan" : "border-rule text-text-dim"}`}
-                >
-                  {m === "steer" ? "dose" : "ablate"}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* dose target */}
+        {/* β channel: ABLATE / DOSE + dose target */}
+        <div className="flex items-baseline gap-2 flex-wrap mb-3">
+          <span className={LABEL}>β&nbsp;CHANNEL</span>
+          <button type="button" onClick={() => setMode("ablate")}
+            className={`px-2.5 py-0.5 border text-[10px] font-display tracking-widest transition-colors ${mode === "ablate" ? "border-amber text-amber bg-amber-dim/10" : "border-rule/40 text-text-dim hover:text-amber-dim"}`}>
+            ABLATE
+          </button>
+          <button type="button" onClick={() => setMode("steer")}
+            className={`px-2.5 py-0.5 border text-[10px] font-display tracking-widest transition-colors ${mode === "steer" ? "border-cyan text-cyan bg-cyan/10" : "border-rule/40 text-text-dim hover:text-cyan"}`}>
+            DOSE
+          </button>
           {mode === "steer" && (
-            <div className="min-w-[14rem]">
-              <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">DOSE</label>
-              <select
-                value={dose}
-                onChange={(e) => setDose(e.target.value)}
-                className="w-full bg-bg-soft border border-rule px-2 py-1 text-[10px]"
-              >
-                {doseDmt.length > 0 && (
-                  <optgroup label="DMT entity">
-                    {doseDmt.map((d) => <option key={d} value={d}>{d}</option>)}
-                  </optgroup>
-                )}
-                <optgroup label="emotions">
-                  {doseEmotions.map((d) => <option key={d} value={d}>{d}</option>)}
+            <select value={dose} onChange={(e) => setDose(e.target.value)}
+              className="ml-1 bg-bg-soft border border-rule/60 px-2 py-1 text-[10px] text-text focus:border-cyan focus:outline-none">
+              {doseDmt.length > 0 && (
+                <optgroup label="DMT entity">
+                  {doseDmt.map((d) => <option key={d} value={d}>{d}</option>)}
                 </optgroup>
-                {doseUncharted.length > 0 && (
-                  <optgroup label="uncharted">
-                    {doseUncharted.map((d) => <option key={d} value={d}>{d}</option>)}
-                  </optgroup>
-                )}
-              </select>
-            </div>
-          )}
-          {/* alpha */}
-          <div>
-            <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">α (strength)</label>
-            <select value={alpha} onChange={(e) => setAlpha(parseFloat(e.target.value))}
-              className="bg-bg-soft border border-rule px-2 py-1 text-[10px]">
-              {ALPHAS.map((a) => <option key={a} value={a}>{a}</option>)}
+              )}
+              <optgroup label="emotions">
+                {doseEmotions.map((d) => <option key={d} value={d}>{d}</option>)}
+              </optgroup>
+              {doseUncharted.length > 0 && (
+                <optgroup label="uncharted">
+                  {doseUncharted.map((d) => <option key={d} value={d}>{d}</option>)}
+                </optgroup>
+              )}
             </select>
-          </div>
-          {/* ramp */}
-          {mode === "steer" && (
-            <div>
-              <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">RAMP</label>
-              <select value={ramp} onChange={(e) => setRamp(parseInt(e.target.value, 10))}
-                className="bg-bg-soft border border-rule px-2 py-1 text-[10px]">
-                {RAMPS.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
           )}
-          {/* first speaker */}
-          <div>
-            <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">OPENS</label>
-            <div className="flex gap-1">
-              {(["beta", "raw"] as InterlinkSide[]).map((s) => (
-                <button key={s} type="button" onClick={() => setFirstSpeaker(s)}
-                  className={`px-3 py-1 text-[10px] border ${firstSpeaker === s ? "border-cyan text-cyan" : "border-rule text-text-dim"}`}>
-                  {s === "beta" ? "altered" : "raw"}
-                </button>
-              ))}
-            </div>
+        </div>
+
+        {/* α — presets + custom */}
+        <div className="flex items-baseline gap-2 flex-wrap mb-3">
+          <span className={LABEL}>{mode === "steer" ? "DOSE α" : "α"}</span>
+          {ALPHA_PRESETS.map((a) => {
+            const active = !customAlpha && Math.abs(alpha - a) < 1e-6;
+            return (
+              <button key={a} type="button" onClick={() => { setCustomAlpha(false); setAlpha(a); }}
+                className={chip(active)} style={chipGlow(active)}>
+                {a.toFixed(2)}
+              </button>
+            );
+          })}
+          <button type="button" onClick={() => { setCustomAlpha(true); setCustomAlphaText(alpha.toFixed(2)); }}
+            className={`px-2 py-0.5 border text-[10px] font-mono transition-colors ${customAlpha ? "border-cyan text-cyan bg-bg" : "border-rule/40 text-text-dim hover:text-text hover:border-rule"}`}>
+            custom
+          </button>
+          {customAlpha && (
+            <input type="number" inputMode="decimal" step="0.05" min={0} max={5} value={customAlphaText}
+              onChange={(e) => {
+                const t = e.target.value;
+                setCustomAlphaText(t);
+                const p = parseFloat(t);
+                if (!Number.isNaN(p)) setAlpha(Math.max(0, Math.min(5, p)));
+              }}
+              placeholder="α"
+              className="px-2 py-0.5 w-20 border border-cyan text-cyan bg-bg text-[10px] font-mono tabular-nums focus:outline-none" />
+          )}
+        </div>
+
+        {/* RAMP — steer only */}
+        {mode === "steer" && (
+          <div className="flex items-baseline gap-2 flex-wrap mb-3">
+            <span className={LABEL} title="Tokens over which the dose ramps 0→α. 'off' = full dose immediately.">RAMP</span>
+            {RAMP_PRESETS.map((r) => (
+              <button key={r} type="button" onClick={() => setRamp(r)}
+                className={chip(ramp === r)} style={chipGlow(ramp === r)}>
+                {r === 0 ? "off" : r}
+              </button>
+            ))}
           </div>
-          {/* thinking */}
-          <div>
-            <label className="block text-[9px] tracking-widest text-text-dim/70 mb-1">THINKING</label>
-            <button type="button" onClick={() => setThinking((t) => !t)}
-              className={`px-3 py-1 text-[10px] border ${thinking ? "border-cyan text-cyan" : "border-rule text-text-dim"}`}>
-              {thinking ? "on" : "off"}
-            </button>
-          </div>
+        )}
+
+        {/* OPENS + THINKING */}
+        <div className="flex items-baseline gap-2 flex-wrap mb-6">
+          <span className={LABEL}>OPENS</span>
+          <button type="button" onClick={() => setFirstSpeaker("beta")}
+            className={chip(firstSpeaker === "beta")} style={chipGlow(firstSpeaker === "beta")}>altered</button>
+          <button type="button" onClick={() => setFirstSpeaker("raw")}
+            className={chip(firstSpeaker === "raw")} style={chipGlow(firstSpeaker === "raw")}>raw</button>
+          <span className="inline-block w-4" />
+          <span className={LABEL}>THINKING</span>
+          <button type="button" onClick={() => setThinking((t) => !t)}
+            className={chip(thinking)} style={chipGlow(thinking)}>{thinking ? "on" : "off"}</button>
         </div>
 
         <button type="button" onClick={onStart}
-          className="px-5 py-2 text-[11px] border border-cyan text-cyan hover:bg-cyan/10 tracking-widest">
+          className="w-full sm:w-auto px-6 py-2.5 text-[11px] font-display tracking-[0.3em] border border-cyan text-cyan hover:bg-cyan/10 transition-colors">
           ▶ START INTERLINK
         </button>
       </main>
