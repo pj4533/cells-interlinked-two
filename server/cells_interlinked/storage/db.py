@@ -133,6 +133,41 @@ CREATE TABLE IF NOT EXISTS chat_turns (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, turn_idx);
+
+-- Interlink (model-to-model auto-conversation). The raw copy and the altered
+-- (dosed/ablated) copy of M talk to each other autonomously. One shared
+-- transcript of single-side messages that alternate (unlike chat's raw+β pair
+-- per row). `side` is 'raw' or 'beta'; the β intervention (mode/dose/alpha/ramp)
+-- is fixed for the whole conversation.
+CREATE TABLE IF NOT EXISTS interlink_sessions (
+  session_id     TEXT PRIMARY KEY,
+  mode           TEXT NOT NULL DEFAULT 'steer',   -- 'steer' (dose@L20) or 'ablate' (@L32)
+  dose_emotion   TEXT,                            -- dose name when mode='steer'
+  alpha          REAL NOT NULL DEFAULT 0.5,
+  dose_ramp      INTEGER NOT NULL DEFAULT 1,
+  opener         TEXT NOT NULL DEFAULT '',        -- the human's kickoff message
+  goal           TEXT NOT NULL DEFAULT '',        -- optional shared goal appended to both system prompts
+  first_speaker  TEXT NOT NULL DEFAULT 'beta',    -- 'raw' or 'beta'
+  thinking       INTEGER NOT NULL DEFAULT 1,      -- enable_thinking for both sides
+  created_at     REAL NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'running'   -- 'running' | 'stopped' | 'done' | 'error'
+);
+
+CREATE INDEX IF NOT EXISTS idx_interlink_sessions_created ON interlink_sessions (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS interlink_messages (
+  session_id      TEXT NOT NULL,
+  idx             INTEGER NOT NULL,
+  side            TEXT NOT NULL,                  -- 'raw' | 'beta'
+  text            TEXT NOT NULL DEFAULT '',
+  thinking        TEXT NOT NULL DEFAULT '',
+  stopped_reason  TEXT NOT NULL DEFAULT '',
+  started_at      REAL NOT NULL,
+  finished_at     REAL,
+  PRIMARY KEY (session_id, idx)
+);
+
+CREATE INDEX IF NOT EXISTS idx_interlink_messages_session ON interlink_messages (session_id, idx);
 """
 
 
@@ -843,6 +878,144 @@ async def list_chat_sessions(
                 "first_user_text": r["first_user_text"] or "",
                 "turn_count": r["turn_count"] or 0,
                 "image_count": r["image_count"] or 0,
+                "last_activity": r["last_activity"],
+            }
+            for r in rows
+        ],
+        "total": tot["n"] if tot else 0,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+# ── Interlink (model-to-model auto-conversation) ─────────────────────────────
+
+async def insert_interlink_session(
+    path: Path,
+    *,
+    session_id: str,
+    mode: str,
+    dose_emotion: str | None,
+    alpha: float,
+    dose_ramp: int,
+    opener: str,
+    goal: str,
+    first_speaker: str,
+    thinking: bool,
+    created_at: float,
+    status: str = "running",
+) -> None:
+    async with aiosqlite.connect(path) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO interlink_sessions "
+            "(session_id, mode, dose_emotion, alpha, dose_ramp, opener, goal, "
+            " first_speaker, thinking, created_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, mode, dose_emotion, alpha, dose_ramp, opener, goal,
+             first_speaker, 1 if thinking else 0, created_at, status),
+        )
+        await db.commit()
+
+
+async def set_interlink_status(path: Path, session_id: str, status: str) -> None:
+    async with aiosqlite.connect(path) as db:
+        await db.execute(
+            "UPDATE interlink_sessions SET status = ? WHERE session_id = ?",
+            (status, session_id),
+        )
+        await db.commit()
+
+
+async def upsert_interlink_message(
+    path: Path,
+    *,
+    session_id: str,
+    idx: int,
+    side: str,
+    text: str,
+    thinking: str,
+    stopped_reason: str,
+    started_at: float,
+    finished_at: float | None,
+) -> None:
+    async with aiosqlite.connect(path) as db:
+        await db.execute(
+            "INSERT INTO interlink_messages "
+            "(session_id, idx, side, text, thinking, stopped_reason, started_at, finished_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id, idx) DO UPDATE SET "
+            "  side=excluded.side, text=excluded.text, thinking=excluded.thinking, "
+            "  stopped_reason=excluded.stopped_reason, started_at=excluded.started_at, "
+            "  finished_at=excluded.finished_at",
+            (session_id, idx, side, text, thinking, stopped_reason, started_at, finished_at),
+        )
+        await db.commit()
+
+
+async def get_interlink_session(path: Path, session_id: str) -> dict[str, Any] | None:
+    async with aiosqlite.connect(path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM interlink_sessions WHERE session_id = ?", (session_id,),
+        ) as cur:
+            srow = await cur.fetchone()
+        if srow is None:
+            return None
+        async with db.execute(
+            "SELECT idx, side, text, thinking, stopped_reason, started_at, finished_at "
+            "FROM interlink_messages WHERE session_id = ? ORDER BY idx",
+            (session_id,),
+        ) as cur:
+            mrows = await cur.fetchall()
+    return {
+        "session_id": srow["session_id"],
+        "mode": srow["mode"],
+        "dose_emotion": srow["dose_emotion"],
+        "alpha": srow["alpha"],
+        "dose_ramp": srow["dose_ramp"],
+        "opener": srow["opener"],
+        "goal": srow["goal"] or "",
+        "first_speaker": srow["first_speaker"],
+        "thinking": bool(srow["thinking"]),
+        "created_at": srow["created_at"],
+        "status": srow["status"],
+        "messages": [
+            {
+                "idx": m["idx"], "side": m["side"], "text": m["text"],
+                "thinking": m["thinking"] or "", "stopped_reason": m["stopped_reason"],
+                "started_at": m["started_at"], "finished_at": m["finished_at"],
+            }
+            for m in mrows
+        ],
+    }
+
+
+async def list_interlink_sessions(
+    path: Path, *, limit: int = 50, offset: int = 0,
+) -> dict[str, Any]:
+    async with aiosqlite.connect(path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT s.session_id, s.mode, s.dose_emotion, s.alpha, s.opener, s.goal, "
+            "       s.first_speaker, s.created_at, s.status, "
+            "       (SELECT COUNT(*) FROM interlink_messages m "
+            "        WHERE m.session_id = s.session_id) AS message_count, "
+            "       (SELECT MAX(finished_at) FROM interlink_messages m "
+            "        WHERE m.session_id = s.session_id) AS last_activity "
+            "FROM interlink_sessions s ORDER BY s.created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ) as cur:
+            rows = await cur.fetchall()
+        async with db.execute("SELECT COUNT(*) AS n FROM interlink_sessions") as cur:
+            tot = await cur.fetchone()
+    return {
+        "rows": [
+            {
+                "session_id": r["session_id"], "mode": r["mode"],
+                "dose_emotion": r["dose_emotion"], "alpha": r["alpha"],
+                "opener": r["opener"] or "", "goal": r["goal"] or "",
+                "first_speaker": r["first_speaker"], "created_at": r["created_at"],
+                "status": r["status"], "message_count": r["message_count"] or 0,
                 "last_activity": r["last_activity"],
             }
             for r in rows

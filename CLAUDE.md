@@ -198,8 +198,8 @@ These exist for hard-won reasons. Don't undo without thinking.
 
 ## Surfaces (what's shipped)
 
-Five pages: **chat** (primary), **trip**, **autoresearch-dmt**, **archive**,
-**journal**.
+Six pages: **chat** (primary), **interlink**, **trip**, **autoresearch-dmt**,
+**archive**, **journal**.
 
 - **`/chat` — dual-channel dialogue.** Every message is answered twice against
   two divergent histories that never see each other: **raw** (Channel α) and a
@@ -214,6 +214,14 @@ Five pages: **chat** (primary), **trip**, **autoresearch-dmt**, **archive**,
   entropy, and **off-manifold distance** vs the raw run. Applies a dose (L20) or
   ablation (L32). Signature Mandalas render the eigenstructure as the non-text
   readout. `pipeline/trajectory.py`, `routes_trip.py`. See `docs/TRIP_VIEW.md`.
+- **`/interlink` — model-to-model auto-conversation.** The raw copy (α) and the
+  altered (dosed/ablated) copy (β) of M talk to each other autonomously from a
+  human opener + scenario/goal; they alternate until stopped. One model (β = same
+  M with a hook), so it's serial alternating single-side generation — no extra
+  memory. Autonomous loop (`InterlinkController`, modeled on `AutoresearchBase`)
+  reusing `run_probe`/`render_chat`/`ThinkingSplitter`/the hooks. **Mutually
+  exclusive** with the hunt + chat/trip (`app.state.interlink_active`). See
+  `docs/INTERLINK.md`. `pipeline/interlink.py`, `routes_interlink.py`.
 - **`/autoresearch-dmt` — the DMT entity hunt** (the sole autoresearch loop). See
   the next section + `docs/AUTORESEARCH_DMT.md`.
 - **`/archive`** — past chat sessions; read-only transcript review at
@@ -388,7 +396,8 @@ e2e/                 Playwright smoke tests + screenshot scripts
 ## Docs index
 
 Current/active: [`AUTORESEARCH_DMT.md`](docs/AUTORESEARCH_DMT.md) ·
-[`CHAT.md`](docs/CHAT.md) · [`TRIP_VIEW.md`](docs/TRIP_VIEW.md) ·
+[`CHAT.md`](docs/CHAT.md) · [`INTERLINK.md`](docs/INTERLINK.md) ·
+[`TRIP_VIEW.md`](docs/TRIP_VIEW.md) ·
 [`REFUSAL_VECTORS.md`](docs/REFUSAL_VECTORS.md) ·
 [`SUPERVISOR.md`](docs/SUPERVISOR.md) ·
 [`GEMMA4_MIGRATION.md`](docs/GEMMA4_MIGRATION.md) ·

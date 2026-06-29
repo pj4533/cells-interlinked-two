@@ -59,6 +59,18 @@ diverge.
 
 → **[docs/CHAT.md](docs/CHAT.md)**
 
+### ⇄ Interlink — two copies talk to each other
+
+A new mode where the **raw** copy and the **altered** (dosed/ablated) copy of the
+model talk to *each other* autonomously. You write an opener and pick a scenario —
+optionally a shared goal like *"work out together what was changed in the altered
+one"* — then they alternate on their own until you stop them. Since there's one
+model (β = the same M with a hook), it's just serial alternating generation, free
+to run as long as you like. The conversations tend to converge, then drift — which
+is the fun.
+
+→ **[docs/INTERLINK.md](docs/INTERLINK.md)**
+
 ### ✦ The Trip — trajectory geometry & signature mandalas
 
 Run one prompt, then re-run it under a perturbation at several strengths (α). Each

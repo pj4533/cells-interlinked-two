@@ -190,6 +190,8 @@ class AutoresearchBase:
         reg = getattr(self.app.state, "registry", None)
         if reg is not None and reg.holder_run_id is not None:
             return {"ok": False, "error": "compute busy (a chat/trip is running)"}
+        if getattr(self.app.state, "interlink_active", False):
+            return {"ok": False, "error": "interlink is running — stop it first"}
         # Mutual exclusion on M: only one autoresearch at a time. This check→set
         # is synchronous (no await before setattr) so two starts can't interleave.
         if self._others_running():

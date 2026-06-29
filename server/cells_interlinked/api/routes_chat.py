@@ -421,6 +421,8 @@ async def list_sessions(request: Request, limit: int = 50, offset: int = 0) -> d
 async def post_turn(sid: str, req: TurnRequest, request: Request) -> TurnResponse:
     if any_autoresearch_active(request.app):
         raise HTTPException(status_code=503, detail="autoresearch is running — chat is locked")
+    if getattr(request.app.state, "interlink_active", False):
+        raise HTTPException(status_code=503, detail="interlink is running — chat is locked")
     session = await _rehydrate_session(sid, request)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")

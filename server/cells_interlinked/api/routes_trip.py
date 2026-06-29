@@ -94,6 +94,8 @@ async def start_trip(req: TripRequest, request: Request) -> TripResponse:
     app = request.app
     if any_autoresearch_active(app):
         raise HTTPException(status_code=503, detail="autoresearch is running — trips are locked")
+    if getattr(app.state, "interlink_active", False):
+        raise HTTPException(status_code=503, detail="interlink is running — trips are locked")
     bundle = getattr(app.state, "bundle", None)
     if bundle is None:
         raise HTTPException(status_code=503, detail="M not loaded")

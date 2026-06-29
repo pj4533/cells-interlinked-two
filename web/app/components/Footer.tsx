@@ -10,11 +10,12 @@ import { fetchDmtState } from "@/lib/autoresearch-dmt";
 
 // Pages that drive M — disabled while the DMT hunt holds it. The DMT AR monitor
 // stays navigable (read-only viewer); its start button errors if compute is busy.
-const M_LOCKED = new Set(["/", "/chat", "/trip"]);
+const M_LOCKED = new Set(["/", "/chat", "/trip", "/interlink"]);
 
 const LINKS: { href: string; label: string; cls: string }[] = [
   { href: "/", label: "cells interlinked", cls: "hover:text-amber" },
   { href: "/chat", label: "chat", cls: "hover:text-cyan" },
+  { href: "/interlink", label: "interlink", cls: "hover:text-cyan" },
   { href: "/trip", label: "trip", cls: "hover:text-cyan" },
   { href: "/autoresearch-dmt", label: "DMT AR", cls: "hover:text-cyan" },
   { href: "/archive", label: "archive", cls: "hover:text-amber" },
