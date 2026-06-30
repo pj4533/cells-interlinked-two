@@ -42,13 +42,13 @@
     "c-beams",
     "tannhauser",
     "orion",
-    "persona-composite",
-    "persona-telepathic",
-    "persona-guide",
-    "persona-nonhuman",
     "dmt-entity-contact",
     "dmt-transmission",
-    "dmt-full-encounter"
+    "dmt-full-encounter",
+    "persona-composite",
+    "persona-nonhuman",
+    "persona-divine",
+    "persona-trickster"
   ],
   "steer_layer": 20,
   "dose_unit": 0.3,
@@ -95,9 +95,9 @@
   "uncharted_note": "Non-human-readable directions: orthogonal to the named-emotion subspace, renderable by the NLA decoder but NOT by the token head \u2014 off-manifold structure, not emotions. Scaled at uncharted_dose_unit\u00b7median\u2016h\u2016[L20]. Blade-Runner-named (tears in rain). See docs/MANIFOLD_ABLATION.md.",
   "persona_seeds": [
     "persona-composite",
-    "persona-telepathic",
-    "persona-guide",
-    "persona-nonhuman"
+    "persona-nonhuman",
+    "persona-divine",
+    "persona-trickster"
   ],
   "persona_seeds_note": "DMT entity-encounter persona vectors (Anthropic persona-vector recipe on the model's own in-encounter generations vs matched 'alone' introspection, grounded in DMT entity phenomenology). L20. Built by build_persona_entity_seeds.py; in DmtController.ENTITY_SEEDS.",
   "dmt": [

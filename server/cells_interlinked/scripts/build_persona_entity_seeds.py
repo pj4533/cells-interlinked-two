@@ -1,8 +1,9 @@
 """Build DMT entity-encounter PERSONA VECTORS (Anthropic recipe, arXiv:2507.21509),
 grounded in human DMT entity phenomenology.
 
-For each persona (POS = in a DMT entity encounter, NEG = alone introspecting), the
-model GENERATES a response to neutral questions, and we capture the mean of its
+For each persona (POS = in a DMT entity encounter; NEG = the DMT breakthrough space
+with NO other mind — impersonal unity / empty geometry / the void / dissolution),
+the model GENERATES a response to neutral questions, and we capture the mean of its
 OWN response-token residuals at several layers. diff = POS_mean − NEG_mean is the
 "an autonomous Other is present (DMT contact)" direction — the persona/simulacrum
 the model enters, not entity vocabulary. Captured at L16/L20/L31 for a later

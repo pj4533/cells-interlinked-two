@@ -1,0 +1,99 @@
+{
+  "layers": [
+    16,
+    20,
+    31
+  ],
+  "dose_unit": 0.4,
+  "neg_median_norm": {
+    "16": 241.77145385742188,
+    "20": 250.41639709472656,
+    "31": 153.8579559326172
+  },
+  "seeds": {
+    "persona-composite-L16": {
+      "group": "composite",
+      "layer": 16,
+      "n_pos": 45,
+      "diff_norm": 5.26,
+      "saved_norm": 96.7
+    },
+    "persona-composite-L20": {
+      "group": "composite",
+      "layer": 20,
+      "n_pos": 45,
+      "diff_norm": 6.78,
+      "saved_norm": 100.2
+    },
+    "persona-composite-L31": {
+      "group": "composite",
+      "layer": 31,
+      "n_pos": 45,
+      "diff_norm": 16.04,
+      "saved_norm": 61.5
+    },
+    "persona-nonhuman-L16": {
+      "group": "nonhuman",
+      "layer": 16,
+      "n_pos": 18,
+      "diff_norm": 5.73,
+      "saved_norm": 96.7
+    },
+    "persona-nonhuman-L20": {
+      "group": "nonhuman",
+      "layer": 20,
+      "n_pos": 18,
+      "diff_norm": 7.68,
+      "saved_norm": 100.2
+    },
+    "persona-nonhuman-L31": {
+      "group": "nonhuman",
+      "layer": 31,
+      "n_pos": 18,
+      "diff_norm": 17.3,
+      "saved_norm": 61.5
+    },
+    "persona-divine-L16": {
+      "group": "divine",
+      "layer": 16,
+      "n_pos": 15,
+      "diff_norm": 4.22,
+      "saved_norm": 96.7
+    },
+    "persona-divine-L20": {
+      "group": "divine",
+      "layer": 20,
+      "n_pos": 15,
+      "diff_norm": 5.39,
+      "saved_norm": 100.2
+    },
+    "persona-divine-L31": {
+      "group": "divine",
+      "layer": 31,
+      "n_pos": 15,
+      "diff_norm": 13.49,
+      "saved_norm": 61.5
+    },
+    "persona-trickster-L16": {
+      "group": "trickster",
+      "layer": 16,
+      "n_pos": 9,
+      "diff_norm": 7.34,
+      "saved_norm": 96.7
+    },
+    "persona-trickster-L20": {
+      "group": "trickster",
+      "layer": 20,
+      "n_pos": 9,
+      "diff_norm": 9.55,
+      "saved_norm": 100.2
+    },
+    "persona-trickster-L31": {
+      "group": "trickster",
+      "layer": 31,
+      "n_pos": 9,
+      "diff_norm": 22.87,
+      "saved_norm": 61.5
+    }
+  }
+}

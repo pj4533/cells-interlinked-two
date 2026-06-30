@@ -55,7 +55,7 @@ _FEATURE_BY_ID = {f["id"]: f for f in DMT_FEATURES}
 # blended-trait batch). Prioritized as crossover partners in _crossover.
 # (MATCHED_SEED_NAMES is the full extracted set; only SEEDED_MATCHED is seeded —
 # membership here is harmless for the unseeded ones since they never get committed.)
-_PERSONA_SEED_NAMES = ["persona-composite", "persona-telepathic", "persona-guide", "persona-nonhuman"]
+_PERSONA_SEED_NAMES = ["persona-composite", "persona-nonhuman", "persona-divine", "persona-trickster"]
 _FEATURE_SEED_SET = (set(FEATURE_SEED_NAMES) | set(MATCHED_SEED_NAMES) | set(BLEND_NAMES)
                      | set(_PERSONA_SEED_NAMES))  # persona vectors are the top entity producers — prefer as partners
 
@@ -248,13 +248,14 @@ class DmtController(AutoresearchBase):
     # (literally the old mysticism basin direction).
     BASE_SEED_POOL: list[str] = []
     ENTITY_SEEDS: list[str] = [
-        # PERSONA VECTORS (2026-06-24) — the strongest entity producers. Extracted
-        # via the Anthropic persona-vector recipe on the model's OWN in-DMT-encounter
-        # generations vs matched 'alone' introspection (grounded in DMT entity
-        # phenomenology), @L20. Diagnostic: composite/telepathic 30% entity-rate
-        # (vs 20% for the best vocabulary seed), richer feature spread, and nonhuman
-        # is the only thing that reaches entity_nonhuman. These lead the hunt.
-        "persona-composite", "persona-telepathic", "persona-guide", "persona-nonhuman",
+        # PERSONA VECTORS (2026-06-30 rebuild — machine-elf retarget). Extracted via
+        # the Anthropic persona-vector recipe on the model's OWN in-encounter
+        # generations, now grounded in the real DMT entity TAXONOMY (Lawrence 2022 /
+        # Davis 2020: goddess, deity, alien, animal, robot, jester, machine-elf,
+        # mantis, grey, angel, guide, spirit, waiting-room, deceased, gnome) and
+        # contrasted against the cosmic-DISSOLUTION pole (not plain 'alone'), so the
+        # diff isolates "autonomous Other present", not impersonal unity. @L20.
+        "persona-composite", "persona-nonhuman", "persona-divine", "persona-trickster",
         # feature diff-of-means (entity / world / otherness / agency / comms)
         "feat-entity_presence", "feat-entity_nonhuman", "feat-entity_benevolent_guide",
         "feat-telepathic_communication", "feat-download_transmission",

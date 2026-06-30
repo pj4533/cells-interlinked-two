@@ -19,9 +19,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("append_persona_seeds")
 
 STEER_LAYER = 20
-# The L20 winners from the diagnostic (composite + the three flavors; nonhuman
-# kept despite lower rate because it's the only thing that reaches entity_nonhuman).
-PROMOTE = ["composite", "telepathic", "guide", "nonhuman"]
+# The flavor groups from persona_entity_prompts.FLAVOR_GROUPS (2026-06-30 rebuild,
+# machine-elf retarget): composite (all 15 entity forms) + nonhuman / divine /
+# trickster sub-directions. Old telepathic/guide groups are gone; this script
+# drops stale persona-* rows first, so they're cleaned up automatically.
+PROMOTE = ["composite", "nonhuman", "divine", "trickster"]
 
 
 def main() -> None:

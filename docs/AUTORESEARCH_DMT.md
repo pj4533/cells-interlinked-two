@@ -51,6 +51,53 @@ and the Trip View. Engine in `pipeline/autoresearch_base.py`, objective in
 > hard gate on rare events (selection bias), low commit floor. Internal `feat-*` /
 > `persona-*` seeds are filtered out of the user-facing dose picker.
 
+## Rebuilding the entity seeds (the "machine-elf" retarget, 2026-06-30)
+
+The first persona seeds produced an **impersonal cosmic-architect / unity**
+flavor (confirmed by reading Interlink transcripts — recurring Architect / Weaver /
+Will / "it's not a person" / ego-dissolution, almost never autonomous *beings*).
+Diagnosis: machine-elf phenomenology (plural, autonomous, communicating, alien
+*others*) is roughly **orthogonal to the dissolution axis** the seeds were sitting
+on. Two fixes, both in `pipeline/persona_entity_prompts.py`:
+
+1. **POS prompts grounded in the real entity taxonomy**, weighted to what actually
+   shows up, not folklore — from the two large report datasets:
+   - **Lawrence et al. 2022** (3,778 inhaled-DMT reports — entity *forms*): feminine/
+     Goddess 24% · deity 17% · alien/celestial 16% · animal 9% · robot 6.7% ·
+     jester 6.5% · machine-elf 2.9% · insectoid/mantis 2.3% · grey 1%.
+   - **Davis et al. 2020** (2,561 reports — *labels* + attributes): being 60% ·
+     guide 43% · spirit 39% · alien 39% · helper 34% · elf/angel/religious 10–16% ·
+     gnome/deceased 1–5%; perceived conscious 96% / benevolent 78% / agency 54%.
+   15 POS personas cover this spread; each foregrounds the four Gallimore
+   ("Traces of the Other") signatures — **plurality, independent agency,
+   awareness-of-and-relation-to the traveler, otherness** — and describes only the
+   beings (no generic geometry/dissolution traits).
+2. **The NEG pole is now the cosmic-DISSOLUTION basin** (impersonal unity, empty
+   geometry, the void, ego-dissolution) instead of plain "alone." So
+   `diff = POS_mean − NEG_mean` cancels the space-ness *and* the dissolution and
+   leaves only "an autonomous Other is present" — the axis we want. Flavor groups:
+   `composite` (all), `nonhuman`, `divine`, `trickster`.
+
+**Reproducing it (the exact procedure — keep these scripts, they were once lost):**
+```bash
+# 0. stop the backend (one model fits in memory; scripts load their own M)
+cd server && ./run_backend.sh stop
+# 1. build persona vectors from the prompts → data/persona_seeds/*.pt + manifest.json
+uv run python -m cells_interlinked.scripts.build_persona_entity_seeds
+# 2. promote the L20 winners into emotion_directions.pt as persona-* seed rows
+#    (re-runnable: drops old persona-* rows, preserves emotions + the dmt-* palette)
+uv run python -m cells_interlinked.scripts.append_persona_seeds
+# 3. (optional) clear the atlas for a fresh hunt — the dmt-* palette is in
+#    emotion_directions.pt and is NOT touched by this:
+rm -f data/atlas_dmt/{atlas,placebo,revert_log}.json data/atlas_dmt/vectors/*.pt
+# 4. restart; the hunt is ready but does NOT auto-start (no .should_run sentinel)
+./run_backend.sh start
+```
+The seed *names* the hunt loads are wired in `autoresearch_dmt.py`
+(`_PERSONA_SEED_NAMES` + `ENTITY_SEEDS`) and must match the `FLAVOR_GROUPS` keys in
+`persona_entity_prompts.py`. The build/promote scripts are otherwise generic — edit
+the prompts + groups and re-run to retarget the hunt at any *kind* of vector.
+
 ## Lineage — where the checklist comes from
 
 Grounded in **Andrew Gallimore's "Traces of the Other"** (DMT / conscious-realism;
