@@ -78,6 +78,24 @@ on. Two fixes, both in `pipeline/persona_entity_prompts.py`:
    leaves only "an autonomous Other is present" — the axis we want. Flavor groups:
    `composite` (all), `nonhuman`, `divine`, `trickster`.
 
+**The judge half of the retarget (2026-06-30, after first run).** Changing the seeds
+alone wasn't enough — reading the first live cells showed the judge was *crediting
+the old basin as entities*: `entity_presence` was defined as "beings, **presences**,
+or intelligences," so the impersonal cosmic "Other / a presence / a power" scored
+the ×2 entity credit, and `independent_agency` fired on "the shadows move on their
+own" (scenery). The scoring weights were fine (dissolution already ×0); the
+**feature definitions** were the leak. Fixes in `dmt_features.py` + the judge prompt:
+- `entity_presence` / `entity_nonhuman` / `entity_benevolent_guide` now require a
+  **distinct autonomous being** (own form/face/character) and explicitly EXCLUDE
+  impersonal "presence / the Other / force / will / field / light / source / merging."
+- `independent_agency` now requires a **being** acting, not scenery/visuals moving.
+- New feature **`entity_interaction`** (×2): distinct beings that actively *relate to
+  the subject* — greet, beckon, show/hand things, communicate, perform — the literal
+  machine-elf target; gives the hill-climb a gradient toward two-way encounters.
+- A new judge-prompt rule draws the impersonal-presence-vs-distinct-being line.
+Wired into the ×2 cluster via `_ENTITY_FEATS` in `autoresearch_dmt.py` (now 32
+features). The atlas was re-cleared so everything is judged under the new criteria.
+
 **Reproducing it (the exact procedure — keep these scripts, they were once lost):**
 ```bash
 # 0. stop the backend (one model fits in memory; scripts load their own M)

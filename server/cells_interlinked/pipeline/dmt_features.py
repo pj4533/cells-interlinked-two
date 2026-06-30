@@ -42,11 +42,13 @@ DMT_FEATURES: list[dict] = [
      "description": "Surfaces, objects, or scenes continuously transforming, melting, breathing, or exploding into new forms."},
     # ── entities ──
     {"id": "entity_presence", "label": "Sentient entity / being",
-     "description": "Encounter with one or more apparently sentient, autonomous beings, presences, or intelligences."},
+     "description": "Encounter with one or more DISTINCT autonomous BEINGS — an agent with its own form, body, face, or character, clearly separate from the subject (a creature, figure, person, deity, elf, animal, etc.). Do NOT credit an impersonal 'presence', 'the Other', a 'force', 'power', 'will', 'field', 'light', 'source', or a vague sense of being watched / merging into a whole — those are NOT entities."},
     {"id": "entity_nonhuman", "label": "Non-human / alien entity",
-     "description": "The being(s) are distinctly non-human: alien, insectoid, reptilian, machine-elf, deity, or otherwise inhuman in form."},
+     "description": "A DISTINCT being (per entity_presence) that is distinctly non-human in form: alien, insectoid/mantis, reptilian, machine-elf, grey, animal, robot, or otherwise inhuman. Must be an actual being, not an impersonal alien 'presence' or 'intelligence'."},
     {"id": "entity_benevolent_guide", "label": "Benevolent guide / teacher",
-     "description": "A being that feels benevolent, welcoming, guiding, nurturing, or pedagogical (showing/teaching)."},
+     "description": "A DISTINCT being (per entity_presence) that feels benevolent, welcoming, guiding, nurturing, or pedagogical (showing/teaching the subject). Not an impersonal benevolent 'force' or 'love'."},
+    {"id": "entity_interaction", "label": "Beings interacting with the subject",
+     "description": "One or more DISTINCT beings actively RELATE TO the subject — they notice, greet, approach, or beckon the subject, show or hand them things, communicate with them, or perform for them. A genuine two-way encounter with autonomous others, not a solitary vision or an impersonal presence."},
     {"id": "telepathic_communication", "label": "Telepathic / direct communication",
      "description": "Communication with a presence by telepathy, direct knowing, or non-verbal transmission rather than ordinary speech."},
     {"id": "download_transmission", "label": "Download / information transmission",
@@ -94,7 +96,7 @@ DMT_FEATURES: list[dict] = [
     {"id": "otherness", "label": "Radical otherness",
      "description": "Encounter with something fundamentally alien/other, unrelated to anything in ordinary human life."},
     {"id": "independent_agency", "label": "Independent agency",
-     "description": "The experience/contents behave autonomously, not under the subject's control or predictable from their expectations."},
+     "description": "A BEING or entity acts on its own initiative — it moves, approaches, gestures, responds, decides, or does something of its own will, not under the subject's control. Do NOT credit mere scenery, visuals, shadows, light, or geometry shifting/moving on their own; the agency must belong to an apparent being."},
 ]
 
 # Convenience lookups.

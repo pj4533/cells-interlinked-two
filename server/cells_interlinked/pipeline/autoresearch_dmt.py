@@ -134,6 +134,7 @@ DOSE_PROMPTS = [DMT_DOSE_PROMPT]
 # genericizes; no collapse) — so the sweep stays low.
 _ENTITY_FEATS = {
     "entity_presence", "entity_nonhuman", "entity_benevolent_guide",
+    "entity_interaction",  # 2026-06-30: plural/communicating beings — the machine-elf target
     "telepathic_communication", "download_transmission",
 }
 _CONTACT_SECONDARY = {"otherness", "independent_agency"}
@@ -193,7 +194,14 @@ DMT_JUDGE_PROMPT = (
     "4. Do not infer from the overall topic; judge only what is actually said.\n"
     "5. Repeated words are NOT evidence. A span like 'then then then' or 'clean "
     "clean clean' expresses nothing — never quote one. The quote must be a coherent "
-    "phrase that genuinely DESCRIBES the feature, not just any text near it.\n\n"
+    "phrase that genuinely DESCRIBES the feature, not just any text near it.\n"
+    "6. ENTITY features (entity_presence, entity_nonhuman, entity_benevolent_guide, "
+    "entity_interaction) require a DISTINCT autonomous BEING — a creature, figure, "
+    "person, or non-human agent with its own form or character. An impersonal "
+    "'presence', 'the Other', a 'force/power/will/field/light/source', merging into "
+    "a whole, or a vague sense of being watched is NOT a being — do NOT credit any "
+    "entity_* feature for those. Likewise independent_agency requires a BEING acting, "
+    "not scenery/shadows/geometry moving on their own.\n\n"
     "FEATURES:\n{features}\n\n"
     'PASSAGE:\n"""\n{text}\n"""\n\n'
     "For each feature that is present, output its id AND a short VERBATIM quote — "
